@@ -1,7 +1,7 @@
 GO ?= go
 BIN_DIR ?= bin
 
-.PHONY: build clean fmt fmt-check test vet
+.PHONY: build clean docker-build docker-build-gateway fmt fmt-check test vet
 
 build:
 	mkdir -p $(BIN_DIR)
@@ -10,6 +10,11 @@ build:
 
 clean:
 	rm -rf $(BIN_DIR)
+
+docker-build-gateway:
+	docker build -f server/gateway/Dockerfile -t porthook-gateway:dev .
+
+docker-build: docker-build-gateway
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -path './.git/*')
