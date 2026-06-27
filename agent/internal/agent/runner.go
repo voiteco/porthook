@@ -143,6 +143,9 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 	for {
 		var env messages.Envelope
 		if err := wsjson.Read(ctx, conn, &env); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			if status := websocket.CloseStatus(err); status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
 				return nil
 			}
