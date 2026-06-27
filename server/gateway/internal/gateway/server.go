@@ -227,7 +227,7 @@ func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn) (*age
 		return nil, fmt.Errorf("write tunnel registered: %w", err)
 	}
 
-	return newAgentSession(conn, tunnel, s.cfg.WebSocketWriteTimeout), nil
+	return newAgentSession(conn, tunnel, s.cfg.WebSocketWriteTimeout, s.cfg.MaxConcurrentStreams), nil
 }
 
 func (s *Server) registerTunnelSession(ctx context.Context, conn *websocket.Conn, payload messages.TunnelRegister) (*registry.Session, error) {
@@ -437,10 +437,20 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	tunnelResponse, err := session.roundTrip(ctx, streamID, tunnelRequest)
 	if err != nil {
 		requestErr = err
-		if errors.Is(err, context.DeadlineExceeded) {
+		switch {
+		case errors.Is(err, ErrStreamLimitExceeded):
+			status = http.StatusServiceUnavailable
+			outcome = "stream_limit_exceeded"
+			http.Error(w, "tunnel overloaded", http.StatusServiceUnavailable)
+			return
+		case errors.Is(err, context.DeadlineExceeded):
 			status = http.StatusGatewayTimeout
 			outcome = "tunnel_timeout"
 			http.Error(w, "tunnel request timed out", http.StatusGatewayTimeout)
+			return
+		case errors.Is(err, context.Canceled):
+			status = 499
+			outcome = "client_canceled"
 			return
 		}
 		status = http.StatusBadGateway

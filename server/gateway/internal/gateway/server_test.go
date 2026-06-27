@@ -463,6 +463,192 @@ func TestPublicRequestTimesOutWaitingForAgent(t *testing.T) {
 	}
 }
 
+func TestPublicRequestTimeoutSendsStreamCancel(t *testing.T) {
+	cfg := testConfig()
+	cfg.StreamTimeout = 50 * time.Millisecond
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		var reqEnv messages.Envelope
+		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
+			agentErr <- err
+			return
+		}
+		if reqEnv.Type != messages.TypeHTTPRequest {
+			agentErr <- errUnexpectedType(reqEnv.Type, messages.TypeHTTPRequest)
+			return
+		}
+
+		var cancelEnv messages.Envelope
+		if err := wsjson.Read(ctx, conn, &cancelEnv); err != nil {
+			agentErr <- err
+			return
+		}
+		if cancelEnv.Type != messages.TypeHTTPStreamCancel {
+			agentErr <- errUnexpectedType(cancelEnv.Type, messages.TypeHTTPStreamCancel)
+			return
+		}
+		if cancelEnv.StreamID != reqEnv.StreamID {
+			agentErr <- errString("cancel stream id did not match request")
+			return
+		}
+		payload, err := messages.DecodePayload[messages.StreamCancel](cancelEnv)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if payload.Reason != "gateway stream timeout" {
+			agentErr <- errString("cancel reason was not gateway stream timeout")
+			return
+		}
+		agentErr <- nil
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/slow", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", resp.StatusCode)
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
+func TestPublicRequestRejectsWhenStreamLimitExceeded(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxConcurrentStreams = 1
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	firstRequest := make(chan messages.Envelope, 1)
+	agentErr := make(chan error, 1)
+	releaseFirst := make(chan struct{})
+	go func() {
+		var reqEnv messages.Envelope
+		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
+			agentErr <- err
+			return
+		}
+		if reqEnv.Type != messages.TypeHTTPRequest {
+			agentErr <- errUnexpectedType(reqEnv.Type, messages.TypeHTTPRequest)
+			return
+		}
+		firstRequest <- reqEnv
+
+		select {
+		case <-releaseFirst:
+		case <-ctx.Done():
+			agentErr <- ctx.Err()
+			return
+		}
+
+		resp, err := messages.NewStream(messages.TypeHTTPResponse, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+			Status: http.StatusOK,
+			Body:   []byte("first-ok"),
+		})
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		agentErr <- wsjson.Write(ctx, conn, resp)
+	}()
+
+	firstDone := make(chan *http.Response, 1)
+	firstErr := make(chan error, 1)
+	go func() {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/first", nil)
+		if err != nil {
+			firstErr <- err
+			return
+		}
+		req.Host = "demo.localhost"
+		resp, err := publicServer.Client().Do(req)
+		if err != nil {
+			firstErr <- err
+			return
+		}
+		firstDone <- resp
+	}()
+
+	select {
+	case <-firstRequest:
+	case err := <-firstErr:
+		t.Fatalf("first request returned error: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("agent did not receive first request")
+	}
+
+	secondReq, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/second", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	secondReq.Host = "demo.localhost"
+	secondResp, err := publicServer.Client().Do(secondReq)
+	if err != nil {
+		t.Fatalf("second public request returned error: %v", err)
+	}
+	secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("second status = %d, want 503", secondResp.StatusCode)
+	}
+
+	close(releaseFirst)
+	select {
+	case resp := <-firstDone:
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("first status = %d, want 200", resp.StatusCode)
+		}
+	case err := <-firstErr:
+		t.Fatalf("first request returned error: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("first request did not complete")
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
 func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	httpServer := httptest.NewServer(server.AgentHandler())

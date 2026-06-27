@@ -514,6 +514,95 @@ func TestRunnerDoesNotReconnectAfterAuthError(t *testing.T) {
 	}
 }
 
+func TestRunnerCancelsLocalRequestOnStreamCancel(t *testing.T) {
+	localStarted := make(chan struct{})
+	localCanceled := make(chan struct{})
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(localStarted)
+		<-r.Context().Done()
+		close(localCanceled)
+	}))
+	defer local.Close()
+
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		ctx := r.Context()
+		readAuthAndRegistration(t, ctx, conn)
+
+		tunnelReq, err := messages.NewStream(messages.TypeHTTPRequest, "str_cancel", "tun_test", httpwire.Request{
+			Method: http.MethodGet,
+			Path:   "/cancel-me",
+		})
+		if err != nil {
+			t.Errorf("NewStream returned error: %v", err)
+			return
+		}
+		if err := wsjson.Write(ctx, conn, tunnelReq); err != nil {
+			t.Errorf("write tunnel request returned error: %v", err)
+			return
+		}
+
+		select {
+		case <-localStarted:
+		case <-time.After(time.Second):
+			t.Errorf("local service did not receive request")
+			return
+		}
+
+		cancelEnv, err := messages.NewStream(messages.TypeHTTPStreamCancel, "str_cancel", "tun_test", messages.StreamCancel{
+			Reason: "test cancel",
+		})
+		if err != nil {
+			t.Errorf("NewStream cancel returned error: %v", err)
+			return
+		}
+		if err := wsjson.Write(ctx, conn, cancelEnv); err != nil {
+			t.Errorf("write cancel returned error: %v", err)
+			return
+		}
+
+		select {
+		case <-localCanceled:
+		case <-time.After(time.Second):
+			t.Errorf("local request was not canceled")
+			return
+		}
+	}))
+	defer gateway.Close()
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:             gateway.URL,
+		Token:                 "dev-token",
+		RequestedSubdomain:    "demo",
+		LocalTarget:           local.URL,
+		AgentVersion:          "test",
+		RequestTimeout:        5 * time.Second,
+		WebSocketPingInterval: time.Hour,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !strings.Contains(output.String(), "GET /cancel-me -> error") {
+		t.Fatalf("output = %q, want canceled request log", output.String())
+	}
+}
+
 func readAuthAndRegistration(t *testing.T, ctx context.Context, conn *websocket.Conn) {
 	t.Helper()
 

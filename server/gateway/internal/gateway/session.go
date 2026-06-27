@@ -18,6 +18,8 @@ import (
 	"github.com/voiteco/porthook/server/gateway/internal/registry"
 )
 
+var ErrStreamLimitExceeded = errors.New("tunnel stream limit exceeded")
+
 type agentSession struct {
 	conn     *websocket.Conn
 	tunnel   *registry.Session
@@ -25,22 +27,33 @@ type agentSession struct {
 	writeTO  time.Duration
 	done     chan struct{}
 	doneOnce sync.Once
+	streams  chan struct{}
 
 	pendingMu sync.RWMutex
 	pending   map[string]chan messages.Envelope
 }
 
-func newAgentSession(conn *websocket.Conn, tunnel *registry.Session, writeTimeout time.Duration) *agentSession {
+func newAgentSession(conn *websocket.Conn, tunnel *registry.Session, writeTimeout time.Duration, maxConcurrentStreams int) *agentSession {
+	var streams chan struct{}
+	if maxConcurrentStreams > 0 {
+		streams = make(chan struct{}, maxConcurrentStreams)
+	}
 	return &agentSession{
 		conn:    conn,
 		tunnel:  tunnel,
 		writeTO: writeTimeout,
 		done:    make(chan struct{}),
+		streams: streams,
 		pending: make(map[string]chan messages.Envelope),
 	}
 }
 
 func (s *agentSession) roundTrip(ctx context.Context, streamID string, req httpwire.Request) (httpwire.Response, error) {
+	if err := s.acquireStream(); err != nil {
+		return httpwire.Response{}, err
+	}
+	defer s.releaseStream()
+
 	ch := make(chan messages.Envelope, 1)
 	s.addPending(streamID, ch)
 	defer s.removePending(streamID)
@@ -55,6 +68,7 @@ func (s *agentSession) roundTrip(ctx context.Context, streamID string, req httpw
 
 	select {
 	case <-ctx.Done():
+		_ = s.cancelStream(context.Background(), streamID, streamCancelReason(ctx.Err()))
 		return httpwire.Response{}, ctx.Err()
 	case <-s.done:
 		return httpwire.Response{}, errors.New("agent disconnected")
@@ -71,6 +85,56 @@ func (s *agentSession) roundTrip(ctx context.Context, streamID string, req httpw
 		default:
 			return httpwire.Response{}, fmt.Errorf("unexpected response message %s", respEnv.Type)
 		}
+	}
+}
+
+func (s *agentSession) acquireStream() error {
+	select {
+	case <-s.done:
+		return errors.New("agent disconnected")
+	default:
+	}
+
+	if s.streams == nil {
+		return nil
+	}
+
+	select {
+	case s.streams <- struct{}{}:
+		return nil
+	default:
+		return ErrStreamLimitExceeded
+	}
+}
+
+func (s *agentSession) releaseStream() {
+	if s.streams == nil {
+		return
+	}
+	select {
+	case <-s.streams:
+	default:
+	}
+}
+
+func (s *agentSession) cancelStream(ctx context.Context, streamID, reason string) error {
+	env, err := messages.NewStream(messages.TypeHTTPStreamCancel, streamID, s.tunnel.TunnelID, messages.StreamCancel{
+		Reason: reason,
+	})
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, env)
+}
+
+func streamCancelReason(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "gateway stream timeout"
+	case errors.Is(err, context.Canceled):
+		return "public request canceled"
+	default:
+		return "gateway stream canceled"
 	}
 }
 

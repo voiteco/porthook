@@ -29,6 +29,9 @@ type Runner struct {
 	httpClient *http.Client
 	sendMu     sync.Mutex
 	outputMu   sync.Mutex
+
+	activeMu      sync.Mutex
+	activeStreams map[string]context.CancelFunc
 }
 
 func NewRunner(cfg Config, logger *slog.Logger, output io.Writer) *Runner {
@@ -47,6 +50,7 @@ func NewRunner(cfg Config, logger *slog.Logger, output io.Writer) *Runner {
 		httpClient: &http.Client{
 			Timeout: cfg.RequestTimeout,
 		},
+		activeStreams: make(map[string]context.CancelFunc),
 	}
 }
 
@@ -213,9 +217,22 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 
 		switch env.Type {
 		case messages.TypeHTTPRequest:
+			streamCtx, cancelStream := context.WithCancel(ctx)
+			r.addActiveStream(env.StreamID, cancelStream)
 			go func(env messages.Envelope) {
-				_ = r.handleHTTPRequest(ctx, conn, tunnelID, env)
+				defer r.removeActiveStream(env.StreamID)
+				defer cancelStream()
+				_ = r.handleHTTPRequest(streamCtx, conn, tunnelID, env)
 			}(env)
+		case messages.TypeHTTPStreamCancel:
+			payload, err := messages.DecodePayload[messages.StreamCancel](env)
+			if err != nil {
+				r.logger.Warn("decode stream cancel failed", "stream_id", env.StreamID, "error", err)
+				continue
+			}
+			if r.cancelActiveStream(env.StreamID) {
+				r.logger.Info("stream canceled by gateway", "stream_id", env.StreamID, "reason", payload.Reason)
+			}
 		case messages.TypePing:
 			pong, err := messages.New(messages.TypePong, nil)
 			if err != nil {
@@ -292,6 +309,11 @@ func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tu
 
 	resp, err := ForwardHTTPRequest(ctx, r.httpClient, r.cfg.LocalTarget, req, r.cfg.MaxResponseBodyBytes)
 	if err != nil {
+		if ctx.Err() != nil {
+			outcome = "stream_canceled"
+			r.writeRequestOutput(req, 0, time.Since(started), ctx.Err())
+			return ctx.Err()
+		}
 		outcome = "local_request_failed"
 		streamErr, buildErr := messages.NewStream(messages.TypeHTTPStreamError, env.StreamID, tunnelID, messages.ErrorPayload{
 			Code:    "local_request_failed",
@@ -324,6 +346,35 @@ func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tu
 
 	r.writeRequestOutput(req, resp.Status, time.Since(started), nil)
 	return nil
+}
+
+func (r *Runner) addActiveStream(streamID string, cancel context.CancelFunc) {
+	if streamID == "" {
+		return
+	}
+	r.activeMu.Lock()
+	defer r.activeMu.Unlock()
+	r.activeStreams[streamID] = cancel
+}
+
+func (r *Runner) cancelActiveStream(streamID string) bool {
+	r.activeMu.Lock()
+	cancel, ok := r.activeStreams[streamID]
+	r.activeMu.Unlock()
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
+}
+
+func (r *Runner) removeActiveStream(streamID string) {
+	if streamID == "" {
+		return
+	}
+	r.activeMu.Lock()
+	defer r.activeMu.Unlock()
+	delete(r.activeStreams, streamID)
 }
 
 func (r *Runner) logLocalRequest(streamID, tunnelID string, req httpwire.Request, status int, outcome string, responseBytes int64, duration time.Duration, err error) {
