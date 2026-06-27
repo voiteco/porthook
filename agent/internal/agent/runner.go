@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -26,6 +27,8 @@ type Runner struct {
 	logger     *slog.Logger
 	output     io.Writer
 	httpClient *http.Client
+	sendMu     sync.Mutex
+	outputMu   sync.Mutex
 }
 
 func NewRunner(cfg Config, logger *slog.Logger, output io.Writer) *Runner {
@@ -154,15 +157,17 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 
 		switch env.Type {
 		case messages.TypeHTTPRequest:
-			if err := r.handleHTTPRequest(ctx, conn, tunnelID, env); err != nil {
-				r.logger.Warn("http request failed", "stream_id", env.StreamID, "error", err)
-			}
+			go func(env messages.Envelope) {
+				if err := r.handleHTTPRequest(ctx, conn, tunnelID, env); err != nil {
+					r.logger.Warn("http request failed", "stream_id", env.StreamID, "error", err)
+				}
+			}(env)
 		case messages.TypePing:
 			pong, err := messages.New(messages.TypePong, nil)
 			if err != nil {
 				return err
 			}
-			if err := wsjson.Write(ctx, conn, pong); err != nil {
+			if err := r.write(ctx, conn, pong); err != nil {
 				return fmt.Errorf("write pong: %w", err)
 			}
 		default:
@@ -187,7 +192,7 @@ func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tu
 		if buildErr != nil {
 			return buildErr
 		}
-		if writeErr := wsjson.Write(ctx, conn, streamErr); writeErr != nil {
+		if writeErr := r.write(ctx, conn, streamErr); writeErr != nil {
 			return fmt.Errorf("write stream error: %w", writeErr)
 		}
 		return err
@@ -197,12 +202,20 @@ func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tu
 	if err != nil {
 		return err
 	}
-	if err := wsjson.Write(ctx, conn, response); err != nil {
+	if err := r.write(ctx, conn, response); err != nil {
 		return fmt.Errorf("write http response: %w", err)
 	}
 
+	r.outputMu.Lock()
+	defer r.outputMu.Unlock()
 	fmt.Fprintf(r.output, "%s %s -> %d %dms\n", req.Method, requestDisplayPath(req.Path, req.Query), resp.Status, time.Since(started).Milliseconds())
 	return nil
+}
+
+func (r *Runner) write(ctx context.Context, conn *websocket.Conn, env messages.Envelope) error {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+	return wsjson.Write(ctx, conn, env)
 }
 
 func BuildWebSocketURL(serverURL string) (string, error) {

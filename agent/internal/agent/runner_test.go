@@ -5,9 +5,11 @@ package agent
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -197,5 +199,139 @@ func TestRunnerHandlesHTTPRequest(t *testing.T) {
 	}
 	if !bytes.Contains(output.Bytes(), []byte("POST /webhook?source=test -> 201")) {
 		t.Fatalf("output does not contain request log: %q", output.String())
+	}
+}
+
+func TestRunnerHandlesConcurrentHTTPRequests(t *testing.T) {
+	const requestCount = 6
+
+	var startedMu sync.Mutex
+	started := 0
+	allStarted := make(chan struct{})
+
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedMu.Lock()
+		started++
+		if started == requestCount {
+			close(allStarted)
+		}
+		startedMu.Unlock()
+
+		select {
+		case <-allStarted:
+		case <-r.Context().Done():
+			t.Errorf("request %s ended before all concurrent requests arrived", r.URL.Path)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "ok:%s", r.URL.Path)
+	}))
+	defer local.Close()
+
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		ctx := r.Context()
+		readAuthAndRegistration(t, ctx, conn)
+
+		for i := 0; i < requestCount; i++ {
+			streamID := fmt.Sprintf("str_%d", i)
+			tunnelReq, err := messages.NewStream(messages.TypeHTTPRequest, streamID, "tun_test", httpwire.Request{
+				Method: http.MethodGet,
+				Path:   fmt.Sprintf("/request-%d", i),
+			})
+			if err != nil {
+				t.Errorf("NewStream returned error: %v", err)
+				return
+			}
+			if err := wsjson.Write(ctx, conn, tunnelReq); err != nil {
+				t.Errorf("write tunnel request returned error: %v", err)
+				return
+			}
+		}
+
+		seen := make(map[string]bool)
+		for len(seen) < requestCount {
+			var response messages.Envelope
+			if err := wsjson.Read(ctx, conn, &response); err != nil {
+				t.Errorf("read tunnel response returned error: %v", err)
+				return
+			}
+			if response.Type != messages.TypeHTTPResponse {
+				t.Errorf("response type = %s, want %s", response.Type, messages.TypeHTTPResponse)
+				return
+			}
+			payload, err := messages.DecodePayload[httpwire.Response](response)
+			if err != nil {
+				t.Errorf("DecodePayload returned error: %v", err)
+				return
+			}
+			if payload.Status != http.StatusOK {
+				t.Errorf("status = %d, want 200", payload.Status)
+				return
+			}
+			seen[response.StreamID] = true
+		}
+	}))
+	defer gateway.Close()
+
+	runner := NewRunner(Config{
+		ServerURL:          gateway.URL,
+		Token:              "dev-token",
+		RequestedSubdomain: "demo",
+		LocalTarget:        local.URL,
+		AgentVersion:       "test",
+		RequestTimeout:     5 * time.Second,
+	}, nil, io.Discard)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func readAuthAndRegistration(t *testing.T, ctx context.Context, conn *websocket.Conn) {
+	t.Helper()
+
+	var auth messages.Envelope
+	if err := wsjson.Read(ctx, conn, &auth); err != nil {
+		t.Fatalf("read auth returned error: %v", err)
+	}
+	if auth.Type != messages.TypeAuthRequest {
+		t.Fatalf("auth type = %s, want %s", auth.Type, messages.TypeAuthRequest)
+	}
+	authOK, _ := messages.New(messages.TypeAuthOK, messages.AuthOK{})
+	if err := wsjson.Write(ctx, conn, authOK); err != nil {
+		t.Fatalf("write auth ok returned error: %v", err)
+	}
+
+	var registration messages.Envelope
+	if err := wsjson.Read(ctx, conn, &registration); err != nil {
+		t.Fatalf("read registration returned error: %v", err)
+	}
+	if registration.Type != messages.TypeTunnelRegister {
+		t.Fatalf("registration type = %s, want %s", registration.Type, messages.TypeTunnelRegister)
+	}
+	registered, _ := messages.New(messages.TypeTunnelRegistered, messages.TunnelRegistered{
+		TunnelID:  "tun_test",
+		PublicURL: "http://demo.localhost:8080",
+		Subdomain: "demo",
+	})
+	if err := wsjson.Write(ctx, conn, registered); err != nil {
+		t.Fatalf("write registered returned error: %v", err)
 	}
 }
