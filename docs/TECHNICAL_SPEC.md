@@ -217,6 +217,7 @@ Initial HTTP stream message types:
 http.request
 http.response
 http.stream.error
+http.stream.cancel
 ```
 
 ### 10.1 Request Payload
@@ -245,6 +246,18 @@ http.stream.error
 }
 ```
 
+### 10.3 Stream Cancel Payload
+
+Sent by the gateway when a public request no longer needs a local response.
+
+```json
+{
+  "reason": "gateway stream timeout"
+}
+```
+
+The agent should cancel the matching local HTTP request context and avoid sending a late response for that stream.
+
 ## 11. Gateway Design
 
 Gateway responsibilities:
@@ -256,6 +269,7 @@ Gateway responsibilities:
 - Route hostnames to tunnels.
 - Multiplex concurrent streams over agent connections.
 - Enforce request size, timeout, and concurrency limits.
+- Send stream cancellation messages when a public request times out or is canceled.
 - Return clear errors for inactive tunnels.
 - Expose health endpoints.
 
@@ -375,6 +389,7 @@ PORTHOOK_ROOT_DOMAIN=porthook.example
 PORTHOOK_PUBLIC_URL=https://porthook.example
 PORTHOOK_STATIC_TOKEN=dev-token
 PORTHOOK_MAX_BODY_BYTES=1048576
+PORTHOOK_MAX_CONCURRENT_STREAMS=64
 PORTHOOK_READ_HEADER_TIMEOUT=5s
 PORTHOOK_READ_TIMEOUT=30s
 PORTHOOK_WRITE_TIMEOUT=35s

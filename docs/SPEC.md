@@ -274,6 +274,7 @@ Initial control messages:
 - `http.request`
 - `http.response`
 - `http.stream.error`
+- `http.stream.cancel`
 - `ping`
 - `pong`
 
@@ -284,6 +285,8 @@ Every forwarded request should have a stream ID created by the gateway.
 The stream ID must be unique within one agent connection.
 
 The protocol must allow concurrent request streams over one persistent tunnel connection.
+
+The gateway may send `http.stream.cancel` when the public client disconnects, the stream times out, or the gateway no longer needs the response.
 
 ### 10.4 Header Handling
 

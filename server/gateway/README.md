@@ -34,6 +34,7 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_PUBLIC_URL` | `http://localhost:8080` | Base public URL printed by the agent. |
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` | Static agent authentication token. |
 | `PORTHOOK_MAX_BODY_BYTES` | `1048576` | Maximum public request body forwarded through a tunnel. |
+| `PORTHOOK_MAX_CONCURRENT_STREAMS` | `64` | Maximum concurrent public requests per tunnel. |
 | `PORTHOOK_READ_HEADER_TIMEOUT` | `5s` | HTTP request header read timeout. |
 | `PORTHOOK_READ_TIMEOUT` | `30s` | HTTP request read timeout. |
 | `PORTHOOK_WRITE_TIMEOUT` | `35s` | HTTP response write timeout. |

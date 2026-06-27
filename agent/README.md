@@ -16,6 +16,7 @@ Responsibilities:
 - Register local tunnels.
 - Maintain a persistent outbound tunnel connection.
 - Forward gateway requests to local services.
+- Cancel local requests when the gateway cancels a stream.
 - Print public URLs and request logs.
 - Reconnect with backoff after transient gateway disconnects.
 
