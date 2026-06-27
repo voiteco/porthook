@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+var (
+	ErrTunnelIDAlreadyRegistered  = errors.New("tunnel id already registered")
+	ErrSubdomainAlreadyRegistered = errors.New("subdomain already registered")
+)
+
 type Session struct {
 	TunnelID    string
 	Subdomain   string
@@ -45,10 +50,10 @@ func (r *Registry) Register(session *Session) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.byTunnelID[session.TunnelID]; exists {
-		return errors.New("tunnel id already registered")
+		return ErrTunnelIDAlreadyRegistered
 	}
 	if _, exists := r.bySubdomain[session.Subdomain]; exists {
-		return errors.New("subdomain already registered")
+		return ErrSubdomainAlreadyRegistered
 	}
 
 	r.byTunnelID[session.TunnelID] = session

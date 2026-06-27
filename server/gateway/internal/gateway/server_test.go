@@ -85,6 +85,90 @@ func TestAgentWebSocketAuthAndRegister(t *testing.T) {
 	}
 }
 
+func TestAgentWebSocketRejectsDuplicateRequestedSubdomain(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	httpServer := httptest.NewServer(server.AgentHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	firstConn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("first Dial returned error: %v", err)
+	}
+	defer firstConn.Close(websocket.StatusNormalClosure, "")
+	registerAgent(t, ctx, firstConn, "demo")
+
+	secondConn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("second Dial returned error: %v", err)
+	}
+	defer secondConn.Close(websocket.StatusNormalClosure, "")
+
+	authenticateAgentForTest(t, ctx, secondConn)
+	writeRegistrationForTest(t, ctx, secondConn, "demo")
+
+	var resp messages.Envelope
+	if err := wsjson.Read(ctx, secondConn, &resp); err != nil {
+		t.Fatalf("read registration error returned error: %v", err)
+	}
+	if resp.Type != messages.TypeTunnelError {
+		t.Fatalf("registration response type = %s, want %s", resp.Type, messages.TypeTunnelError)
+	}
+
+	payload, err := messages.DecodePayload[messages.ErrorPayload](resp)
+	if err != nil {
+		t.Fatalf("DecodePayload returned error: %v", err)
+	}
+	if payload.Code != "subdomain_unavailable" {
+		t.Fatalf("error code = %q, want subdomain_unavailable", payload.Code)
+	}
+	if !strings.Contains(payload.Message, `subdomain "demo" is already in use`) {
+		t.Fatalf("error message = %q, want duplicate subdomain guidance", payload.Message)
+	}
+}
+
+func TestAgentWebSocketRetriesRandomSubdomainCollision(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	subdomains := []string{"taken", "available"}
+	server.generateSubdomain = func(_ int) (string, error) {
+		if len(subdomains) == 0 {
+			t.Fatal("generateSubdomain called too many times")
+		}
+		next := subdomains[0]
+		subdomains = subdomains[1:]
+		return next, nil
+	}
+
+	httpServer := httptest.NewServer(server.AgentHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	firstConn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("first Dial returned error: %v", err)
+	}
+	defer firstConn.Close(websocket.StatusNormalClosure, "")
+	registerAgent(t, ctx, firstConn, "taken")
+
+	secondConn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("second Dial returned error: %v", err)
+	}
+	defer secondConn.Close(websocket.StatusNormalClosure, "")
+
+	registered := registerAgentAndRead(t, ctx, secondConn, "")
+	if registered.Subdomain != "available" {
+		t.Fatalf("subdomain = %q, want available", registered.Subdomain)
+	}
+	if len(subdomains) != 0 {
+		t.Fatalf("unused generated subdomains = %v, want none", subdomains)
+	}
+}
+
 func TestPublicRequestRoundTrip(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	agentServer := httptest.NewServer(server.AgentHandler())
@@ -381,7 +465,31 @@ func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 
 func registerAgent(t *testing.T, ctx context.Context, conn *websocket.Conn, subdomain string) {
 	t.Helper()
+	_ = registerAgentAndRead(t, ctx, conn, subdomain)
+}
 
+func registerAgentAndRead(t *testing.T, ctx context.Context, conn *websocket.Conn, subdomain string) messages.TunnelRegistered {
+	t.Helper()
+	authenticateAgentForTest(t, ctx, conn)
+	writeRegistrationForTest(t, ctx, conn, subdomain)
+
+	var regResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &regResp); err != nil {
+		t.Fatalf("read registration response returned error: %v", err)
+	}
+	if regResp.Type != messages.TypeTunnelRegistered {
+		t.Fatalf("registration response type = %s, want %s", regResp.Type, messages.TypeTunnelRegistered)
+	}
+
+	payload, err := messages.DecodePayload[messages.TunnelRegistered](regResp)
+	if err != nil {
+		t.Fatalf("DecodePayload returned error: %v", err)
+	}
+	return payload
+}
+
+func authenticateAgentForTest(t *testing.T, ctx context.Context, conn *websocket.Conn) {
+	t.Helper()
 	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{Token: "dev-token"})
 	if err != nil {
 		t.Fatalf("New auth returned error: %v", err)
@@ -397,7 +505,10 @@ func registerAgent(t *testing.T, ctx context.Context, conn *websocket.Conn, subd
 	if authResp.Type != messages.TypeAuthOK {
 		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthOK)
 	}
+}
 
+func writeRegistrationForTest(t *testing.T, ctx context.Context, conn *websocket.Conn, subdomain string) {
+	t.Helper()
 	reg, err := messages.New(messages.TypeTunnelRegister, messages.TunnelRegister{
 		Protocol:           "http",
 		LocalTarget:        "http://localhost:3000",
@@ -408,14 +519,6 @@ func registerAgent(t *testing.T, ctx context.Context, conn *websocket.Conn, subd
 	}
 	if err := wsjson.Write(ctx, conn, reg); err != nil {
 		t.Fatalf("write registration returned error: %v", err)
-	}
-
-	var regResp messages.Envelope
-	if err := wsjson.Read(ctx, conn, &regResp); err != nil {
-		t.Fatalf("read registration response returned error: %v", err)
-	}
-	if regResp.Type != messages.TypeTunnelRegistered {
-		t.Fatalf("registration response type = %s, want %s", regResp.Type, messages.TypeTunnelRegistered)
 	}
 }
 

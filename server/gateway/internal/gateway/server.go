@@ -26,6 +26,11 @@ import (
 
 const agentWebSocketPath = "/agent/connect"
 
+const (
+	randomSubdomainLength   = 8
+	randomSubdomainAttempts = 8
+)
+
 type Server struct {
 	cfg      Config
 	logger   *slog.Logger
@@ -33,6 +38,9 @@ type Server struct {
 
 	sessionsMu sync.RWMutex
 	sessions   map[string]*agentSession
+
+	generateSubdomain func(length int) (string, error)
+	generateTunnelID  func() (string, error)
 }
 
 func NewServer(cfg Config, logger *slog.Logger) *Server {
@@ -45,6 +53,9 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 		logger:   logger,
 		registry: registry.New(),
 		sessions: make(map[string]*agentSession),
+
+		generateSubdomain: names.RandomSubdomain,
+		generateTunnelID:  newTunnelID,
 	}
 }
 
@@ -177,40 +188,12 @@ func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn) (*age
 		return nil, err
 	}
 	if payload.Protocol != "http" {
+		_ = writeTunnelError(ctx, conn, "unsupported_protocol", fmt.Sprintf("unsupported tunnel protocol %q", payload.Protocol))
 		return nil, fmt.Errorf("unsupported tunnel protocol %q", payload.Protocol)
 	}
 
-	subdomain := payload.RequestedSubdomain
-	if subdomain == "" {
-		subdomain, err = names.RandomSubdomain(8)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err := names.ValidateSubdomain(subdomain); err != nil {
-		return nil, err
-	}
-
-	tunnelID, err := newTunnelID()
+	tunnel, err := s.registerTunnelSession(ctx, conn, payload)
 	if err != nil {
-		return nil, err
-	}
-
-	tunnel := &registry.Session{
-		TunnelID:    tunnelID,
-		Subdomain:   subdomain,
-		PublicURL:   s.publicURLForSubdomain(subdomain),
-		LocalTarget: payload.LocalTarget,
-		Protocol:    payload.Protocol,
-		CreatedAt:   time.Now().UTC(),
-	}
-
-	if err := s.registry.Register(tunnel); err != nil {
-		tunnelErr, _ := messages.New(messages.TypeTunnelError, messages.ErrorPayload{
-			Code:    "registration_failed",
-			Message: err.Error(),
-		})
-		_ = wsjson.Write(ctx, conn, tunnelErr)
 		return nil, err
 	}
 
@@ -229,6 +212,106 @@ func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn) (*age
 	}
 
 	return newAgentSession(conn, tunnel), nil
+}
+
+func (s *Server) registerTunnelSession(ctx context.Context, conn *websocket.Conn, payload messages.TunnelRegister) (*registry.Session, error) {
+	if payload.RequestedSubdomain != "" {
+		return s.registerRequestedSubdomain(ctx, conn, payload)
+	}
+	return s.registerRandomSubdomain(ctx, conn, payload)
+}
+
+func (s *Server) registerRequestedSubdomain(ctx context.Context, conn *websocket.Conn, payload messages.TunnelRegister) (*registry.Session, error) {
+	subdomain := payload.RequestedSubdomain
+	if err := names.ValidateSubdomain(subdomain); err != nil {
+		message := fmt.Sprintf("invalid requested subdomain %q: %s", subdomain, err)
+		_ = writeTunnelError(ctx, conn, "invalid_subdomain", message)
+		return nil, errors.New(message)
+	}
+
+	tunnel, err := s.newTunnelSession(payload, subdomain)
+	if err != nil {
+		_ = writeTunnelError(ctx, conn, "registration_failed", "failed to create tunnel session")
+		return nil, err
+	}
+
+	if err := s.registry.Register(tunnel); err != nil {
+		if errors.Is(err, registry.ErrSubdomainAlreadyRegistered) {
+			message := fmt.Sprintf("subdomain %q is already in use; choose another name or omit --subdomain for a random subdomain", subdomain)
+			_ = writeTunnelError(ctx, conn, "subdomain_unavailable", message)
+			return nil, err
+		}
+		_ = writeTunnelError(ctx, conn, "registration_failed", err.Error())
+		return nil, err
+	}
+
+	return tunnel, nil
+}
+
+func (s *Server) registerRandomSubdomain(ctx context.Context, conn *websocket.Conn, payload messages.TunnelRegister) (*registry.Session, error) {
+	var lastErr error
+	for attempt := 0; attempt < randomSubdomainAttempts; attempt++ {
+		subdomain, err := s.generateSubdomain(randomSubdomainLength)
+		if err != nil {
+			_ = writeTunnelError(ctx, conn, "registration_failed", "failed to generate random subdomain")
+			return nil, err
+		}
+		if err := names.ValidateSubdomain(subdomain); err != nil {
+			lastErr = err
+			continue
+		}
+
+		tunnel, err := s.newTunnelSession(payload, subdomain)
+		if err != nil {
+			_ = writeTunnelError(ctx, conn, "registration_failed", "failed to create tunnel session")
+			return nil, err
+		}
+
+		if err := s.registry.Register(tunnel); err != nil {
+			if errors.Is(err, registry.ErrSubdomainAlreadyRegistered) {
+				lastErr = err
+				continue
+			}
+			_ = writeTunnelError(ctx, conn, "registration_failed", err.Error())
+			return nil, err
+		}
+
+		return tunnel, nil
+	}
+
+	message := "could not assign a random subdomain; retry or request a subdomain with --subdomain"
+	_ = writeTunnelError(ctx, conn, "random_subdomain_exhausted", message)
+	if lastErr != nil {
+		return nil, fmt.Errorf("%s: %w", message, lastErr)
+	}
+	return nil, errors.New(message)
+}
+
+func (s *Server) newTunnelSession(payload messages.TunnelRegister, subdomain string) (*registry.Session, error) {
+	tunnelID, err := s.generateTunnelID()
+	if err != nil {
+		return nil, err
+	}
+
+	return &registry.Session{
+		TunnelID:    tunnelID,
+		Subdomain:   subdomain,
+		PublicURL:   s.publicURLForSubdomain(subdomain),
+		LocalTarget: payload.LocalTarget,
+		Protocol:    payload.Protocol,
+		CreatedAt:   time.Now().UTC(),
+	}, nil
+}
+
+func writeTunnelError(ctx context.Context, conn *websocket.Conn, code, message string) error {
+	tunnelErr, err := messages.New(messages.TypeTunnelError, messages.ErrorPayload{
+		Code:    code,
+		Message: message,
+	})
+	if err != nil {
+		return err
+	}
+	return wsjson.Write(ctx, conn, tunnelErr)
 }
 
 func (s *Server) publicURLForSubdomain(subdomain string) string {
