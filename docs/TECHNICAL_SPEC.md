@@ -398,11 +398,16 @@ PORTHOOK_MAX_RESPONSE_BODY_BYTES=1048576
 PORTHOOK_WS_WRITE_TIMEOUT=10s
 PORTHOOK_WS_PING_INTERVAL=15s
 PORTHOOK_WS_PONG_TIMEOUT=5s
+PORTHOOK_RECONNECT_INITIAL_DELAY=500ms
+PORTHOOK_RECONNECT_MAX_DELAY=5s
+PORTHOOK_RECONNECT_JITTER=250ms
 ```
 
 Static token authentication is acceptable for the first proof of concept.
 
 Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
+
+The agent retries transient dial and WebSocket disconnect failures with exponential backoff and jitter. Authentication failures and explicit tunnel registration errors are terminal.
 
 ## 15. Health and Operations
 

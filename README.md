@@ -42,6 +42,7 @@ The first product shape is intentionally narrow:
 - Wildcard subdomain routing.
 - Token-based tunnel authentication.
 - Basic request logs for local debugging.
+- Agent reconnects for transient gateway disconnects.
 - A simple dashboard after the tunnel core is stable.
 
 This public repository should stay focused on the self-hosted open-source product.
