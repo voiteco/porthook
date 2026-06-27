@@ -2,7 +2,21 @@
 
 package agent
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"nhooyr.io/websocket"
+	"nhooyr.io/websocket/wsjson"
+
+	"github.com/voiteco/porthook/protocol/httpwire"
+	"github.com/voiteco/porthook/protocol/messages"
+)
 
 func TestBuildWebSocketURL(t *testing.T) {
 	tests := []struct {
@@ -43,5 +57,145 @@ func TestBuildWebSocketURL(t *testing.T) {
 func TestBuildWebSocketURLRejectsInvalidURL(t *testing.T) {
 	if _, err := BuildWebSocketURL("ftp://localhost"); err == nil {
 		t.Fatal("BuildWebSocketURL returned nil error")
+	}
+}
+
+func TestRunnerHandlesHTTPRequest(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/webhook" {
+			t.Errorf("path = %s, want /webhook", r.URL.Path)
+		}
+		if r.URL.RawQuery != "source=test" {
+			t.Errorf("query = %s, want source=test", r.URL.RawQuery)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("ReadAll returned error: %v", err)
+		}
+		if string(body) != "payload" {
+			t.Errorf("body = %q, want payload", string(body))
+		}
+
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("local-ok"))
+	}))
+	defer local.Close()
+
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		ctx := r.Context()
+		var auth messages.Envelope
+		if err := wsjson.Read(ctx, conn, &auth); err != nil {
+			t.Errorf("read auth returned error: %v", err)
+			return
+		}
+		if auth.Type != messages.TypeAuthRequest {
+			t.Errorf("auth type = %s, want %s", auth.Type, messages.TypeAuthRequest)
+			return
+		}
+		authOK, _ := messages.New(messages.TypeAuthOK, messages.AuthOK{})
+		if err := wsjson.Write(ctx, conn, authOK); err != nil {
+			t.Errorf("write auth ok returned error: %v", err)
+			return
+		}
+
+		var registration messages.Envelope
+		if err := wsjson.Read(ctx, conn, &registration); err != nil {
+			t.Errorf("read registration returned error: %v", err)
+			return
+		}
+		if registration.Type != messages.TypeTunnelRegister {
+			t.Errorf("registration type = %s, want %s", registration.Type, messages.TypeTunnelRegister)
+			return
+		}
+		registered, _ := messages.New(messages.TypeTunnelRegistered, messages.TunnelRegistered{
+			TunnelID:  "tun_test",
+			PublicURL: "http://demo.localhost:8080",
+			Subdomain: "demo",
+		})
+		if err := wsjson.Write(ctx, conn, registered); err != nil {
+			t.Errorf("write registered returned error: %v", err)
+			return
+		}
+
+		tunnelReq, err := messages.NewStream(messages.TypeHTTPRequest, "str_test", "tun_test", httpwire.Request{
+			Method: http.MethodPost,
+			Path:   "/webhook",
+			Query:  "source=test",
+			Header: http.Header{"X-Test": []string{"yes"}},
+			Body:   []byte("payload"),
+		})
+		if err != nil {
+			t.Errorf("NewStream returned error: %v", err)
+			return
+		}
+		if err := wsjson.Write(ctx, conn, tunnelReq); err != nil {
+			t.Errorf("write tunnel request returned error: %v", err)
+			return
+		}
+
+		var response messages.Envelope
+		if err := wsjson.Read(ctx, conn, &response); err != nil {
+			t.Errorf("read tunnel response returned error: %v", err)
+			return
+		}
+		if response.Type != messages.TypeHTTPResponse {
+			t.Errorf("response type = %s, want %s", response.Type, messages.TypeHTTPResponse)
+			return
+		}
+		if response.StreamID != "str_test" {
+			t.Errorf("stream id = %s, want str_test", response.StreamID)
+			return
+		}
+		payload, err := messages.DecodePayload[httpwire.Response](response)
+		if err != nil {
+			t.Errorf("DecodePayload returned error: %v", err)
+			return
+		}
+		if payload.Status != http.StatusCreated {
+			t.Errorf("status = %d, want 201", payload.Status)
+		}
+		if string(payload.Body) != "local-ok" {
+			t.Errorf("body = %q, want local-ok", string(payload.Body))
+		}
+	}))
+	defer gateway.Close()
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:          gateway.URL,
+		Token:              "dev-token",
+		RequestedSubdomain: "demo",
+		LocalTarget:        local.URL,
+		AgentVersion:       "test",
+		RequestTimeout:     5 * time.Second,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !bytes.Contains(output.Bytes(), []byte("Tunnel established")) {
+		t.Fatalf("output does not contain tunnel establishment: %q", output.String())
+	}
+	if !bytes.Contains(output.Bytes(), []byte("POST /webhook?source=test -> 201")) {
+		t.Fatalf("output does not contain request log: %q", output.String())
 	}
 }

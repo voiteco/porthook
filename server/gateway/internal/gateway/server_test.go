@@ -3,8 +3,11 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -13,6 +16,7 @@ import (
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
+	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
 )
 
@@ -81,6 +85,116 @@ func TestAgentWebSocketAuthAndRegister(t *testing.T) {
 	}
 }
 
+func TestPublicRequestRoundTrip(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		var reqEnv messages.Envelope
+		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
+			agentErr <- err
+			return
+		}
+		if reqEnv.Type != messages.TypeHTTPRequest {
+			agentErr <- errUnexpectedType(reqEnv.Type, messages.TypeHTTPRequest)
+			return
+		}
+
+		payload, err := messages.DecodePayload[httpwire.Request](reqEnv)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if payload.Method != http.MethodPost {
+			agentErr <- errString("method was not forwarded")
+			return
+		}
+		if payload.Path != "/hello" || payload.Query != "x=1" {
+			agentErr <- errString("path or query was not forwarded")
+			return
+		}
+		if payload.Header.Get("Connection") != "" {
+			agentErr <- errString("hop-by-hop request header was forwarded")
+			return
+		}
+		if payload.Header.Get("X-Porthook-Tunnel-ID") == "" {
+			agentErr <- errString("tunnel header was not added")
+			return
+		}
+		if string(payload.Body) != "payload" {
+			agentErr <- errString("request body was not forwarded")
+			return
+		}
+
+		resp, err := messages.NewStream(messages.TypeHTTPResponse, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+			Status: http.StatusAccepted,
+			Header: http.Header{
+				"Content-Type": []string{"text/plain"},
+				"Connection":   []string{"close"},
+			},
+			Body: []byte("via-agent"),
+		})
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if err := wsjson.Write(ctx, conn, resp); err != nil {
+			agentErr <- err
+			return
+		}
+		agentErr <- nil
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, publicServer.URL+"/hello?x=1", bytes.NewBufferString("payload"))
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+	req.Header.Set("Connection", "close")
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	if resp.Header.Get("Content-Type") != "text/plain" {
+		t.Fatalf("Content-Type = %q, want text/plain", resp.Header.Get("Content-Type"))
+	}
+	if resp.Header.Get("Connection") != "" {
+		t.Fatal("hop-by-hop response header was forwarded")
+	}
+	if string(body) != "via-agent" {
+		t.Fatalf("body = %q, want via-agent", string(body))
+	}
+
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
 func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	httpServer := httptest.NewServer(server.AgentHandler())
@@ -112,6 +226,46 @@ func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 	}
 }
 
+func registerAgent(t *testing.T, ctx context.Context, conn *websocket.Conn, subdomain string) {
+	t.Helper()
+
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{Token: "dev-token"})
+	if err != nil {
+		t.Fatalf("New auth returned error: %v", err)
+	}
+	if err := wsjson.Write(ctx, conn, auth); err != nil {
+		t.Fatalf("write auth returned error: %v", err)
+	}
+
+	var authResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &authResp); err != nil {
+		t.Fatalf("read auth response returned error: %v", err)
+	}
+	if authResp.Type != messages.TypeAuthOK {
+		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthOK)
+	}
+
+	reg, err := messages.New(messages.TypeTunnelRegister, messages.TunnelRegister{
+		Protocol:           "http",
+		LocalTarget:        "http://localhost:3000",
+		RequestedSubdomain: subdomain,
+	})
+	if err != nil {
+		t.Fatalf("New registration returned error: %v", err)
+	}
+	if err := wsjson.Write(ctx, conn, reg); err != nil {
+		t.Fatalf("write registration returned error: %v", err)
+	}
+
+	var regResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &regResp); err != nil {
+		t.Fatalf("read registration response returned error: %v", err)
+	}
+	if regResp.Type != messages.TypeTunnelRegistered {
+		t.Fatalf("registration response type = %s, want %s", regResp.Type, messages.TypeTunnelRegistered)
+	}
+}
+
 func TestPublicHandlerHealthEndpoints(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	httpServer := httptest.NewServer(server.PublicHandler())
@@ -127,6 +281,16 @@ func TestPublicHandlerHealthEndpoints(t *testing.T) {
 			t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
 		}
 	}
+}
+
+type errString string
+
+func (e errString) Error() string {
+	return string(e)
+}
+
+func errUnexpectedType(got, want messages.Type) error {
+	return errString("unexpected message type " + string(got) + ", want " + string(want))
 }
 
 func testConfig() Config {

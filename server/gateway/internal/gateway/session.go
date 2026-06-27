@@ -4,26 +4,70 @@ package gateway
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
+	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
 	"github.com/voiteco/porthook/server/gateway/internal/registry"
 )
 
 type agentSession struct {
-	conn   *websocket.Conn
-	tunnel *registry.Session
-	sendMu sync.Mutex
+	conn     *websocket.Conn
+	tunnel   *registry.Session
+	sendMu   sync.Mutex
+	done     chan struct{}
+	doneOnce sync.Once
+
+	pendingMu sync.RWMutex
+	pending   map[string]chan messages.Envelope
 }
 
 func newAgentSession(conn *websocket.Conn, tunnel *registry.Session) *agentSession {
 	return &agentSession{
-		conn:   conn,
-		tunnel: tunnel,
+		conn:    conn,
+		tunnel:  tunnel,
+		done:    make(chan struct{}),
+		pending: make(map[string]chan messages.Envelope),
+	}
+}
+
+func (s *agentSession) roundTrip(ctx context.Context, streamID string, req httpwire.Request) (httpwire.Response, error) {
+	ch := make(chan messages.Envelope, 1)
+	s.addPending(streamID, ch)
+	defer s.removePending(streamID)
+
+	env, err := messages.NewStream(messages.TypeHTTPRequest, streamID, s.tunnel.TunnelID, req)
+	if err != nil {
+		return httpwire.Response{}, err
+	}
+	if err := s.write(ctx, env); err != nil {
+		return httpwire.Response{}, fmt.Errorf("write tunnel request: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return httpwire.Response{}, ctx.Err()
+	case <-s.done:
+		return httpwire.Response{}, errors.New("agent disconnected")
+	case respEnv := <-ch:
+		switch respEnv.Type {
+		case messages.TypeHTTPResponse:
+			return messages.DecodePayload[httpwire.Response](respEnv)
+		case messages.TypeHTTPStreamError:
+			payload, err := messages.DecodePayload[messages.ErrorPayload](respEnv)
+			if err != nil {
+				return httpwire.Response{}, err
+			}
+			return httpwire.Response{}, errors.New(payload.Message)
+		default:
+			return httpwire.Response{}, fmt.Errorf("unexpected response message %s", respEnv.Type)
+		}
 	}
 }
 
@@ -34,6 +78,8 @@ func (s *agentSession) write(ctx context.Context, env messages.Envelope) error {
 }
 
 func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
+	defer s.closeDone()
+
 	for {
 		var env messages.Envelope
 		if err := wsjson.Read(ctx, s.conn, &env); err != nil {
@@ -52,8 +98,45 @@ func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 				logger.Warn("write pong failed", "tunnel_id", s.tunnel.TunnelID, "error", err)
 				return
 			}
+		case messages.TypeHTTPResponse, messages.TypeHTTPStreamError:
+			if !s.deliver(env) {
+				logger.Warn("received response for unknown stream", "tunnel_id", s.tunnel.TunnelID, "stream_id", env.StreamID)
+			}
 		default:
 			logger.Warn("unexpected agent message", "tunnel_id", s.tunnel.TunnelID, "type", env.Type)
 		}
 	}
+}
+
+func (s *agentSession) addPending(streamID string, ch chan messages.Envelope) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	s.pending[streamID] = ch
+}
+
+func (s *agentSession) removePending(streamID string) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	delete(s.pending, streamID)
+}
+
+func (s *agentSession) deliver(env messages.Envelope) bool {
+	s.pendingMu.RLock()
+	ch, ok := s.pending[env.StreamID]
+	s.pendingMu.RUnlock()
+	if !ok {
+		return false
+	}
+
+	select {
+	case ch <- env:
+	default:
+	}
+	return true
+}
+
+func (s *agentSession) closeDone() {
+	s.doneOnce.Do(func() {
+		close(s.done)
+	})
 }

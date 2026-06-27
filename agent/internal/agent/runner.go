@@ -143,6 +143,9 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 	for {
 		var env messages.Envelope
 		if err := wsjson.Read(ctx, conn, &env); err != nil {
+			if status := websocket.CloseStatus(err); status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
+				return nil
+			}
 			return fmt.Errorf("read gateway message: %w", err)
 		}
 
@@ -195,7 +198,7 @@ func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tu
 		return fmt.Errorf("write http response: %w", err)
 	}
 
-	fmt.Fprintf(r.output, "%s %s -> %d %dms\n", req.Method, req.Path, resp.Status, time.Since(started).Milliseconds())
+	fmt.Fprintf(r.output, "%s %s -> %d %dms\n", req.Method, requestDisplayPath(req.Path, req.Query), resp.Status, time.Since(started).Milliseconds())
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
+	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
 	"github.com/voiteco/porthook/protocol/names"
 	"github.com/voiteco/porthook/server/gateway/internal/registry"
@@ -86,9 +88,7 @@ func (s *Server) PublicHandler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
-	})
+	mux.HandleFunc("/", s.handlePublicRequest)
 	return mux
 }
 
@@ -251,6 +251,121 @@ func (s *Server) publicURLForSubdomain(subdomain string) string {
 	return parsed.String()
 }
 
+func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
+	subdomain, ok := s.subdomainFromHost(r.Host)
+	if !ok {
+		http.Error(w, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
+		return
+	}
+
+	session, ok := s.sessionBySubdomain(subdomain)
+	if !ok {
+		http.Error(w, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
+		return
+	}
+
+	body, err := readLimitedBody(w, r, s.cfg.MaxBodyBytes)
+	if err != nil {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	streamID, err := newStreamID()
+	if err != nil {
+		http.Error(w, "failed to create stream", http.StatusInternalServerError)
+		return
+	}
+
+	requestHeader := httpwire.StripHopByHopHeaders(r.Header)
+	requestHeader = httpwire.AddForwardedHeaders(
+		requestHeader,
+		session.tunnel.TunnelID,
+		r.Host,
+		requestProto(r),
+		remoteIP(r.RemoteAddr),
+	)
+
+	tunnelRequest := httpwire.Request{
+		Method: r.Method,
+		Path:   r.URL.Path,
+		Query:  r.URL.RawQuery,
+		Header: requestHeader,
+		Body:   body,
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.StreamTimeout)
+	defer cancel()
+
+	started := time.Now()
+	tunnelResponse, err := session.roundTrip(ctx, streamID, tunnelRequest)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			http.Error(w, "tunnel request timed out", http.StatusGatewayTimeout)
+			return
+		}
+		s.logger.Warn("tunnel request failed", "tunnel_id", session.tunnel.TunnelID, "stream_id", streamID, "error", err)
+		http.Error(w, "tunnel request failed", http.StatusBadGateway)
+		return
+	}
+
+	for name, values := range httpwire.StripHopByHopHeaders(tunnelResponse.Header) {
+		for _, value := range values {
+			w.Header().Add(name, value)
+		}
+	}
+	if tunnelResponse.Status <= 0 {
+		tunnelResponse.Status = http.StatusBadGateway
+	}
+	w.WriteHeader(tunnelResponse.Status)
+	_, _ = w.Write(tunnelResponse.Body)
+
+	s.logger.Info("public request completed",
+		"tunnel_id", session.tunnel.TunnelID,
+		"stream_id", streamID,
+		"method", r.Method,
+		"host", r.Host,
+		"path", r.URL.Path,
+		"status", tunnelResponse.Status,
+		"duration_ms", time.Since(started).Milliseconds(),
+	)
+}
+
+func (s *Server) subdomainFromHost(hostport string) (string, bool) {
+	host := strings.ToLower(strings.TrimSpace(hostport))
+	if host == "" {
+		return "", false
+	}
+	if splitHost, _, err := net.SplitHostPort(host); err == nil {
+		host = splitHost
+	}
+
+	suffix := "." + strings.ToLower(strings.TrimSpace(s.cfg.RootDomain))
+	if !strings.HasSuffix(host, suffix) {
+		return "", false
+	}
+
+	subdomain := strings.TrimSuffix(host, suffix)
+	if subdomain == "" || strings.Contains(subdomain, ".") {
+		return "", false
+	}
+	if err := names.ValidateSubdomain(subdomain); err != nil {
+		return "", false
+	}
+	return subdomain, true
+}
+
+func (s *Server) sessionBySubdomain(subdomain string) (*agentSession, bool) {
+	tunnel, ok := s.registry.LookupBySubdomain(subdomain)
+	if !ok {
+		return nil, false
+	}
+
+	s.sessionsMu.RLock()
+	defer s.sessionsMu.RUnlock()
+	session, ok := s.sessions[tunnel.TunnelID]
+	return session, ok
+}
+
 func (s *Server) addSession(session *agentSession) {
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
@@ -273,11 +388,35 @@ func newTunnelID() (string, error) {
 	return "tun_" + suffix, nil
 }
 
+func newStreamID() (string, error) {
+	suffix, err := names.RandomSubdomain(20)
+	if err != nil {
+		return "", err
+	}
+	return "str_" + suffix, nil
+}
+
+func readLimitedBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = defaultMaxBodyBytes
+	}
+	defer r.Body.Close()
+	return io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+}
+
 func serveHTTP(errCh chan<- error, server *http.Server) {
 	err := server.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		errCh <- err
 	}
+}
+
+func remoteIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err == nil {
+		return host
+	}
+	return remoteAddr
 }
 
 func requestProto(r *http.Request) string {
