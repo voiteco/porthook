@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package registry
+
+import (
+	"errors"
+	"sync"
+	"time"
+)
+
+type Session struct {
+	TunnelID    string
+	Subdomain   string
+	PublicURL   string
+	LocalTarget string
+	Protocol    string
+	CreatedAt   time.Time
+}
+
+type Registry struct {
+	mu          sync.RWMutex
+	byTunnelID  map[string]*Session
+	bySubdomain map[string]*Session
+}
+
+func New() *Registry {
+	return &Registry{
+		byTunnelID:  make(map[string]*Session),
+		bySubdomain: make(map[string]*Session),
+	}
+}
+
+func (r *Registry) Register(session *Session) error {
+	if session == nil {
+		return errors.New("session is required")
+	}
+	if session.TunnelID == "" {
+		return errors.New("tunnel id is required")
+	}
+	if session.Subdomain == "" {
+		return errors.New("subdomain is required")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.byTunnelID[session.TunnelID]; exists {
+		return errors.New("tunnel id already registered")
+	}
+	if _, exists := r.bySubdomain[session.Subdomain]; exists {
+		return errors.New("subdomain already registered")
+	}
+
+	r.byTunnelID[session.TunnelID] = session
+	r.bySubdomain[session.Subdomain] = session
+	return nil
+}
+
+func (r *Registry) LookupByTunnelID(tunnelID string) (*Session, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, ok := r.byTunnelID[tunnelID]
+	return session, ok
+}
+
+func (r *Registry) LookupBySubdomain(subdomain string) (*Session, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, ok := r.bySubdomain[subdomain]
+	return session, ok
+}
+
+func (r *Registry) Unregister(tunnelID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	session, ok := r.byTunnelID[tunnelID]
+	if !ok {
+		return
+	}
+
+	delete(r.byTunnelID, tunnelID)
+	delete(r.bySubdomain, session.Subdomain)
+}
+
+func (r *Registry) Count() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.byTunnelID)
+}
