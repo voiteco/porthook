@@ -90,6 +90,22 @@ func TestFormatTunnelRegistrationErrorForDuplicateSubdomain(t *testing.T) {
 	}
 }
 
+func TestWriteRequestOutputForFailure(t *testing.T) {
+	var output bytes.Buffer
+	runner := NewRunner(Config{}, nil, &output)
+
+	runner.writeRequestOutput(httpwire.Request{
+		Method: http.MethodGet,
+		Path:   "/broken",
+		Query:  "x=1",
+	}, 0, 12*time.Millisecond, fmt.Errorf("local service failed"))
+
+	got := output.String()
+	if !strings.Contains(got, "GET /broken?x=1 -> error 12ms: local service failed") {
+		t.Fatalf("output = %q, want failure request log", got)
+	}
+}
+
 func TestRunnerHandlesHTTPRequest(t *testing.T) {
 	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

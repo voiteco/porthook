@@ -165,7 +165,7 @@ func TestAgentWebSocketRetriesRandomSubdomainCollision(t *testing.T) {
 		t.Fatalf("subdomain = %q, want available", registered.Subdomain)
 	}
 	if len(subdomains) != 0 {
-		t.Fatalf("unused generated subdomains = %v, want none", subdomains)
+		t.Fatalf("unused random subdomains = %v, want none", subdomains)
 	}
 }
 
@@ -539,6 +539,45 @@ func TestPublicHandlerHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestPublicRequestLogsMissingTunnel(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	server := NewServer(testConfig(), logger)
+	httpServer := httptest.NewServer(server.PublicHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/missing", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := httpServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+
+	got := logs.String()
+	for _, want := range []string{
+		`msg="public request"`,
+		"host=demo.localhost",
+		"status=404",
+		"outcome=no_active_session",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("logs = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestContextWithTimeoutAllowsZeroTimeout(t *testing.T) {
 	ctx, cancel := contextWithTimeout(context.Background(), 0)
 	defer cancel()
@@ -547,6 +586,18 @@ func TestContextWithTimeoutAllowsZeroTimeout(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("context was canceled immediately")
 	default:
+	}
+}
+
+func TestRequestContentLength(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader("body"))
+	if got := requestContentLength(req, 99); got != 4 {
+		t.Fatalf("requestContentLength = %d, want 4", got)
+	}
+
+	req.ContentLength = -1
+	if got := requestContentLength(req, 99); got != 99 {
+		t.Fatalf("requestContentLength fallback = %d, want 99", got)
 	}
 }
 

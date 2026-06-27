@@ -351,26 +351,65 @@ func (s *Server) publicURLForSubdomain(subdomain string) string {
 }
 
 func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	status := 0
+	outcome := "unknown"
+	var subdomain string
+	var tunnelID string
+	var streamID string
+	var requestBytes int64
+	var responseBytes int64
+	var requestErr error
+	defer func() {
+		if status == 0 {
+			status = http.StatusInternalServerError
+		}
+		s.logPublicRequest(r, publicRequestLog{
+			Started:       started,
+			Status:        status,
+			Outcome:       outcome,
+			Subdomain:     subdomain,
+			TunnelID:      tunnelID,
+			StreamID:      streamID,
+			RequestBytes:  requestBytes,
+			ResponseBytes: responseBytes,
+			Error:         requestErr,
+		})
+	}()
+
 	subdomain, ok := s.subdomainFromHost(r.Host)
 	if !ok {
+		status = http.StatusNotFound
+		outcome = "no_tunnel_for_host"
 		http.Error(w, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
 		return
 	}
 
 	session, ok := s.sessionBySubdomain(subdomain)
 	if !ok {
+		status = http.StatusNotFound
+		outcome = "no_active_session"
 		http.Error(w, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
 		return
 	}
+	tunnelID = session.tunnel.TunnelID
 
 	body, err := readLimitedBody(w, r, s.cfg.MaxBodyBytes)
 	if err != nil {
+		status = http.StatusRequestEntityTooLarge
+		outcome = "request_body_too_large"
+		requestErr = err
+		requestBytes = requestContentLength(r, s.cfg.MaxBodyBytes+1)
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
+	requestBytes = int64(len(body))
 
-	streamID, err := newStreamID()
+	streamID, err = newStreamID()
 	if err != nil {
+		status = http.StatusInternalServerError
+		outcome = "stream_id_failed"
+		requestErr = err
 		http.Error(w, "failed to create stream", http.StatusInternalServerError)
 		return
 	}
@@ -395,14 +434,17 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.StreamTimeout)
 	defer cancel()
 
-	started := time.Now()
 	tunnelResponse, err := session.roundTrip(ctx, streamID, tunnelRequest)
 	if err != nil {
+		requestErr = err
 		if errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+			outcome = "tunnel_timeout"
 			http.Error(w, "tunnel request timed out", http.StatusGatewayTimeout)
 			return
 		}
-		s.logger.Warn("tunnel request failed", "tunnel_id", session.tunnel.TunnelID, "stream_id", streamID, "error", err)
+		status = http.StatusBadGateway
+		outcome = "tunnel_error"
 		http.Error(w, "tunnel request failed", http.StatusBadGateway)
 		return
 	}
@@ -415,18 +457,51 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	if tunnelResponse.Status <= 0 {
 		tunnelResponse.Status = http.StatusBadGateway
 	}
+	status = tunnelResponse.Status
+	outcome = "completed"
+	responseBytes = int64(len(tunnelResponse.Body))
 	w.WriteHeader(tunnelResponse.Status)
 	_, _ = w.Write(tunnelResponse.Body)
+}
 
-	s.logger.Info("public request completed",
-		"tunnel_id", session.tunnel.TunnelID,
-		"stream_id", streamID,
-		"method", r.Method,
-		"host", r.Host,
-		"path", r.URL.Path,
-		"status", tunnelResponse.Status,
-		"duration_ms", time.Since(started).Milliseconds(),
-	)
+type publicRequestLog struct {
+	Started       time.Time
+	Status        int
+	Outcome       string
+	Subdomain     string
+	TunnelID      string
+	StreamID      string
+	RequestBytes  int64
+	ResponseBytes int64
+	Error         error
+}
+
+func (s *Server) logPublicRequest(r *http.Request, entry publicRequestLog) {
+	level := slog.LevelInfo
+	if entry.Status >= 500 {
+		level = slog.LevelWarn
+	}
+
+	attrs := []slog.Attr{
+		slog.String("method", r.Method),
+		slog.String("host", r.Host),
+		slog.String("path", r.URL.Path),
+		slog.String("query", r.URL.RawQuery),
+		slog.String("remote_ip", remoteIP(r.RemoteAddr)),
+		slog.String("subdomain", entry.Subdomain),
+		slog.String("tunnel_id", entry.TunnelID),
+		slog.String("stream_id", entry.StreamID),
+		slog.Int("status", entry.Status),
+		slog.String("outcome", entry.Outcome),
+		slog.Int64("request_bytes", entry.RequestBytes),
+		slog.Int64("response_bytes", entry.ResponseBytes),
+		slog.Int64("duration_ms", time.Since(entry.Started).Milliseconds()),
+	}
+	if entry.Error != nil {
+		attrs = append(attrs, slog.Any("error", entry.Error))
+	}
+
+	s.logger.LogAttrs(r.Context(), level, "public request", attrs...)
 }
 
 func (s *Server) subdomainFromHost(hostport string) (string, bool) {
@@ -541,6 +616,13 @@ func readLimitedBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byt
 	}
 	defer r.Body.Close()
 	return io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+}
+
+func requestContentLength(r *http.Request, fallback int64) int64 {
+	if r.ContentLength >= 0 {
+		return r.ContentLength
+	}
+	return fallback
 }
 
 func serveHTTP(errCh chan<- error, server *http.Server) {

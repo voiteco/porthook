@@ -183,9 +183,7 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 		switch env.Type {
 		case messages.TypeHTTPRequest:
 			go func(env messages.Envelope) {
-				if err := r.handleHTTPRequest(ctx, conn, tunnelID, env); err != nil {
-					r.logger.Warn("http request failed", "stream_id", env.StreamID, "error", err)
-				}
+				_ = r.handleHTTPRequest(ctx, conn, tunnelID, env)
 			}(env)
 		case messages.TypePing:
 			pong, err := messages.New(messages.TypePong, nil)
@@ -201,40 +199,91 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 	}
 }
 
-func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tunnelID string, env messages.Envelope) error {
-	req, err := messages.DecodePayload[httpwire.Request](env)
+func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tunnelID string, env messages.Envelope) (err error) {
+	started := time.Now()
+	status := 0
+	outcome := "unknown"
+	var req httpwire.Request
+	var responseBytes int64
+	defer func() {
+		r.logLocalRequest(env.StreamID, tunnelID, req, status, outcome, responseBytes, time.Since(started), err)
+	}()
+
+	req, err = messages.DecodePayload[httpwire.Request](env)
 	if err != nil {
+		outcome = "decode_failed"
 		return err
 	}
 
-	started := time.Now()
 	resp, err := ForwardHTTPRequest(ctx, r.httpClient, r.cfg.LocalTarget, req, r.cfg.MaxResponseBodyBytes)
 	if err != nil {
+		outcome = "local_request_failed"
 		streamErr, buildErr := messages.NewStream(messages.TypeHTTPStreamError, env.StreamID, tunnelID, messages.ErrorPayload{
 			Code:    "local_request_failed",
 			Message: err.Error(),
 		})
 		if buildErr != nil {
+			outcome = "stream_error_build_failed"
 			return buildErr
 		}
 		if writeErr := r.write(ctx, conn, streamErr); writeErr != nil {
+			outcome = "stream_error_write_failed"
 			return fmt.Errorf("write stream error: %w", writeErr)
 		}
+		r.writeRequestOutput(req, 0, time.Since(started), err)
 		return err
 	}
+	status = resp.Status
+	responseBytes = int64(len(resp.Body))
 
 	response, err := messages.NewStream(messages.TypeHTTPResponse, env.StreamID, tunnelID, resp)
 	if err != nil {
+		outcome = "response_build_failed"
 		return err
 	}
 	if err := r.write(ctx, conn, response); err != nil {
+		outcome = "response_write_failed"
 		return fmt.Errorf("write http response: %w", err)
 	}
+	outcome = "completed"
 
+	r.writeRequestOutput(req, resp.Status, time.Since(started), nil)
+	return nil
+}
+
+func (r *Runner) logLocalRequest(streamID, tunnelID string, req httpwire.Request, status int, outcome string, responseBytes int64, duration time.Duration, err error) {
+	level := slog.LevelInfo
+	if err != nil || status >= 500 {
+		level = slog.LevelWarn
+	}
+
+	attrs := []slog.Attr{
+		slog.String("stream_id", streamID),
+		slog.String("tunnel_id", tunnelID),
+		slog.String("method", req.Method),
+		slog.String("path", requestDisplayPath(req.Path, req.Query)),
+		slog.Int("status", status),
+		slog.String("outcome", outcome),
+		slog.Int("request_bytes", len(req.Body)),
+		slog.Int64("response_bytes", responseBytes),
+		slog.Int64("duration_ms", duration.Milliseconds()),
+	}
+	if err != nil {
+		attrs = append(attrs, slog.Any("error", err))
+	}
+
+	r.logger.LogAttrs(context.Background(), level, "local request", attrs...)
+}
+
+func (r *Runner) writeRequestOutput(req httpwire.Request, status int, duration time.Duration, err error) {
 	r.outputMu.Lock()
 	defer r.outputMu.Unlock()
-	fmt.Fprintf(r.output, "%s %s -> %d %dms\n", req.Method, requestDisplayPath(req.Path, req.Query), resp.Status, time.Since(started).Milliseconds())
-	return nil
+
+	if err != nil {
+		fmt.Fprintf(r.output, "%s %s -> error %dms: %s\n", req.Method, requestDisplayPath(req.Path, req.Query), duration.Milliseconds(), err)
+		return
+	}
+	fmt.Fprintf(r.output, "%s %s -> %d %dms\n", req.Method, requestDisplayPath(req.Path, req.Query), status, duration.Milliseconds())
 }
 
 func (r *Runner) write(ctx context.Context, conn *websocket.Conn, env messages.Envelope) error {
