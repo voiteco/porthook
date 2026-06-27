@@ -61,7 +61,7 @@ See [REPOSITORY_BOUNDARY.md](./REPOSITORY_BOUNDARY.md) for the public/private sp
 
 Porthook uses a split-license model:
 
-- Server-side components are AGPL-3.0.
+- Server-side components are AGPL-3.0-only.
 - The CLI agent and protocol SDK are Apache-2.0.
 
 Server-side components include:

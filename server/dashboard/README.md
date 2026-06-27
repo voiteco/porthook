@@ -1,6 +1,6 @@
 # Dashboard
 
-License: AGPL-3.0
+License: AGPL-3.0-only
 
 The dashboard will provide a web interface for:
 

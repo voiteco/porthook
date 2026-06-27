@@ -52,7 +52,7 @@ This public repository should stay focused on the self-hosted open-source produc
 .
 |-- agent/             # CLI agent. Apache-2.0.
 |-- protocol/          # Shared protocol and SDK packages. Apache-2.0.
-|-- server/            # Gateway, control plane, and dashboard. AGPL-3.0.
+|-- server/            # Gateway, control plane, and dashboard. AGPL-3.0-only.
 |   |-- control-plane/
 |   |-- dashboard/
 |   `-- gateway/
@@ -66,7 +66,7 @@ This public repository should stay focused on the self-hosted open-source produc
 
 Porthook uses a split-license model:
 
-- `server/` is licensed under AGPL-3.0.
+- `server/` is licensed under AGPL-3.0-only.
 - `agent/` and `protocol/` are licensed under Apache-2.0.
 - Documentation and deployment examples follow the license declared in their file headers or directory README.
 

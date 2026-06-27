@@ -1,6 +1,6 @@
 # Control Plane
 
-License: AGPL-3.0
+License: AGPL-3.0-only
 
 The control plane owns users, tokens, tunnel metadata, reserved names, and limits.
 

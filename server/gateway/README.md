@@ -1,6 +1,6 @@
 # Gateway
 
-License: AGPL-3.0
+License: AGPL-3.0-only
 
 The gateway is the public edge service.
 
@@ -12,4 +12,3 @@ Responsibilities:
 - Forward requests and responses.
 - Enforce limits.
 - Expose health and metrics endpoints.
-
