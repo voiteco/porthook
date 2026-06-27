@@ -9,7 +9,8 @@ public HTTP client -> porthook-gateway -> WebSocket tunnel -> porthook agent -> 
 ## Prerequisites
 
 - Go installed.
-- Ports `3000`, `8080`, and `8081` available.
+- Ports `13000`, `18080`, and `18081` available for the automated test.
+- Ports `3000`, `8080`, and `8081` available for the manual steps.
 
 ## Automated Smoke Test
 
@@ -20,6 +21,12 @@ make smoke-local
 ```
 
 The automated smoke test builds local binaries, starts a temporary local HTTP fixture, starts `porthook-gateway`, starts the `porthook` agent, sends a public request through the tunnel, verifies the response body, and cleans up all started processes.
+
+Default automated ports can be overridden with:
+
+- `PORTHOOK_SMOKE_LOCAL_PORT`
+- `PORTHOOK_SMOKE_PUBLIC_PORT`
+- `PORTHOOK_SMOKE_AGENT_PORT`
 
 The manual steps below are useful when debugging the individual processes.
 

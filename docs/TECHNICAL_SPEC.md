@@ -126,9 +126,9 @@ The protocol has two layers:
 
 Control messages are JSON.
 
-Request and response bodies may start as base64-encoded JSON payload chunks for simplicity, but the protocol should move to binary frames once the MVP proves the flow.
+Request and response bodies currently use whole-body JSON payloads for simplicity. The protocol should move to chunked or binary body streaming once the single request path is stable.
 
-Every forwarded HTTP request is assigned a gateway-generated stream ID.
+Every forwarded HTTP request is assigned a stream ID created by the gateway.
 
 ## 8. Message Envelope
 
@@ -136,7 +136,7 @@ Draft JSON envelope:
 
 ```json
 {
-  "type": "http.request.start",
+  "type": "http.request",
   "stream_id": "01J00000000000000000000000",
   "tunnel_id": "tun_123",
   "payload": {}
@@ -214,36 +214,34 @@ Sent by gateway when the tunnel is active.
 Initial HTTP stream message types:
 
 ```text
-http.request.start
-http.request.body
-http.request.end
-http.response.start
-http.response.body
-http.response.end
+http.request
+http.response
 http.stream.error
 ```
 
-### 10.1 Request Start Payload
+### 10.1 Request Payload
 
 ```json
 {
   "method": "POST",
   "path": "/webhook",
   "query": "source=test",
-  "headers": {
+  "header": {
     "content-type": ["application/json"]
-  }
+  },
+  "body": "base64-encoded body in JSON"
 }
 ```
 
-### 10.2 Response Start Payload
+### 10.2 Response Payload
 
 ```json
 {
   "status": 200,
-  "headers": {
+  "header": {
     "content-type": ["application/json"]
-  }
+  },
+  "body": "base64-encoded body in JSON"
 }
 ```
 
@@ -376,7 +374,17 @@ PORTHOOK_AGENT_ADDR=:8081
 PORTHOOK_ROOT_DOMAIN=porthook.example
 PORTHOOK_PUBLIC_URL=https://porthook.example
 PORTHOOK_STATIC_TOKEN=dev-token
-PORTHOOK_LOG_FORMAT=text
+PORTHOOK_MAX_BODY_BYTES=1048576
+PORTHOOK_READ_HEADER_TIMEOUT=5s
+PORTHOOK_READ_TIMEOUT=30s
+PORTHOOK_WRITE_TIMEOUT=35s
+PORTHOOK_IDLE_TIMEOUT=120s
+PORTHOOK_HANDSHAKE_TIMEOUT=10s
+PORTHOOK_STREAM_TIMEOUT=30s
+PORTHOOK_WS_WRITE_TIMEOUT=10s
+PORTHOOK_WS_PING_INTERVAL=15s
+PORTHOOK_WS_PONG_TIMEOUT=5s
+PORTHOOK_SHUTDOWN_TIMEOUT=5s
 ```
 
 Agent environment variables:
@@ -384,10 +392,17 @@ Agent environment variables:
 ```text
 PORTHOOK_SERVER_URL=https://porthook.example
 PORTHOOK_TOKEN=dev-token
-PORTHOOK_LOG_FORMAT=text
+PORTHOOK_HANDSHAKE_TIMEOUT=10s
+PORTHOOK_REQUEST_TIMEOUT=30s
+PORTHOOK_MAX_RESPONSE_BODY_BYTES=1048576
+PORTHOOK_WS_WRITE_TIMEOUT=10s
+PORTHOOK_WS_PING_INTERVAL=15s
+PORTHOOK_WS_PONG_TIMEOUT=5s
 ```
 
 Static token authentication is acceptable for the first proof of concept.
+
+Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
 
 ## 15. Health and Operations
 
@@ -412,6 +427,8 @@ MVP logs should include:
 - Public request completion.
 - Stream errors.
 - Authentication failures.
+- WebSocket keepalive failures.
+- Local agent request completion and failures.
 
 Recommended fields:
 
@@ -419,11 +436,14 @@ Recommended fields:
 timestamp
 level
 component
+outcome
 tunnel_id
 stream_id
 method
 host
 path
+request_bytes
+response_bytes
 status
 duration_ms
 error
@@ -519,4 +539,3 @@ Manual smoke test:
 - Should the first gateway expose one port or separate public and agent ports?
 - Should the root Go module include all components or should modules be split early?
 - Which WebSocket library should be used?
-

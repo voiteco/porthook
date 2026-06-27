@@ -4,7 +4,7 @@ Porthook is an open-source reverse tunnel service for exposing local development
 
 This repository is the public self-hosted product. Private commercial, hosted-cloud, pricing, and operating plans should live in separate private repositories.
 
-Project status: design-stage, pre-alpha.
+Project status: pre-alpha. The local MVP HTTP tunnel prototype is implemented and covered by `make smoke-local`.
 
 ## What It Does
 
@@ -78,7 +78,7 @@ See [docs/REPOSITORY_BOUNDARY.md](./docs/REPOSITORY_BOUNDARY.md) for what belong
 
 ## MVP Scope
 
-The first working release should prove the full tunnel path:
+The current prototype proves the local full tunnel path:
 
 1. A user starts a local HTTP service.
 2. The user runs `porthook http 3000`.
@@ -86,6 +86,12 @@ The first working release should prove the full tunnel path:
 4. The gateway assigns or accepts a subdomain.
 5. Public HTTP requests are forwarded to the local service.
 6. The agent prints request logs and the public URL.
+
+Run the local smoke test from the repository root:
+
+```sh
+make smoke-local
+```
 
 Out of scope for the first MVP:
 
