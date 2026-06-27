@@ -36,7 +36,13 @@ jobs:
         run: make vet
 
       - name: Build binaries
-        run: make build
+        run: make build VERSION=ci
+
+      - name: Run local smoke test
+        run: make smoke-local VERSION=ci-smoke
+
+      - name: Build release binaries
+        run: make release-build VERSION=ci
 
       - name: Validate Docker Compose config
         run: docker compose -f deploy/compose/docker-compose.yml config
