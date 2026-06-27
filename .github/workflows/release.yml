@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.ref_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: make fmt-check
+
+      - name: Run tests
+        run: make test
+
+      - name: Run vet
+        run: make vet
+
+      - name: Run local smoke test
+        run: make smoke-local VERSION="$VERSION"
+
+      - name: Build release binaries
+        run: make release-build VERSION="$VERSION"
+
+      - name: Verify release versions
+        run: |
+          test "$(./dist/porthook_linux_amd64 version)" = "$VERSION"
+          test "$(./dist/porthook-gateway_linux_amd64 version)" = "$VERSION"
+
+      - name: Generate checksums
+        run: make release-checksums
+
+      - name: Validate Docker Compose config
+        run: docker compose -f deploy/compose/docker-compose.yml config
+
+      - name: Build gateway Docker image
+        run: make docker-build-gateway VERSION="$VERSION"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$VERSION" dist/* --title "$VERSION" --generate-notes --prerelease

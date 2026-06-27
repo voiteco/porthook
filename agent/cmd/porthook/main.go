@@ -44,7 +44,7 @@ func run(args []string) error {
 		defer stop()
 
 		return runner.Run(ctx)
-	case "version":
+	case "version", "--version", "-version":
 		fmt.Fprintln(os.Stdout, version)
 		return nil
 	default:

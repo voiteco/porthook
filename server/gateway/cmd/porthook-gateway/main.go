@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,7 +17,24 @@ import (
 var version = "dev"
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	if err := run(os.Args[1:], os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run(args []string, stdout io.Writer) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "version", "--version", "-version":
+			fmt.Fprintln(stdout, version)
+			return nil
+		default:
+			return fmt.Errorf("usage: porthook-gateway [version|--version]")
+		}
+	}
+
+	logger := slog.New(slog.NewTextHandler(stdout, nil))
 	cfg := gateway.ConfigFromEnv()
 
 	server := gateway.NewServer(cfg, logger)
@@ -27,6 +46,7 @@ func main() {
 
 	if err := server.Run(ctx); err != nil {
 		logger.Error("gateway stopped", "error", err)
-		os.Exit(1)
+		return err
 	}
+	return nil
 }
