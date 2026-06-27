@@ -11,6 +11,18 @@ public HTTP client -> porthook-gateway -> WebSocket tunnel -> porthook agent -> 
 - Go installed.
 - Ports `3000`, `8080`, and `8081` available.
 
+## Automated Smoke Test
+
+From the repository root:
+
+```sh
+make smoke-local
+```
+
+The automated smoke test builds local binaries, starts a temporary local HTTP fixture, starts `porthook-gateway`, starts the `porthook` agent, sends a public request through the tunnel, verifies the response body, and cleans up all started processes.
+
+The manual steps below are useful when debugging the individual processes.
+
 ## 1. Start a Local HTTP Service
 
 From the repository root:

@@ -5,7 +5,7 @@ VERSION ?= dev
 LDFLAGS ?= -s -w -X main.version=$(VERSION)
 RELEASE_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: build clean docker-build docker-build-gateway fmt fmt-check release-build test vet
+.PHONY: build clean docker-build docker-build-gateway fmt fmt-check release-build smoke-local test vet
 
 build:
 	mkdir -p $(BIN_DIR)
@@ -34,6 +34,9 @@ release-build:
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook_$${os}_$${arch} ./agent/cmd/porthook; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook-gateway_$${os}_$${arch} ./server/gateway/cmd/porthook-gateway; \
 	done
+
+smoke-local:
+	VERSION=$(VERSION) ./scripts/smoke-local.sh
 
 test:
 	$(GO) test ./...
