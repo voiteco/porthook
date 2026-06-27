@@ -126,7 +126,7 @@ The protocol has two layers:
 
 Control messages are JSON.
 
-Request and response bodies currently use whole-body JSON payloads for simplicity. The protocol should move to chunked or binary body streaming once the single request path is stable.
+HTTP request and response bodies use chunked JSON stream messages. The gateway and agent still understand the original whole-body `http.request` and `http.response` messages for compatibility, but the public forwarding path uses `start/body/end` frames.
 
 Every forwarded HTTP request is assigned a stream ID created by the gateway.
 
@@ -215,38 +215,55 @@ Initial HTTP stream message types:
 
 ```text
 http.request
+http.request.start
+http.request.body
+http.request.end
 http.response
+http.response.start
+http.response.body
+http.response.end
 http.stream.error
 http.stream.cancel
 ```
 
-### 10.1 Request Payload
+### 10.1 Request Start Payload
 
 ```json
 {
   "method": "POST",
   "path": "/webhook",
   "query": "source=test",
-  "header": {
+  "headers": {
     "content-type": ["application/json"]
   },
-  "body": "base64-encoded body in JSON"
+  "content_length": 123
 }
 ```
 
-### 10.2 Response Payload
+### 10.2 Body Chunk Payload
+
+Used by `http.request.body` and `http.response.body`.
+
+```json
+{
+  "data": "base64-encoded body chunk in JSON"
+}
+```
+
+`http.request.end` and `http.response.end` use an empty payload.
+
+### 10.3 Response Start Payload
 
 ```json
 {
   "status": 200,
-  "header": {
+  "headers": {
     "content-type": ["application/json"]
-  },
-  "body": "base64-encoded body in JSON"
+  }
 }
 ```
 
-### 10.3 Stream Cancel Payload
+### 10.4 Stream Cancel Payload
 
 Sent by the gateway when a public request no longer needs a local response.
 
@@ -390,6 +407,7 @@ PORTHOOK_PUBLIC_URL=https://porthook.example
 PORTHOOK_STATIC_TOKEN=dev-token
 PORTHOOK_MAX_BODY_BYTES=1048576
 PORTHOOK_MAX_CONCURRENT_STREAMS=64
+PORTHOOK_STREAM_CHUNK_BYTES=32768
 PORTHOOK_READ_HEADER_TIMEOUT=5s
 PORTHOOK_READ_TIMEOUT=30s
 PORTHOOK_WRITE_TIMEOUT=35s
@@ -410,6 +428,7 @@ PORTHOOK_TOKEN=dev-token
 PORTHOOK_HANDSHAKE_TIMEOUT=10s
 PORTHOOK_REQUEST_TIMEOUT=30s
 PORTHOOK_MAX_RESPONSE_BODY_BYTES=1048576
+PORTHOOK_STREAM_CHUNK_BYTES=32768
 PORTHOOK_WS_WRITE_TIMEOUT=10s
 PORTHOOK_WS_PING_INTERVAL=15s
 PORTHOOK_WS_PONG_TIMEOUT=5s

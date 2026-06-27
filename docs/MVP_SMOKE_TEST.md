@@ -92,6 +92,6 @@ Expected result:
 
 ## Notes
 
-The MVP uses whole-body JSON messages over WebSocket. It is intentionally simple and should be replaced with chunked or binary body streaming after the single request path is stable.
+The MVP uses JSON messages over WebSocket with chunked `start/body/end` frames for HTTP bodies. The current transport is intentionally simple and can move to binary chunks later without changing the public CLI flow.
 
 The Docker Compose path is documented in [../deploy/compose/README.md](../deploy/compose/README.md).

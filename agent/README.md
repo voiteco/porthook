@@ -33,6 +33,7 @@ CLI flags take precedence for the command they configure. Environment variables 
 | `PORTHOOK_HANDSHAKE_TIMEOUT` | `10s` | WebSocket dial, authentication, and tunnel registration timeout. |
 | `PORTHOOK_REQUEST_TIMEOUT` | `30s` | Local service request timeout. |
 | `PORTHOOK_MAX_RESPONSE_BODY_BYTES` | `1048576` | Maximum local response body sent through the tunnel. |
+| `PORTHOOK_STREAM_CHUNK_BYTES` | `32768` | Maximum HTTP body chunk size for tunnel messages. |
 | `PORTHOOK_WS_WRITE_TIMEOUT` | `10s` | WebSocket message write timeout. |
 | `PORTHOOK_WS_PING_INTERVAL` | `15s` | WebSocket keepalive ping interval. |
 | `PORTHOOK_WS_PONG_TIMEOUT` | `5s` | WebSocket keepalive pong timeout. |

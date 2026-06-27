@@ -272,7 +272,13 @@ Initial control messages:
 - `tunnel.registered`
 - `tunnel.error`
 - `http.request`
+- `http.request.start`
+- `http.request.body`
+- `http.request.end`
 - `http.response`
+- `http.response.start`
+- `http.response.body`
+- `http.response.end`
 - `http.stream.error`
 - `http.stream.cancel`
 - `ping`
