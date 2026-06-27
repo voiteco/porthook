@@ -77,3 +77,20 @@ func TestNewStreamCancel(t *testing.T) {
 		t.Fatalf("reason = %q, want client canceled", payload.Reason)
 	}
 }
+
+func TestStreamingMessageTypeValues(t *testing.T) {
+	tests := map[Type]string{
+		TypeHTTPRequestStart:  "http.request.start",
+		TypeHTTPRequestBody:   "http.request.body",
+		TypeHTTPRequestEnd:    "http.request.end",
+		TypeHTTPResponseStart: "http.response.start",
+		TypeHTTPResponseBody:  "http.response.body",
+		TypeHTTPResponseEnd:   "http.response.end",
+	}
+
+	for got, want := range tests {
+		if string(got) != want {
+			t.Fatalf("type = %q, want %q", got, want)
+		}
+	}
+}

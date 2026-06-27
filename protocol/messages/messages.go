@@ -11,18 +11,24 @@ import (
 type Type string
 
 const (
-	TypeAuthRequest      Type = "auth.request"
-	TypeAuthOK           Type = "auth.ok"
-	TypeAuthError        Type = "auth.error"
-	TypeTunnelRegister   Type = "tunnel.register"
-	TypeTunnelRegistered Type = "tunnel.registered"
-	TypeTunnelError      Type = "tunnel.error"
-	TypePing             Type = "ping"
-	TypePong             Type = "pong"
-	TypeHTTPRequest      Type = "http.request"
-	TypeHTTPResponse     Type = "http.response"
-	TypeHTTPStreamError  Type = "http.stream.error"
-	TypeHTTPStreamCancel Type = "http.stream.cancel"
+	TypeAuthRequest       Type = "auth.request"
+	TypeAuthOK            Type = "auth.ok"
+	TypeAuthError         Type = "auth.error"
+	TypeTunnelRegister    Type = "tunnel.register"
+	TypeTunnelRegistered  Type = "tunnel.registered"
+	TypeTunnelError       Type = "tunnel.error"
+	TypePing              Type = "ping"
+	TypePong              Type = "pong"
+	TypeHTTPRequest       Type = "http.request"
+	TypeHTTPRequestStart  Type = "http.request.start"
+	TypeHTTPRequestBody   Type = "http.request.body"
+	TypeHTTPRequestEnd    Type = "http.request.end"
+	TypeHTTPResponse      Type = "http.response"
+	TypeHTTPResponseStart Type = "http.response.start"
+	TypeHTTPResponseBody  Type = "http.response.body"
+	TypeHTTPResponseEnd   Type = "http.response.end"
+	TypeHTTPStreamError   Type = "http.stream.error"
+	TypeHTTPStreamCancel  Type = "http.stream.cancel"
 )
 
 type Envelope struct {
