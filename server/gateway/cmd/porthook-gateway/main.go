@@ -12,6 +12,8 @@ import (
 	"github.com/voiteco/porthook/server/gateway/internal/gateway"
 )
 
+var version = "dev"
+
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	cfg := gateway.ConfigFromEnv()
@@ -20,6 +22,8 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	logger.Info("starting gateway", "version", version)
 
 	if err := server.Run(ctx); err != nil {
 		logger.Error("gateway stopped", "error", err)

@@ -4,6 +4,7 @@ FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS build
 
 ARG TARGETOS=linux
 ARG TARGETARCH
+ARG VERSION=dev
 
 WORKDIR /src
 
@@ -15,7 +16,7 @@ RUN target_os="${TARGETOS:-linux}"; \
     target_arch="${TARGETARCH:-$(go env GOARCH)}"; \
     CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go build \
       -trimpath \
-      -ldflags="-s -w" \
+      -ldflags="-s -w -X main.version=$VERSION" \
       -o /out/porthook-gateway \
       ./server/gateway/cmd/porthook-gateway
 

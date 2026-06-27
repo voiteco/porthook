@@ -1,18 +1,22 @@
 GO ?= go
 BIN_DIR ?= bin
+DIST_DIR ?= dist
+VERSION ?= dev
+LDFLAGS ?= -s -w -X main.version=$(VERSION)
+RELEASE_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: build clean docker-build docker-build-gateway fmt fmt-check test vet
+.PHONY: build clean docker-build docker-build-gateway fmt fmt-check release-build test vet
 
 build:
 	mkdir -p $(BIN_DIR)
-	$(GO) build -o $(BIN_DIR)/porthook ./agent/cmd/porthook
-	$(GO) build -o $(BIN_DIR)/porthook-gateway ./server/gateway/cmd/porthook-gateway
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/porthook ./agent/cmd/porthook
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/porthook-gateway ./server/gateway/cmd/porthook-gateway
 
 clean:
-	rm -rf $(BIN_DIR)
+	rm -rf $(BIN_DIR) $(DIST_DIR)
 
 docker-build-gateway:
-	docker build -f server/gateway/Dockerfile -t porthook-gateway:dev .
+	docker build --build-arg VERSION=$(VERSION) -f server/gateway/Dockerfile -t porthook-gateway:dev .
 
 docker-build: docker-build-gateway
 
@@ -21,6 +25,15 @@ fmt:
 
 fmt-check:
 	test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './.git/*'))"
+
+release-build:
+	mkdir -p $(DIST_DIR)
+	set -eu; for target in $(RELEASE_TARGETS); do \
+		os=$${target%/*}; \
+		arch=$${target#*/}; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook_$${os}_$${arch} ./agent/cmd/porthook; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook-gateway_$${os}_$${arch} ./server/gateway/cmd/porthook-gateway; \
+	done
 
 test:
 	$(GO) test ./...
