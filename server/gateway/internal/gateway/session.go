@@ -82,6 +82,45 @@ func (s *agentSession) write(ctx context.Context, env messages.Envelope) error {
 	return wsjson.Write(writeCtx, s.conn, env)
 }
 
+func (s *agentSession) ping(ctx context.Context, timeout time.Duration) error {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	pingCtx, cancel := contextWithTimeout(ctx, timeout)
+	defer cancel()
+	return s.conn.Ping(pingCtx)
+}
+
+func (s *agentSession) startKeepalive(ctx context.Context, interval, timeout time.Duration, logger *slog.Logger) func() {
+	if interval <= 0 {
+		return func() {}
+	}
+
+	keepaliveCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-keepaliveCtx.Done():
+				return
+			case <-ticker.C:
+				if err := s.ping(keepaliveCtx, timeout); err != nil {
+					logger.Warn("agent websocket keepalive failed",
+						"tunnel_id", s.tunnel.TunnelID,
+						"subdomain", s.tunnel.Subdomain,
+						"error", err,
+					)
+					_ = s.close(websocket.StatusGoingAway, "websocket keepalive failed")
+					return
+				}
+			}
+		}
+	}()
+
+	return cancel
+}
+
 func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 	defer s.closeDone()
 

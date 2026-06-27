@@ -155,6 +155,9 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		"local_target", session.tunnel.LocalTarget,
 	)
 
+	stopKeepalive := session.startKeepalive(r.Context(), s.cfg.WebSocketPingInterval, s.cfg.WebSocketPongTimeout, s.logger)
+	defer stopKeepalive()
+
 	session.readLoop(r.Context(), s.logger)
 }
 

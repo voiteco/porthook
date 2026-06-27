@@ -77,6 +77,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	fmt.Fprintln(r.output, "Tunnel established")
 	fmt.Fprintf(r.output, "Forwarding: %s -> %s\n", registered.PublicURL, r.cfg.LocalTarget)
 
+	stopKeepalive := r.startKeepalive(ctx, conn, registered.TunnelID)
+	defer stopKeepalive()
+
 	return r.serve(ctx, conn, registered.TunnelID)
 }
 
@@ -240,6 +243,41 @@ func (r *Runner) write(ctx context.Context, conn *websocket.Conn, env messages.E
 	writeCtx, cancel := contextWithTimeout(ctx, r.cfg.WebSocketWriteTimeout)
 	defer cancel()
 	return wsjson.Write(writeCtx, conn, env)
+}
+
+func (r *Runner) ping(ctx context.Context, conn *websocket.Conn) error {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+	pingCtx, cancel := contextWithTimeout(ctx, r.cfg.WebSocketPongTimeout)
+	defer cancel()
+	return conn.Ping(pingCtx)
+}
+
+func (r *Runner) startKeepalive(ctx context.Context, conn *websocket.Conn, tunnelID string) func() {
+	if r.cfg.WebSocketPingInterval <= 0 {
+		return func() {}
+	}
+
+	keepaliveCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(r.cfg.WebSocketPingInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-keepaliveCtx.Done():
+				return
+			case <-ticker.C:
+				if err := r.ping(keepaliveCtx, conn); err != nil {
+					r.logger.Warn("gateway websocket keepalive failed", "tunnel_id", tunnelID, "error", err)
+					_ = conn.Close(websocket.StatusGoingAway, "websocket keepalive failed")
+					return
+				}
+			}
+		}
+	}()
+
+	return cancel
 }
 
 func contextWithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
