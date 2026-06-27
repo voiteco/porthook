@@ -38,7 +38,9 @@ release-build:
 release-checksums:
 	cd $(DIST_DIR) && set -eu; \
 	files="$$(printf '%s\n' porthook-gateway_* porthook_* | sort)"; \
-	if command -v sha256sum >/dev/null 2>&1; then \
+	if [ "$$(uname -s)" = "Darwin" ]; then \
+		shasum -a 256 $$files > SHA256SUMS; \
+	elif command -v sha256sum >/dev/null 2>&1; then \
 		sha256sum $$files > SHA256SUMS; \
 	else \
 		shasum -a 256 $$files > SHA256SUMS; \
