@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -19,6 +21,13 @@ import (
 )
 
 var ErrStreamLimitExceeded = errors.New("tunnel stream limit exceeded")
+var ErrRequestBodyTooLarge = errors.New("request body too large")
+
+type streamRoundTripResult struct {
+	Status        int
+	RequestBytes  int64
+	ResponseBytes int64
+}
 
 type agentSession struct {
 	conn     *websocket.Conn
@@ -88,6 +97,202 @@ func (s *agentSession) roundTrip(ctx context.Context, streamID string, req httpw
 	}
 }
 
+func (s *agentSession) streamRoundTrip(
+	ctx context.Context,
+	streamID string,
+	req httpwire.RequestStart,
+	body io.Reader,
+	maxBodyBytes int64,
+	chunkBytes int,
+	writeResponseStart func(httpwire.ResponseStart),
+	writeResponseBody func([]byte) (int, error),
+) (streamRoundTripResult, error) {
+	if err := s.acquireStream(); err != nil {
+		return streamRoundTripResult{}, err
+	}
+	defer s.releaseStream()
+
+	ch := make(chan messages.Envelope, 32)
+	s.addPending(streamID, ch)
+	defer s.removePending(streamID)
+
+	start, err := messages.NewStream(messages.TypeHTTPRequestStart, streamID, s.tunnel.TunnelID, req)
+	if err != nil {
+		return streamRoundTripResult{}, err
+	}
+	if err := s.write(ctx, start); err != nil {
+		return streamRoundTripResult{}, fmt.Errorf("write request start: %w", err)
+	}
+
+	result := streamRoundTripResult{}
+	result.RequestBytes, err = s.writeRequestBody(ctx, streamID, body, maxBodyBytes, chunkBytes)
+	if err != nil {
+		_ = s.cancelStream(context.Background(), streamID, streamCancelReasonForError(err))
+		return result, err
+	}
+
+	end, err := messages.NewStream(messages.TypeHTTPRequestEnd, streamID, s.tunnel.TunnelID, nil)
+	if err != nil {
+		return result, err
+	}
+	if err := s.write(ctx, end); err != nil {
+		return result, fmt.Errorf("write request end: %w", err)
+	}
+
+	result, err = s.readStreamResponse(ctx, streamID, ch, chunkBytes, writeResponseStart, writeResponseBody, result)
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		_ = s.cancelStream(context.Background(), streamID, streamCancelReasonForError(err))
+	}
+	return result, err
+}
+
+func (s *agentSession) writeRequestBody(ctx context.Context, streamID string, body io.Reader, maxBodyBytes int64, chunkBytes int) (int64, error) {
+	if body == nil {
+		return 0, nil
+	}
+	if maxBodyBytes <= 0 {
+		maxBodyBytes = defaultMaxBodyBytes
+	}
+	if chunkBytes <= 0 {
+		chunkBytes = defaultStreamChunkBytes
+	}
+
+	buf := make([]byte, chunkBytes)
+	var sent int64
+	for {
+		n, readErr := body.Read(buf)
+		if n > 0 {
+			sent += int64(n)
+			if sent > maxBodyBytes {
+				return sent, ErrRequestBodyTooLarge
+			}
+			chunk := append([]byte(nil), buf[:n]...)
+			env, err := messages.NewStream(messages.TypeHTTPRequestBody, streamID, s.tunnel.TunnelID, httpwire.BodyChunk{
+				Data: chunk,
+			})
+			if err != nil {
+				return sent, err
+			}
+			if err := s.write(ctx, env); err != nil {
+				return sent, fmt.Errorf("write request body: %w", err)
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return sent, nil
+			}
+			return sent, fmt.Errorf("read public request body: %w", readErr)
+		}
+	}
+}
+
+func (s *agentSession) readStreamResponse(
+	ctx context.Context,
+	streamID string,
+	ch <-chan messages.Envelope,
+	chunkBytes int,
+	writeResponseStart func(httpwire.ResponseStart),
+	writeResponseBody func([]byte) (int, error),
+	result streamRoundTripResult,
+) (streamRoundTripResult, error) {
+	if chunkBytes <= 0 {
+		chunkBytes = defaultStreamChunkBytes
+	}
+
+	responseStarted := false
+	for {
+		select {
+		case <-ctx.Done():
+			_ = s.cancelStream(context.Background(), streamID, streamCancelReason(ctx.Err()))
+			return result, ctx.Err()
+		case <-s.done:
+			return result, errors.New("agent disconnected")
+		case respEnv := <-ch:
+			switch respEnv.Type {
+			case messages.TypeHTTPResponseStart:
+				resp, err := messages.DecodePayload[httpwire.ResponseStart](respEnv)
+				if err != nil {
+					return result, err
+				}
+				if resp.Status <= 0 {
+					resp.Status = http.StatusBadGateway
+				}
+				result.Status = resp.Status
+				responseStarted = true
+				writeResponseStart(resp)
+			case messages.TypeHTTPResponseBody:
+				if !responseStarted {
+					return result, errors.New("response body received before response start")
+				}
+				chunk, err := messages.DecodePayload[httpwire.BodyChunk](respEnv)
+				if err != nil {
+					return result, err
+				}
+				if len(chunk.Data) > chunkBytes {
+					return result, fmt.Errorf("response chunk exceeds %d bytes", chunkBytes)
+				}
+				n, err := writeResponseBody(chunk.Data)
+				result.ResponseBytes += int64(n)
+				if err != nil {
+					return result, err
+				}
+				if n != len(chunk.Data) {
+					return result, io.ErrShortWrite
+				}
+			case messages.TypeHTTPResponseEnd:
+				if !responseStarted {
+					resp := httpwire.ResponseStart{Status: http.StatusOK}
+					result.Status = resp.Status
+					writeResponseStart(resp)
+				}
+				return result, nil
+			case messages.TypeHTTPResponse:
+				return s.handleWholeResponse(respEnv, writeResponseStart, writeResponseBody, result)
+			case messages.TypeHTTPStreamError:
+				payload, err := messages.DecodePayload[messages.ErrorPayload](respEnv)
+				if err != nil {
+					return result, err
+				}
+				return result, errors.New(payload.Message)
+			default:
+				return result, fmt.Errorf("unexpected response message %s", respEnv.Type)
+			}
+		}
+	}
+}
+
+func (s *agentSession) handleWholeResponse(
+	respEnv messages.Envelope,
+	writeResponseStart func(httpwire.ResponseStart),
+	writeResponseBody func([]byte) (int, error),
+	result streamRoundTripResult,
+) (streamRoundTripResult, error) {
+	resp, err := messages.DecodePayload[httpwire.Response](respEnv)
+	if err != nil {
+		return result, err
+	}
+	if resp.Status <= 0 {
+		resp.Status = http.StatusBadGateway
+	}
+	result.Status = resp.Status
+	writeResponseStart(httpwire.ResponseStart{
+		Status: resp.Status,
+		Header: resp.Header,
+	})
+	if len(resp.Body) == 0 {
+		return result, nil
+	}
+	n, err := writeResponseBody(resp.Body)
+	result.ResponseBytes += int64(n)
+	if err != nil {
+		return result, err
+	}
+	if n != len(resp.Body) {
+		return result, io.ErrShortWrite
+	}
+	return result, nil
+}
+
 func (s *agentSession) acquireStream() error {
 	select {
 	case <-s.done:
@@ -135,6 +340,17 @@ func streamCancelReason(err error) string {
 		return "public request canceled"
 	default:
 		return "gateway stream canceled"
+	}
+}
+
+func streamCancelReasonForError(err error) string {
+	switch {
+	case errors.Is(err, ErrRequestBodyTooLarge):
+		return "public request body too large"
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return streamCancelReason(err)
+	default:
+		return "gateway stream failed"
 	}
 }
 
@@ -206,7 +422,11 @@ func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 				logger.Warn("write pong failed", "tunnel_id", s.tunnel.TunnelID, "error", err)
 				return
 			}
-		case messages.TypeHTTPResponse, messages.TypeHTTPStreamError:
+		case messages.TypeHTTPResponse,
+			messages.TypeHTTPResponseStart,
+			messages.TypeHTTPResponseBody,
+			messages.TypeHTTPResponseEnd,
+			messages.TypeHTTPStreamError:
 			if !s.deliver(env) {
 				logger.Warn("received response for unknown stream", "tunnel_id", s.tunnel.TunnelID, "stream_id", env.StreamID)
 			}

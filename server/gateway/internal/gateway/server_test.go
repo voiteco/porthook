@@ -220,21 +220,12 @@ func TestPublicRequestRoundTrip(t *testing.T) {
 
 	agentErr := make(chan error, 1)
 	go func() {
-		var reqEnv messages.Envelope
-		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
-			agentErr <- err
-			return
-		}
-		if reqEnv.Type != messages.TypeHTTPRequest {
-			agentErr <- errUnexpectedType(reqEnv.Type, messages.TypeHTTPRequest)
-			return
-		}
-
-		payload, err := messages.DecodePayload[httpwire.Request](reqEnv)
+		reqEnv, payload, body, err := readStreamedRequest(ctx, conn)
 		if err != nil {
 			agentErr <- err
 			return
 		}
+
 		if payload.Method != http.MethodPost {
 			agentErr <- errString("method was not forwarded")
 			return
@@ -251,24 +242,20 @@ func TestPublicRequestRoundTrip(t *testing.T) {
 			agentErr <- errString("tunnel header was not added")
 			return
 		}
-		if string(payload.Body) != "payload" {
+		if string(body) != "payload" {
 			agentErr <- errString("request body was not forwarded")
 			return
 		}
 
-		resp, err := messages.NewStream(messages.TypeHTTPResponse, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+		resp := httpwire.Response{
 			Status: http.StatusAccepted,
 			Header: http.Header{
 				"Content-Type": []string{"text/plain"},
 				"Connection":   []string{"close"},
 			},
 			Body: []byte("via-agent"),
-		})
-		if err != nil {
-			agentErr <- err
-			return
 		}
-		if err := wsjson.Write(ctx, conn, resp); err != nil {
+		if err := writeStreamedResponse(ctx, conn, reqEnv.StreamID, reqEnv.TunnelID, resp); err != nil {
 			agentErr <- err
 			return
 		}
@@ -367,8 +354,8 @@ func TestPublicRequestMapsStreamErrorToBadGateway(t *testing.T) {
 
 	agentErr := make(chan error, 1)
 	go func() {
-		var reqEnv messages.Envelope
-		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
 			agentErr <- err
 			return
 		}
@@ -425,13 +412,8 @@ func TestPublicRequestTimesOutWaitingForAgent(t *testing.T) {
 
 	agentErr := make(chan error, 1)
 	go func() {
-		var reqEnv messages.Envelope
-		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
+		if _, _, _, err := readStreamedRequest(ctx, conn); err != nil {
 			agentErr <- err
-			return
-		}
-		if reqEnv.Type != messages.TypeHTTPRequest {
-			agentErr <- errUnexpectedType(reqEnv.Type, messages.TypeHTTPRequest)
 			return
 		}
 		agentErr <- nil
@@ -485,13 +467,9 @@ func TestPublicRequestTimeoutSendsStreamCancel(t *testing.T) {
 
 	agentErr := make(chan error, 1)
 	go func() {
-		var reqEnv messages.Envelope
-		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
 			agentErr <- err
-			return
-		}
-		if reqEnv.Type != messages.TypeHTTPRequest {
-			agentErr <- errUnexpectedType(reqEnv.Type, messages.TypeHTTPRequest)
 			return
 		}
 
@@ -564,13 +542,9 @@ func TestPublicRequestRejectsWhenStreamLimitExceeded(t *testing.T) {
 	agentErr := make(chan error, 1)
 	releaseFirst := make(chan struct{})
 	go func() {
-		var reqEnv messages.Envelope
-		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
 			agentErr <- err
-			return
-		}
-		if reqEnv.Type != messages.TypeHTTPRequest {
-			agentErr <- errUnexpectedType(reqEnv.Type, messages.TypeHTTPRequest)
 			return
 		}
 		firstRequest <- reqEnv
@@ -582,15 +556,11 @@ func TestPublicRequestRejectsWhenStreamLimitExceeded(t *testing.T) {
 			return
 		}
 
-		resp, err := messages.NewStream(messages.TypeHTTPResponse, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+		resp := httpwire.Response{
 			Status: http.StatusOK,
 			Body:   []byte("first-ok"),
-		})
-		if err != nil {
-			agentErr <- err
-			return
 		}
-		agentErr <- wsjson.Write(ctx, conn, resp)
+		agentErr <- writeStreamedResponse(ctx, conn, reqEnv.StreamID, reqEnv.TunnelID, resp)
 	}()
 
 	firstDone := make(chan *http.Response, 1)
@@ -860,16 +830,85 @@ func errUnexpectedType(got, want messages.Type) error {
 	return errString("unexpected message type " + string(got) + ", want " + string(want))
 }
 
+func readStreamedRequest(ctx context.Context, conn *websocket.Conn) (messages.Envelope, httpwire.RequestStart, []byte, error) {
+	var startEnv messages.Envelope
+	if err := wsjson.Read(ctx, conn, &startEnv); err != nil {
+		return messages.Envelope{}, httpwire.RequestStart{}, nil, err
+	}
+	if startEnv.Type != messages.TypeHTTPRequestStart {
+		return messages.Envelope{}, httpwire.RequestStart{}, nil, errUnexpectedType(startEnv.Type, messages.TypeHTTPRequestStart)
+	}
+
+	start, err := messages.DecodePayload[httpwire.RequestStart](startEnv)
+	if err != nil {
+		return messages.Envelope{}, httpwire.RequestStart{}, nil, err
+	}
+
+	var body bytes.Buffer
+	for {
+		var env messages.Envelope
+		if err := wsjson.Read(ctx, conn, &env); err != nil {
+			return messages.Envelope{}, httpwire.RequestStart{}, nil, err
+		}
+		if env.StreamID != startEnv.StreamID {
+			return messages.Envelope{}, httpwire.RequestStart{}, nil, errString("stream id changed while reading request")
+		}
+
+		switch env.Type {
+		case messages.TypeHTTPRequestBody:
+			chunk, err := messages.DecodePayload[httpwire.BodyChunk](env)
+			if err != nil {
+				return messages.Envelope{}, httpwire.RequestStart{}, nil, err
+			}
+			body.Write(chunk.Data)
+		case messages.TypeHTTPRequestEnd:
+			return startEnv, start, body.Bytes(), nil
+		default:
+			return messages.Envelope{}, httpwire.RequestStart{}, nil, errUnexpectedType(env.Type, messages.TypeHTTPRequestBody)
+		}
+	}
+}
+
+func writeStreamedResponse(ctx context.Context, conn *websocket.Conn, streamID, tunnelID string, resp httpwire.Response) error {
+	start, err := messages.NewStream(messages.TypeHTTPResponseStart, streamID, tunnelID, httpwire.ResponseStart{
+		Status: resp.Status,
+		Header: resp.Header,
+	})
+	if err != nil {
+		return err
+	}
+	if err := wsjson.Write(ctx, conn, start); err != nil {
+		return err
+	}
+	if len(resp.Body) > 0 {
+		body, err := messages.NewStream(messages.TypeHTTPResponseBody, streamID, tunnelID, httpwire.BodyChunk{
+			Data: resp.Body,
+		})
+		if err != nil {
+			return err
+		}
+		if err := wsjson.Write(ctx, conn, body); err != nil {
+			return err
+		}
+	}
+	end, err := messages.NewStream(messages.TypeHTTPResponseEnd, streamID, tunnelID, nil)
+	if err != nil {
+		return err
+	}
+	return wsjson.Write(ctx, conn, end)
+}
+
 func testConfig() Config {
 	return Config{
-		PublicAddr:      ":8080",
-		AgentAddr:       ":8081",
-		RootDomain:      "localhost",
-		PublicURL:       "http://localhost:8080",
-		StaticToken:     "dev-token",
-		MaxBodyBytes:    defaultMaxBodyBytes,
-		StreamTimeout:   defaultStreamTimeout,
-		ShutdownTimeout: defaultShutdownTimeout,
+		PublicAddr:       ":8080",
+		AgentAddr:        ":8081",
+		RootDomain:       "localhost",
+		PublicURL:        "http://localhost:8080",
+		StaticToken:      "dev-token",
+		MaxBodyBytes:     defaultMaxBodyBytes,
+		StreamChunkBytes: defaultStreamChunkBytes,
+		StreamTimeout:    defaultStreamTimeout,
+		ShutdownTimeout:  defaultShutdownTimeout,
 	}
 }
 

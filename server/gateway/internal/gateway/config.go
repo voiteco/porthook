@@ -16,6 +16,7 @@ const (
 	defaultStaticToken           = "dev-token"
 	defaultMaxBodyBytes          = 1 << 20
 	defaultMaxConcurrentStreams  = 64
+	defaultStreamChunkBytes      = 32 << 10
 	defaultReadHeaderTimeout     = 5 * time.Second
 	defaultReadTimeout           = 30 * time.Second
 	defaultWriteTimeout          = 35 * time.Second
@@ -36,6 +37,7 @@ type Config struct {
 	StaticToken           string
 	MaxBodyBytes          int64
 	MaxConcurrentStreams  int
+	StreamChunkBytes      int
 	ReadHeaderTimeout     time.Duration
 	ReadTimeout           time.Duration
 	WriteTimeout          time.Duration
@@ -57,6 +59,7 @@ func ConfigFromEnv() Config {
 		StaticToken:           envString("PORTHOOK_STATIC_TOKEN", defaultStaticToken),
 		MaxBodyBytes:          envInt64("PORTHOOK_MAX_BODY_BYTES", defaultMaxBodyBytes),
 		MaxConcurrentStreams:  envInt("PORTHOOK_MAX_CONCURRENT_STREAMS", defaultMaxConcurrentStreams),
+		StreamChunkBytes:      envInt("PORTHOOK_STREAM_CHUNK_BYTES", defaultStreamChunkBytes),
 		ReadHeaderTimeout:     envDuration("PORTHOOK_READ_HEADER_TIMEOUT", defaultReadHeaderTimeout),
 		ReadTimeout:           envDuration("PORTHOOK_READ_TIMEOUT", defaultReadTimeout),
 		WriteTimeout:          envDuration("PORTHOOK_WRITE_TIMEOUT", defaultWriteTimeout),
@@ -91,6 +94,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.MaxConcurrentStreams <= 0 {
 		cfg.MaxConcurrentStreams = defaultMaxConcurrentStreams
+	}
+	if cfg.StreamChunkBytes <= 0 {
+		cfg.StreamChunkBytes = defaultStreamChunkBytes
 	}
 	if cfg.ReadHeaderTimeout <= 0 {
 		cfg.ReadHeaderTimeout = defaultReadHeaderTimeout

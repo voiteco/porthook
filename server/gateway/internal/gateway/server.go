@@ -360,6 +360,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	var requestBytes int64
 	var responseBytes int64
 	var requestErr error
+	var err error
 	defer func() {
 		if status == 0 {
 			status = http.StatusInternalServerError
@@ -394,17 +395,6 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	tunnelID = session.tunnel.TunnelID
 
-	body, err := readLimitedBody(w, r, s.cfg.MaxBodyBytes)
-	if err != nil {
-		status = http.StatusRequestEntityTooLarge
-		outcome = "request_body_too_large"
-		requestErr = err
-		requestBytes = requestContentLength(r, s.cfg.MaxBodyBytes+1)
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-	requestBytes = int64(len(body))
-
 	streamID, err = newStreamID()
 	if err != nil {
 		status = http.StatusInternalServerError
@@ -423,18 +413,56 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		remoteIP(r.RemoteAddr),
 	)
 
-	tunnelRequest := httpwire.Request{
-		Method: r.Method,
-		Path:   r.URL.Path,
-		Query:  r.URL.RawQuery,
-		Header: requestHeader,
-		Body:   body,
+	contentLength := r.ContentLength
+	if contentLength < 0 {
+		contentLength = 0
 	}
+	tunnelRequest := httpwire.RequestStart{
+		Method:        r.Method,
+		Path:          r.URL.Path,
+		Query:         r.URL.RawQuery,
+		Header:        requestHeader,
+		ContentLength: contentLength,
+	}
+	defer r.Body.Close()
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.StreamTimeout)
 	defer cancel()
 
-	tunnelResponse, err := session.roundTrip(ctx, streamID, tunnelRequest)
+	responseStarted := false
+	writeResponseStart := func(tunnelResponse httpwire.ResponseStart) {
+		for name, values := range httpwire.StripHopByHopHeaders(tunnelResponse.Header) {
+			for _, value := range values {
+				w.Header().Add(name, value)
+			}
+		}
+		if tunnelResponse.Status <= 0 {
+			tunnelResponse.Status = http.StatusBadGateway
+		}
+		status = tunnelResponse.Status
+		responseStarted = true
+		w.WriteHeader(tunnelResponse.Status)
+	}
+	writeResponseBody := func(chunk []byte) (int, error) {
+		n, err := w.Write(chunk)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		return n, err
+	}
+
+	result, err := session.streamRoundTrip(
+		ctx,
+		streamID,
+		tunnelRequest,
+		r.Body,
+		s.cfg.MaxBodyBytes,
+		s.cfg.StreamChunkBytes,
+		writeResponseStart,
+		writeResponseBody,
+	)
+	requestBytes = result.RequestBytes
+	responseBytes = result.ResponseBytes
 	if err != nil {
 		requestErr = err
 		switch {
@@ -443,35 +471,39 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 			outcome = "stream_limit_exceeded"
 			http.Error(w, "tunnel overloaded", http.StatusServiceUnavailable)
 			return
+		case errors.Is(err, ErrRequestBodyTooLarge):
+			status = http.StatusRequestEntityTooLarge
+			outcome = "request_body_too_large"
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
 		case errors.Is(err, context.DeadlineExceeded):
-			status = http.StatusGatewayTimeout
+			if !responseStarted {
+				status = http.StatusGatewayTimeout
+			}
 			outcome = "tunnel_timeout"
-			http.Error(w, "tunnel request timed out", http.StatusGatewayTimeout)
+			if !responseStarted {
+				http.Error(w, "tunnel request timed out", http.StatusGatewayTimeout)
+			}
 			return
 		case errors.Is(err, context.Canceled):
-			status = 499
+			if !responseStarted {
+				status = 499
+			}
 			outcome = "client_canceled"
 			return
 		}
-		status = http.StatusBadGateway
+		if !responseStarted {
+			status = http.StatusBadGateway
+		}
 		outcome = "tunnel_error"
-		http.Error(w, "tunnel request failed", http.StatusBadGateway)
+		if !responseStarted {
+			http.Error(w, "tunnel request failed", http.StatusBadGateway)
+		}
 		return
 	}
 
-	for name, values := range httpwire.StripHopByHopHeaders(tunnelResponse.Header) {
-		for _, value := range values {
-			w.Header().Add(name, value)
-		}
-	}
-	if tunnelResponse.Status <= 0 {
-		tunnelResponse.Status = http.StatusBadGateway
-	}
-	status = tunnelResponse.Status
+	status = result.Status
 	outcome = "completed"
-	responseBytes = int64(len(tunnelResponse.Body))
-	w.WriteHeader(tunnelResponse.Status)
-	_, _ = w.Write(tunnelResponse.Body)
 }
 
 type publicRequestLog struct {
