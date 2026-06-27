@@ -539,6 +539,17 @@ func TestPublicHandlerHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestContextWithTimeoutAllowsZeroTimeout(t *testing.T) {
+	ctx, cancel := contextWithTimeout(context.Background(), 0)
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("context was canceled immediately")
+	default:
+	}
+}
+
 type errString string
 
 func (e errString) Error() string {

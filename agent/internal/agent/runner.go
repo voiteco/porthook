@@ -38,18 +38,14 @@ func NewRunner(cfg Config, logger *slog.Logger, output io.Writer) *Runner {
 	if output == nil {
 		output = io.Discard
 	}
-
-	timeout := cfg.RequestTimeout
-	if timeout == 0 {
-		timeout = defaultRequestTimeout
-	}
+	cfg = normalizeConfig(cfg)
 
 	return &Runner{
 		cfg:    cfg,
 		logger: logger,
 		output: output,
 		httpClient: &http.Client{
-			Timeout: timeout,
+			Timeout: cfg.RequestTimeout,
 		},
 	}
 }
@@ -60,17 +56,20 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	handshakeCtx, cancel := contextWithTimeout(ctx, r.cfg.HandshakeTimeout)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(handshakeCtx, wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("connect to gateway %s: %w", wsURL, err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	if err := r.authenticate(ctx, conn); err != nil {
+	if err := r.authenticate(handshakeCtx, conn); err != nil {
 		return err
 	}
 
-	registered, err := r.registerTunnel(ctx, conn)
+	registered, err := r.registerTunnel(handshakeCtx, conn)
 	if err != nil {
 		return err
 	}
@@ -238,7 +237,16 @@ func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tu
 func (r *Runner) write(ctx context.Context, conn *websocket.Conn, env messages.Envelope) error {
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
-	return wsjson.Write(ctx, conn, env)
+	writeCtx, cancel := contextWithTimeout(ctx, r.cfg.WebSocketWriteTimeout)
+	defer cancel()
+	return wsjson.Write(writeCtx, conn, env)
+}
+
+func contextWithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, timeout)
 }
 
 func BuildWebSocketURL(serverURL string) (string, error) {

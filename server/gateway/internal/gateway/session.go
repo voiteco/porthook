@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -21,6 +22,7 @@ type agentSession struct {
 	conn     *websocket.Conn
 	tunnel   *registry.Session
 	sendMu   sync.Mutex
+	writeTO  time.Duration
 	done     chan struct{}
 	doneOnce sync.Once
 
@@ -28,10 +30,11 @@ type agentSession struct {
 	pending   map[string]chan messages.Envelope
 }
 
-func newAgentSession(conn *websocket.Conn, tunnel *registry.Session) *agentSession {
+func newAgentSession(conn *websocket.Conn, tunnel *registry.Session, writeTimeout time.Duration) *agentSession {
 	return &agentSession{
 		conn:    conn,
 		tunnel:  tunnel,
+		writeTO: writeTimeout,
 		done:    make(chan struct{}),
 		pending: make(map[string]chan messages.Envelope),
 	}
@@ -74,7 +77,9 @@ func (s *agentSession) roundTrip(ctx context.Context, streamID string, req httpw
 func (s *agentSession) write(ctx context.Context, env messages.Envelope) error {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
-	return wsjson.Write(ctx, s.conn, env)
+	writeCtx, cancel := contextWithTimeout(ctx, s.writeTO)
+	defer cancel()
+	return wsjson.Write(writeCtx, s.conn, env)
 }
 
 func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
@@ -139,4 +144,21 @@ func (s *agentSession) closeDone() {
 	s.doneOnce.Do(func() {
 		close(s.done)
 	})
+}
+
+func (s *agentSession) close(status websocket.StatusCode, reason string) error {
+	s.closeDone()
+	return s.conn.Close(status, reason)
+}
+
+func (s *agentSession) closeNow() error {
+	s.closeDone()
+	return s.conn.CloseNow()
+}
+
+func contextWithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, timeout)
 }

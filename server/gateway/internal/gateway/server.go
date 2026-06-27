@@ -47,6 +47,7 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	cfg = normalizeConfig(cfg)
 
 	return &Server{
 		cfg:      cfg,
@@ -63,12 +64,18 @@ func (s *Server) Run(ctx context.Context) error {
 	publicServer := &http.Server{
 		Addr:              s.cfg.PublicAddr,
 		Handler:           s.PublicHandler(),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: s.cfg.ReadHeaderTimeout,
+		ReadTimeout:       s.cfg.ReadTimeout,
+		WriteTimeout:      s.cfg.WriteTimeout,
+		IdleTimeout:       s.cfg.IdleTimeout,
 	}
 	agentServer := &http.Server{
 		Addr:              s.cfg.AgentAddr,
 		Handler:           s.AgentHandler(),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: s.cfg.ReadHeaderTimeout,
+		ReadTimeout:       s.cfg.ReadTimeout,
+		WriteTimeout:      s.cfg.WriteTimeout,
+		IdleTimeout:       s.cfg.IdleTimeout,
 	}
 
 	errCh := make(chan error, 2)
@@ -81,11 +88,17 @@ func (s *Server) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ShutdownTimeout)
 		defer cancel()
+		s.closeSessions(shutdownCtx, websocket.StatusGoingAway, "gateway shutting down")
 		errPublic := publicServer.Shutdown(shutdownCtx)
 		errAgent := agentServer.Shutdown(shutdownCtx)
 		return errors.Join(errPublic, errAgent)
 	case err := <-errCh:
-		return err
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ShutdownTimeout)
+		defer cancel()
+		s.closeSessions(shutdownCtx, websocket.StatusInternalError, "gateway listener stopped")
+		errPublic := publicServer.Shutdown(shutdownCtx)
+		errAgent := agentServer.Shutdown(shutdownCtx)
+		return errors.Join(err, errPublic, errAgent)
 	}
 }
 
@@ -117,7 +130,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.StreamTimeout)
+	ctx, cancel := contextWithTimeout(r.Context(), s.cfg.HandshakeTimeout)
 	defer cancel()
 
 	if err := s.authenticateAgent(ctx, conn); err != nil {
@@ -211,7 +224,7 @@ func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn) (*age
 		return nil, fmt.Errorf("write tunnel registered: %w", err)
 	}
 
-	return newAgentSession(conn, tunnel), nil
+	return newAgentSession(conn, tunnel, s.cfg.WebSocketWriteTimeout), nil
 }
 
 func (s *Server) registerTunnelSession(ctx context.Context, conn *websocket.Conn, payload messages.TunnelRegister) (*registry.Session, error) {
@@ -461,6 +474,46 @@ func (s *Server) removeSession(tunnelID string) {
 	delete(s.sessions, tunnelID)
 	s.registry.Unregister(tunnelID)
 	s.logger.Info("tunnel disconnected", "tunnel_id", tunnelID)
+}
+
+func (s *Server) closeSessions(ctx context.Context, status websocket.StatusCode, reason string) {
+	s.sessionsMu.RLock()
+	sessions := make([]*agentSession, 0, len(s.sessions))
+	for _, session := range s.sessions {
+		sessions = append(sessions, session)
+	}
+	s.sessionsMu.RUnlock()
+
+	if len(sessions) == 0 {
+		return
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(sessions))
+	for _, session := range sessions {
+		go func(session *agentSession) {
+			defer wg.Done()
+			if err := session.close(status, reason); err != nil {
+				s.logger.Warn("close tunnel session failed", "tunnel_id", session.tunnel.TunnelID, "error", err)
+			}
+		}(session)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		for _, session := range sessions {
+			if err := session.closeNow(); err != nil {
+				s.logger.Warn("force close tunnel session failed", "tunnel_id", session.tunnel.TunnelID, "error", err)
+			}
+		}
+	}
 }
 
 func newTunnelID() (string, error) {
