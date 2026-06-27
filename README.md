@@ -129,3 +129,5 @@ A web UI for active tunnels, request history, tokens, and domains.
 The public product specification lives in [docs/SPEC.md](./docs/SPEC.md).
 
 The implementation-focused technical specification lives in [docs/TECHNICAL_SPEC.md](./docs/TECHNICAL_SPEC.md).
+
+The first Go MVP smoke test lives in [docs/MVP_SMOKE_TEST.md](./docs/MVP_SMOKE_TEST.md).
