@@ -29,6 +29,12 @@ In another terminal:
 go run ./server/gateway/cmd/porthook-gateway
 ```
 
+Alternatively, start the gateway with Docker Compose:
+
+```sh
+docker compose -f deploy/compose/docker-compose.yml up --build
+```
+
 Default gateway configuration:
 
 - public HTTP listener: `:8080`
@@ -68,3 +74,5 @@ Expected result:
 ## Notes
 
 The MVP uses whole-body JSON messages over WebSocket. It is intentionally simple and should be replaced with chunked or binary body streaming after the single request path is stable.
+
+The Docker Compose path is documented in [../deploy/compose/README.md](../deploy/compose/README.md).
