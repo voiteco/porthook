@@ -195,6 +195,159 @@ func TestPublicRequestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPublicRequestRejectsLargeBody(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxBodyBytes = 3
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, publicServer.URL+"/upload", bytes.NewBufferString("too-large"))
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+}
+
+func TestPublicRequestMapsStreamErrorToBadGateway(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		var reqEnv messages.Envelope
+		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
+			agentErr <- err
+			return
+		}
+		streamErr, err := messages.NewStream(messages.TypeHTTPStreamError, reqEnv.StreamID, reqEnv.TunnelID, messages.ErrorPayload{
+			Code:    "local_request_failed",
+			Message: "local service failed",
+		})
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		agentErr <- wsjson.Write(ctx, conn, streamErr)
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/broken", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
+func TestPublicRequestTimesOutWaitingForAgent(t *testing.T) {
+	cfg := testConfig()
+	cfg.StreamTimeout = 50 * time.Millisecond
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		var reqEnv messages.Envelope
+		if err := wsjson.Read(ctx, conn, &reqEnv); err != nil {
+			agentErr <- err
+			return
+		}
+		if reqEnv.Type != messages.TypeHTTPRequest {
+			agentErr <- errUnexpectedType(reqEnv.Type, messages.TypeHTTPRequest)
+			return
+		}
+		agentErr <- nil
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/slow", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504", resp.StatusCode)
+	}
+
+	select {
+	case err := <-agentErr:
+		if err != nil {
+			t.Fatalf("agent goroutine returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("agent did not receive timed-out request")
+	}
+}
+
 func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	httpServer := httptest.NewServer(server.AgentHandler())

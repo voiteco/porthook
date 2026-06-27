@@ -14,7 +14,7 @@ import (
 	"github.com/voiteco/porthook/protocol/httpwire"
 )
 
-func ForwardHTTPRequest(ctx context.Context, client *http.Client, localTarget string, req httpwire.Request) (httpwire.Response, error) {
+func ForwardHTTPRequest(ctx context.Context, client *http.Client, localTarget string, req httpwire.Request, maxResponseBodyBytes int64) (httpwire.Response, error) {
 	targetURL, err := buildLocalURL(localTarget, req.Path, req.Query)
 	if err != nil {
 		return httpwire.Response{}, err
@@ -32,7 +32,7 @@ func ForwardHTTPRequest(ctx context.Context, client *http.Client, localTarget st
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimitedResponseBody(resp.Body, maxResponseBodyBytes)
 	if err != nil {
 		return httpwire.Response{}, fmt.Errorf("read local response: %w", err)
 	}
@@ -42,6 +42,21 @@ func ForwardHTTPRequest(ctx context.Context, client *http.Client, localTarget st
 		Header: httpwire.StripHopByHopHeaders(resp.Header),
 		Body:   body,
 	}, nil
+}
+
+func readLimitedResponseBody(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = defaultMaxResponseBodyBytes
+	}
+
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("local response body exceeds %d bytes", limit)
+	}
+	return data, nil
 }
 
 func buildLocalURL(localTarget, requestPath, rawQuery string) (string, error) {

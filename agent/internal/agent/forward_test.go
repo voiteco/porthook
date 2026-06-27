@@ -56,7 +56,7 @@ func TestForwardHTTPRequest(t *testing.T) {
 		Body: []byte("payload"),
 	}
 
-	resp, err := ForwardHTTPRequest(context.Background(), local.Client(), local.URL, req)
+	resp, err := ForwardHTTPRequest(context.Background(), local.Client(), local.URL, req, defaultMaxResponseBodyBytes)
 	if err != nil {
 		t.Fatalf("ForwardHTTPRequest returned error: %v", err)
 	}
@@ -71,6 +71,23 @@ func TestForwardHTTPRequest(t *testing.T) {
 	}
 	if string(resp.Body) != "ok" {
 		t.Fatalf("body = %q, want ok", string(resp.Body))
+	}
+}
+
+func TestForwardHTTPRequestRejectsLargeResponse(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("too-large"))
+	}))
+	defer local.Close()
+
+	req := httpwire.Request{
+		Method: http.MethodGet,
+		Path:   "/",
+	}
+
+	_, err := ForwardHTTPRequest(context.Background(), local.Client(), local.URL, req, 3)
+	if err == nil {
+		t.Fatal("ForwardHTTPRequest returned nil error")
 	}
 }
 

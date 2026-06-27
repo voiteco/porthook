@@ -183,7 +183,7 @@ func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tu
 	}
 
 	started := time.Now()
-	resp, err := ForwardHTTPRequest(ctx, r.httpClient, r.cfg.LocalTarget, req)
+	resp, err := ForwardHTTPRequest(ctx, r.httpClient, r.cfg.LocalTarget, req, r.cfg.MaxResponseBodyBytes)
 	if err != nil {
 		streamErr, buildErr := messages.NewStream(messages.TypeHTTPStreamError, env.StreamID, tunnelID, messages.ErrorPayload{
 			Code:    "local_request_failed",
