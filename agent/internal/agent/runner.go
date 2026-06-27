@@ -62,7 +62,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
-		return fmt.Errorf("connect to gateway: %w", err)
+		return fmt.Errorf("connect to gateway %s: %w", wsURL, err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
@@ -105,7 +105,7 @@ func (r *Runner) authenticate(ctx context.Context, conn *websocket.Conn) error {
 		if err != nil {
 			return err
 		}
-		return fmt.Errorf("authentication failed: %s", payload.Message)
+		return formatAuthError(payload)
 	default:
 		return fmt.Errorf("unexpected auth response %s", resp.Type)
 	}
@@ -136,10 +136,33 @@ func (r *Runner) registerTunnel(ctx context.Context, conn *websocket.Conn) (mess
 		if err != nil {
 			return messages.TunnelRegistered{}, err
 		}
-		return messages.TunnelRegistered{}, fmt.Errorf("tunnel registration failed: %s", payload.Message)
+		return messages.TunnelRegistered{}, formatTunnelRegistrationError(payload)
 	default:
 		return messages.TunnelRegistered{}, fmt.Errorf("unexpected tunnel registration response %s", resp.Type)
 	}
+}
+
+func formatAuthError(payload messages.ErrorPayload) error {
+	message := errorPayloadMessage(payload)
+	if payload.Code == "invalid_token" {
+		return fmt.Errorf("authentication failed: invalid token; check --token or PORTHOOK_TOKEN")
+	}
+	return fmt.Errorf("authentication failed: %s", message)
+}
+
+func formatTunnelRegistrationError(payload messages.ErrorPayload) error {
+	return fmt.Errorf("tunnel registration failed: %s", errorPayloadMessage(payload))
+}
+
+func errorPayloadMessage(payload messages.ErrorPayload) string {
+	message := strings.TrimSpace(payload.Message)
+	if message != "" {
+		return message
+	}
+	if payload.Code != "" {
+		return payload.Code
+	}
+	return "unknown error"
 }
 
 func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID string) error {

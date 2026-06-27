@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/voiteco/porthook/agent/internal/agent"
+	"github.com/voiteco/porthook/protocol/names"
 )
 
 const version = "0.1.0-dev"
@@ -91,6 +92,11 @@ func parseHTTPConfig(args []string) (agent.Config, error) {
 	}
 	if cfg.Token == "" {
 		return agent.Config{}, fmt.Errorf("token is required")
+	}
+	if cfg.RequestedSubdomain != "" {
+		if err := names.ValidateSubdomain(cfg.RequestedSubdomain); err != nil {
+			return agent.Config{}, fmt.Errorf("invalid subdomain %q: %w", cfg.RequestedSubdomain, err)
+		}
 	}
 
 	return cfg, nil

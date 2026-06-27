@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -59,6 +60,33 @@ func TestBuildWebSocketURL(t *testing.T) {
 func TestBuildWebSocketURLRejectsInvalidURL(t *testing.T) {
 	if _, err := BuildWebSocketURL("ftp://localhost"); err == nil {
 		t.Fatal("BuildWebSocketURL returned nil error")
+	}
+}
+
+func TestFormatAuthError(t *testing.T) {
+	err := formatAuthError(messages.ErrorPayload{Code: "invalid_token", Message: "invalid token"})
+	if err == nil {
+		t.Fatal("formatAuthError returned nil")
+	}
+	want := "authentication failed: invalid token; check --token or PORTHOOK_TOKEN"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestFormatTunnelRegistrationErrorForDuplicateSubdomain(t *testing.T) {
+	err := formatTunnelRegistrationError(messages.ErrorPayload{
+		Code:    "subdomain_unavailable",
+		Message: `subdomain "demo" is already in use; choose another name or omit --subdomain for a random subdomain`,
+	})
+	if err == nil {
+		t.Fatal("formatTunnelRegistrationError returned nil")
+	}
+	if !strings.Contains(err.Error(), `subdomain "demo" is already in use`) {
+		t.Fatalf("error = %q, want duplicate subdomain guidance", err.Error())
+	}
+	if !strings.Contains(err.Error(), "omit --subdomain") {
+		t.Fatalf("error = %q, want random subdomain guidance", err.Error())
 	}
 }
 
