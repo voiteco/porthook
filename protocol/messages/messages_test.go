@@ -53,3 +53,27 @@ func TestNewUsesEmptyObjectPayload(t *testing.T) {
 		t.Fatalf("payload = %s, want {}", env.Payload)
 	}
 }
+
+func TestNewStreamCancel(t *testing.T) {
+	env, err := NewStream(TypeHTTPStreamCancel, "str_test", "tun_test", StreamCancel{Reason: "client canceled"})
+	if err != nil {
+		t.Fatalf("NewStream returned error: %v", err)
+	}
+	if env.Type != TypeHTTPStreamCancel {
+		t.Fatalf("type = %s, want %s", env.Type, TypeHTTPStreamCancel)
+	}
+	if env.StreamID != "str_test" {
+		t.Fatalf("stream id = %q, want str_test", env.StreamID)
+	}
+	if env.TunnelID != "tun_test" {
+		t.Fatalf("tunnel id = %q, want tun_test", env.TunnelID)
+	}
+
+	payload, err := DecodePayload[StreamCancel](env)
+	if err != nil {
+		t.Fatalf("DecodePayload returned error: %v", err)
+	}
+	if payload.Reason != "client canceled" {
+		t.Fatalf("reason = %q, want client canceled", payload.Reason)
+	}
+}

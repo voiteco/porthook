@@ -22,6 +22,7 @@ const (
 	TypeHTTPRequest      Type = "http.request"
 	TypeHTTPResponse     Type = "http.response"
 	TypeHTTPStreamError  Type = "http.stream.error"
+	TypeHTTPStreamCancel Type = "http.stream.cancel"
 )
 
 type Envelope struct {
@@ -53,6 +54,10 @@ type TunnelRegistered struct {
 	TunnelID  string `json:"tunnel_id"`
 	PublicURL string `json:"public_url"`
 	Subdomain string `json:"subdomain"`
+}
+
+type StreamCancel struct {
+	Reason string `json:"reason"`
 }
 
 func New(typ Type, payload any) (Envelope, error) {
