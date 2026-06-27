@@ -17,6 +17,9 @@ const (
 	defaultWebSocketWriteTimeout = 10 * time.Second
 	defaultWebSocketPingInterval = 15 * time.Second
 	defaultWebSocketPongTimeout  = 5 * time.Second
+	defaultReconnectInitialDelay = 500 * time.Millisecond
+	defaultReconnectMaxDelay     = 5 * time.Second
+	defaultReconnectJitter       = 250 * time.Millisecond
 )
 
 type Config struct {
@@ -32,6 +35,9 @@ type Config struct {
 	WebSocketWriteTimeout time.Duration
 	WebSocketPingInterval time.Duration
 	WebSocketPongTimeout  time.Duration
+	ReconnectInitialDelay time.Duration
+	ReconnectMaxDelay     time.Duration
+	ReconnectJitter       time.Duration
 }
 
 func ConfigFromEnv() Config {
@@ -44,6 +50,9 @@ func ConfigFromEnv() Config {
 		WebSocketWriteTimeout: envDuration("PORTHOOK_WS_WRITE_TIMEOUT", defaultWebSocketWriteTimeout),
 		WebSocketPingInterval: envDuration("PORTHOOK_WS_PING_INTERVAL", defaultWebSocketPingInterval),
 		WebSocketPongTimeout:  envDuration("PORTHOOK_WS_PONG_TIMEOUT", defaultWebSocketPongTimeout),
+		ReconnectInitialDelay: envDuration("PORTHOOK_RECONNECT_INITIAL_DELAY", defaultReconnectInitialDelay),
+		ReconnectMaxDelay:     envDuration("PORTHOOK_RECONNECT_MAX_DELAY", defaultReconnectMaxDelay),
+		ReconnectJitter:       envDuration("PORTHOOK_RECONNECT_JITTER", defaultReconnectJitter),
 	})
 }
 
@@ -71,6 +80,18 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.WebSocketPongTimeout <= 0 {
 		cfg.WebSocketPongTimeout = defaultWebSocketPongTimeout
+	}
+	if cfg.ReconnectInitialDelay <= 0 {
+		cfg.ReconnectInitialDelay = defaultReconnectInitialDelay
+	}
+	if cfg.ReconnectMaxDelay <= 0 {
+		cfg.ReconnectMaxDelay = defaultReconnectMaxDelay
+	}
+	if cfg.ReconnectJitter < 0 {
+		cfg.ReconnectJitter = defaultReconnectJitter
+	}
+	if cfg.ReconnectMaxDelay < cfg.ReconnectInitialDelay {
+		cfg.ReconnectMaxDelay = cfg.ReconnectInitialDelay
 	}
 	return cfg
 }

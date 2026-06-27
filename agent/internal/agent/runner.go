@@ -56,31 +56,62 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
+	attempt := 0
+	connectedBefore := false
+	for {
+		connected, err := r.runOnce(ctx, wsURL, connectedBefore)
+		if connected {
+			connectedBefore = true
+			attempt = 0
+		}
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		if isPermanent(err) {
+			return err
+		}
+
+		delay := reconnectDelay(attempt, r.cfg.ReconnectInitialDelay, r.cfg.ReconnectMaxDelay, r.cfg.ReconnectJitter, randomReconnectJitter)
+		attempt++
+		r.logger.Warn("gateway connection lost", "error", err, "reconnect_delay_ms", delay.Milliseconds())
+		r.writeReconnectOutput(err, delay, connectedBefore)
+		if err := waitForReconnect(ctx, delay); err != nil {
+			return nil
+		}
+	}
+}
+
+func (r *Runner) runOnce(ctx context.Context, wsURL string, restored bool) (bool, error) {
 	handshakeCtx, cancel := contextWithTimeout(ctx, r.cfg.HandshakeTimeout)
 	defer cancel()
 
 	conn, _, err := websocket.Dial(handshakeCtx, wsURL, nil)
 	if err != nil {
-		return fmt.Errorf("connect to gateway %s: %w", wsURL, err)
+		return false, fmt.Errorf("connect to gateway %s: %w", wsURL, err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	if err := r.authenticate(handshakeCtx, conn); err != nil {
-		return err
+		return false, err
 	}
 
 	registered, err := r.registerTunnel(handshakeCtx, conn)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	fmt.Fprintln(r.output, "Tunnel established")
-	fmt.Fprintf(r.output, "Forwarding: %s -> %s\n", registered.PublicURL, r.cfg.LocalTarget)
+	r.writeTunnelReadyOutput(restored, registered.PublicURL)
 
-	stopKeepalive := r.startKeepalive(ctx, conn, registered.TunnelID)
+	sessionCtx, stopSession := context.WithCancel(ctx)
+	defer stopSession()
+
+	stopKeepalive := r.startKeepalive(sessionCtx, conn, registered.TunnelID)
 	defer stopKeepalive()
 
-	return r.serve(ctx, conn, registered.TunnelID)
+	return true, r.serve(sessionCtx, conn, registered.TunnelID)
 }
 
 func (r *Runner) authenticate(ctx context.Context, conn *websocket.Conn) error {
@@ -105,11 +136,11 @@ func (r *Runner) authenticate(ctx context.Context, conn *websocket.Conn) error {
 	case messages.TypeAuthError:
 		payload, err := messages.DecodePayload[messages.ErrorPayload](resp)
 		if err != nil {
-			return err
+			return permanent(err)
 		}
-		return formatAuthError(payload)
+		return permanent(formatAuthError(payload))
 	default:
-		return fmt.Errorf("unexpected auth response %s", resp.Type)
+		return permanent(fmt.Errorf("unexpected auth response %s", resp.Type))
 	}
 }
 
@@ -136,11 +167,11 @@ func (r *Runner) registerTunnel(ctx context.Context, conn *websocket.Conn) (mess
 	case messages.TypeTunnelError:
 		payload, err := messages.DecodePayload[messages.ErrorPayload](resp)
 		if err != nil {
-			return messages.TunnelRegistered{}, err
+			return messages.TunnelRegistered{}, permanent(err)
 		}
-		return messages.TunnelRegistered{}, formatTunnelRegistrationError(payload)
+		return messages.TunnelRegistered{}, permanent(formatTunnelRegistrationError(payload))
 	default:
-		return messages.TunnelRegistered{}, fmt.Errorf("unexpected tunnel registration response %s", resp.Type)
+		return messages.TunnelRegistered{}, permanent(fmt.Errorf("unexpected tunnel registration response %s", resp.Type))
 	}
 }
 
@@ -174,7 +205,7 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 			if ctx.Err() != nil {
 				return nil
 			}
-			if status := websocket.CloseStatus(err); status == websocket.StatusNormalClosure || status == websocket.StatusGoingAway {
+			if status := websocket.CloseStatus(err); status == websocket.StatusNormalClosure {
 				return nil
 			}
 			return fmt.Errorf("read gateway message: %w", err)
@@ -196,6 +227,50 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 		default:
 			r.logger.Warn("unexpected gateway message", "type", env.Type)
 		}
+	}
+}
+
+func (r *Runner) writeTunnelReadyOutput(restored bool, publicURL string) {
+	r.outputMu.Lock()
+	defer r.outputMu.Unlock()
+
+	if restored {
+		fmt.Fprintln(r.output, "Tunnel restored")
+	} else {
+		fmt.Fprintln(r.output, "Tunnel established")
+	}
+	fmt.Fprintf(r.output, "Forwarding: %s -> %s\n", publicURL, r.cfg.LocalTarget)
+}
+
+func (r *Runner) writeReconnectOutput(err error, delay time.Duration, disconnected bool) {
+	r.outputMu.Lock()
+	defer r.outputMu.Unlock()
+
+	if disconnected {
+		fmt.Fprintf(r.output, "Disconnected, reconnecting in %s: %s\n", delay.Round(time.Millisecond), err)
+		return
+	}
+	fmt.Fprintf(r.output, "Connection failed, retrying in %s: %s\n", delay.Round(time.Millisecond), err)
+}
+
+func waitForReconnect(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 

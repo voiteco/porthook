@@ -129,6 +129,37 @@ func TestAgentWebSocketRejectsDuplicateRequestedSubdomain(t *testing.T) {
 	}
 }
 
+func TestAgentWebSocketReleasesSubdomainAfterDisconnect(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	firstConn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("first Dial returned error: %v", err)
+	}
+	registerAgent(t, ctx, firstConn, "demo")
+	_ = firstConn.Close(websocket.StatusGoingAway, "test disconnect")
+
+	waitForPublicStatus(t, ctx, publicServer.Client(), publicServer.URL+"/after-disconnect", "demo.localhost", http.StatusNotFound)
+
+	secondConn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("second Dial returned error: %v", err)
+	}
+	defer secondConn.Close(websocket.StatusNormalClosure, "")
+
+	registered := registerAgentAndRead(t, ctx, secondConn, "demo")
+	if registered.Subdomain != "demo" {
+		t.Fatalf("subdomain = %q, want demo", registered.Subdomain)
+	}
+}
+
 func TestAgentWebSocketRetriesRandomSubdomainCollision(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	subdomains := []string{"taken", "available"}
@@ -519,6 +550,38 @@ func writeRegistrationForTest(t *testing.T, ctx context.Context, conn *websocket
 	}
 	if err := wsjson.Write(ctx, conn, reg); err != nil {
 		t.Fatalf("write registration returned error: %v", err)
+	}
+}
+
+func waitForPublicStatus(t *testing.T, ctx context.Context, client *http.Client, url, host string, want int) {
+	t.Helper()
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatalf("NewRequest returned error: %v", err)
+		}
+		req.Host = host
+
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == want {
+				return
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			if err != nil {
+				t.Fatalf("public request did not reach status %d before timeout: %v", want, err)
+			}
+			t.Fatalf("public request did not reach status %d before timeout", want)
+		case <-ticker.C:
+		}
 	}
 }
 
