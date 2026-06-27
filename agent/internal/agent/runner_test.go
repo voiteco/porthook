@@ -247,6 +247,145 @@ func TestRunnerHandlesHTTPRequest(t *testing.T) {
 	}
 }
 
+func TestRunnerHandlesStreamedHTTPRequest(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/webhook" {
+			t.Errorf("path = %s, want /webhook", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("ReadAll returned error: %v", err)
+		}
+		if string(body) != "payload" {
+			t.Errorf("body = %q, want payload", string(body))
+		}
+
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("local-ok"))
+	}))
+	defer local.Close()
+
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		ctx := r.Context()
+		readAuthAndRegistration(t, ctx, conn)
+
+		start, err := messages.NewStream(messages.TypeHTTPRequestStart, "str_stream", "tun_test", httpwire.RequestStart{
+			Method:        http.MethodPost,
+			Path:          "/webhook",
+			Header:        http.Header{"X-Test": []string{"yes"}},
+			ContentLength: 7,
+		})
+		if err != nil {
+			t.Errorf("NewStream start returned error: %v", err)
+			return
+		}
+		if err := wsjson.Write(ctx, conn, start); err != nil {
+			t.Errorf("write request start returned error: %v", err)
+			return
+		}
+		for _, data := range []string{"pay", "load"} {
+			body, err := messages.NewStream(messages.TypeHTTPRequestBody, "str_stream", "tun_test", httpwire.BodyChunk{
+				Data: []byte(data),
+			})
+			if err != nil {
+				t.Errorf("NewStream body returned error: %v", err)
+				return
+			}
+			if err := wsjson.Write(ctx, conn, body); err != nil {
+				t.Errorf("write request body returned error: %v", err)
+				return
+			}
+		}
+		end, err := messages.NewStream(messages.TypeHTTPRequestEnd, "str_stream", "tun_test", nil)
+		if err != nil {
+			t.Errorf("NewStream end returned error: %v", err)
+			return
+		}
+		if err := wsjson.Write(ctx, conn, end); err != nil {
+			t.Errorf("write request end returned error: %v", err)
+			return
+		}
+
+		var responseBody bytes.Buffer
+		for {
+			var response messages.Envelope
+			if err := wsjson.Read(ctx, conn, &response); err != nil {
+				t.Errorf("read response returned error: %v", err)
+				return
+			}
+			if response.StreamID != "str_stream" {
+				t.Errorf("stream id = %s, want str_stream", response.StreamID)
+				return
+			}
+			switch response.Type {
+			case messages.TypeHTTPResponseStart:
+				payload, err := messages.DecodePayload[httpwire.ResponseStart](response)
+				if err != nil {
+					t.Errorf("DecodePayload response start returned error: %v", err)
+					return
+				}
+				if payload.Status != http.StatusCreated {
+					t.Errorf("status = %d, want 201", payload.Status)
+					return
+				}
+			case messages.TypeHTTPResponseBody:
+				payload, err := messages.DecodePayload[httpwire.BodyChunk](response)
+				if err != nil {
+					t.Errorf("DecodePayload response body returned error: %v", err)
+					return
+				}
+				responseBody.Write(payload.Data)
+			case messages.TypeHTTPResponseEnd:
+				if responseBody.String() != "local-ok" {
+					t.Errorf("response body = %q, want local-ok", responseBody.String())
+				}
+				return
+			default:
+				t.Errorf("response type = %s, want streaming response", response.Type)
+				return
+			}
+		}
+	}))
+	defer gateway.Close()
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:          gateway.URL,
+		Token:              "dev-token",
+		RequestedSubdomain: "demo",
+		LocalTarget:        local.URL,
+		AgentVersion:       "test",
+		RequestTimeout:     5 * time.Second,
+		StreamChunkBytes:   4,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !bytes.Contains(output.Bytes(), []byte("POST /webhook -> 201")) {
+		t.Fatalf("output does not contain request log: %q", output.String())
+	}
+}
+
 func TestRunnerHandlesConcurrentHTTPRequests(t *testing.T) {
 	const requestCount = 6
 

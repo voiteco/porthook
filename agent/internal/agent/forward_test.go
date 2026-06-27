@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -88,6 +89,72 @@ func TestForwardHTTPRequestRejectsLargeResponse(t *testing.T) {
 	_, err := ForwardHTTPRequest(context.Background(), local.Client(), local.URL, req, 3)
 	if err == nil {
 		t.Fatal("ForwardHTTPRequest returned nil error")
+	}
+}
+
+func TestForwardHTTPStream(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if r.ContentLength != 7 {
+			t.Errorf("content length = %d, want 7", r.ContentLength)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("ReadAll returned error: %v", err)
+		}
+		if string(body) != "payload" {
+			t.Errorf("body = %q, want payload", string(body))
+		}
+
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("streamed-response"))
+	}))
+	defer local.Close()
+
+	var responseStart httpwire.ResponseStart
+	var responseBody bytes.Buffer
+	status, responseBytes, err := ForwardHTTPStream(
+		context.Background(),
+		local.Client(),
+		local.URL,
+		httpwire.RequestStart{
+			Method:        http.MethodPost,
+			Path:          "/webhook",
+			Header:        http.Header{"Content-Type": []string{"text/plain"}},
+			ContentLength: 7,
+		},
+		bytes.NewBufferString("payload"),
+		defaultMaxResponseBodyBytes,
+		4,
+		func(start httpwire.ResponseStart) error {
+			responseStart = start
+			return nil
+		},
+		func(chunk []byte) error {
+			_, err := responseBody.Write(chunk)
+			return err
+		},
+	)
+	if err != nil {
+		t.Fatalf("ForwardHTTPStream returned error: %v", err)
+	}
+	if status != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", status)
+	}
+	if responseStart.Status != http.StatusAccepted {
+		t.Fatalf("response start status = %d, want 202", responseStart.Status)
+	}
+	if responseStart.Header.Get("Content-Type") != "text/plain" {
+		t.Fatalf("Content-Type = %q, want text/plain", responseStart.Header.Get("Content-Type"))
+	}
+	if responseBytes != int64(len("streamed-response")) {
+		t.Fatalf("response bytes = %d, want %d", responseBytes, len("streamed-response"))
+	}
+	if responseBody.String() != "streamed-response" {
+		t.Fatalf("response body = %q, want streamed-response", responseBody.String())
 	}
 }
 

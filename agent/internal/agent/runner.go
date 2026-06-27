@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -31,7 +32,19 @@ type Runner struct {
 	outputMu   sync.Mutex
 
 	activeMu      sync.Mutex
-	activeStreams map[string]context.CancelFunc
+	activeStreams map[string]*activeStream
+}
+
+type activeStream struct {
+	cancel   context.CancelFunc
+	chunks   chan requestBodyChunk
+	done     chan struct{}
+	doneOnce sync.Once
+}
+
+type requestBodyChunk struct {
+	data []byte
+	end  bool
 }
 
 func NewRunner(cfg Config, logger *slog.Logger, output io.Writer) *Runner {
@@ -50,7 +63,7 @@ func NewRunner(cfg Config, logger *slog.Logger, output io.Writer) *Runner {
 		httpClient: &http.Client{
 			Timeout: cfg.RequestTimeout,
 		},
-		activeStreams: make(map[string]context.CancelFunc),
+		activeStreams: make(map[string]*activeStream),
 	}
 }
 
@@ -218,12 +231,44 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 		switch env.Type {
 		case messages.TypeHTTPRequest:
 			streamCtx, cancelStream := context.WithCancel(ctx)
-			r.addActiveStream(env.StreamID, cancelStream)
+			r.addActiveStream(env.StreamID, newActiveStream(cancelStream, nil))
 			go func(env messages.Envelope) {
 				defer r.removeActiveStream(env.StreamID)
 				defer cancelStream()
 				_ = r.handleHTTPRequest(streamCtx, conn, tunnelID, env)
 			}(env)
+		case messages.TypeHTTPRequestStart:
+			req, err := messages.DecodePayload[httpwire.RequestStart](env)
+			if err != nil {
+				r.logger.Warn("decode request start failed", "stream_id", env.StreamID, "error", err)
+				continue
+			}
+			streamCtx, cancelStream := context.WithCancel(ctx)
+			stream := newActiveStream(cancelStream, make(chan requestBodyChunk, 32))
+			r.addActiveStream(env.StreamID, stream)
+			go func(env messages.Envelope, req httpwire.RequestStart, stream *activeStream) {
+				defer r.removeActiveStream(env.StreamID)
+				defer cancelStream()
+				_ = r.handleHTTPStream(streamCtx, conn, tunnelID, env, req, stream.chunks)
+			}(env, req, stream)
+		case messages.TypeHTTPRequestBody:
+			payload, err := messages.DecodePayload[httpwire.BodyChunk](env)
+			if err != nil {
+				r.logger.Warn("decode request body failed", "stream_id", env.StreamID, "error", err)
+				continue
+			}
+			if len(payload.Data) > r.cfg.StreamChunkBytes {
+				r.logger.Warn("request body chunk too large", "stream_id", env.StreamID, "chunk_bytes", len(payload.Data))
+				r.cancelActiveStream(env.StreamID)
+				continue
+			}
+			if err := r.deliverActiveStreamChunk(ctx, env.StreamID, requestBodyChunk{data: payload.Data}); err != nil {
+				r.logger.Warn("deliver request body failed", "stream_id", env.StreamID, "error", err)
+			}
+		case messages.TypeHTTPRequestEnd:
+			if err := r.deliverActiveStreamChunk(ctx, env.StreamID, requestBodyChunk{end: true}); err != nil {
+				r.logger.Warn("deliver request end failed", "stream_id", env.StreamID, "error", err)
+			}
 		case messages.TypeHTTPStreamCancel:
 			payload, err := messages.DecodePayload[messages.StreamCancel](env)
 			if err != nil {
@@ -348,24 +393,187 @@ func (r *Runner) handleHTTPRequest(ctx context.Context, conn *websocket.Conn, tu
 	return nil
 }
 
-func (r *Runner) addActiveStream(streamID string, cancel context.CancelFunc) {
+func (r *Runner) handleHTTPStream(
+	ctx context.Context,
+	conn *websocket.Conn,
+	tunnelID string,
+	env messages.Envelope,
+	req httpwire.RequestStart,
+	chunks <-chan requestBodyChunk,
+) (err error) {
+	started := time.Now()
+	status := 0
+	outcome := "unknown"
+	var responseBytes int64
+
+	body, requestBytes := requestBodyFromChunks(ctx, chunks)
+	defer body.Close()
+	defer func() {
+		r.logLocalRequestFields(
+			env.StreamID,
+			tunnelID,
+			req.Method,
+			req.Path,
+			req.Query,
+			status,
+			outcome,
+			requestBytes.Load(),
+			responseBytes,
+			time.Since(started),
+			err,
+		)
+	}()
+
+	writeResponseStart := func(resp httpwire.ResponseStart) error {
+		if resp.Status <= 0 {
+			resp.Status = http.StatusBadGateway
+		}
+		status = resp.Status
+		start, err := messages.NewStream(messages.TypeHTTPResponseStart, env.StreamID, tunnelID, resp)
+		if err != nil {
+			return err
+		}
+		return r.write(ctx, conn, start)
+	}
+	writeResponseBody := func(chunk []byte) error {
+		bodyEnv, err := messages.NewStream(messages.TypeHTTPResponseBody, env.StreamID, tunnelID, httpwire.BodyChunk{
+			Data: chunk,
+		})
+		if err != nil {
+			return err
+		}
+		return r.write(ctx, conn, bodyEnv)
+	}
+
+	status, responseBytes, err = ForwardHTTPStream(
+		ctx,
+		r.httpClient,
+		r.cfg.LocalTarget,
+		req,
+		body,
+		r.cfg.MaxResponseBodyBytes,
+		r.cfg.StreamChunkBytes,
+		writeResponseStart,
+		writeResponseBody,
+	)
+	if err != nil {
+		if ctx.Err() != nil {
+			outcome = "stream_canceled"
+			r.writeStreamRequestOutput(req, 0, time.Since(started), ctx.Err())
+			return ctx.Err()
+		}
+		outcome = "local_request_failed"
+		streamErr, buildErr := messages.NewStream(messages.TypeHTTPStreamError, env.StreamID, tunnelID, messages.ErrorPayload{
+			Code:    "local_request_failed",
+			Message: err.Error(),
+		})
+		if buildErr != nil {
+			outcome = "stream_error_build_failed"
+			return buildErr
+		}
+		if writeErr := r.write(ctx, conn, streamErr); writeErr != nil {
+			outcome = "stream_error_write_failed"
+			return fmt.Errorf("write stream error: %w", writeErr)
+		}
+		r.writeStreamRequestOutput(req, 0, time.Since(started), err)
+		return err
+	}
+
+	end, err := messages.NewStream(messages.TypeHTTPResponseEnd, env.StreamID, tunnelID, nil)
+	if err != nil {
+		outcome = "response_end_build_failed"
+		return err
+	}
+	if err := r.write(ctx, conn, end); err != nil {
+		outcome = "response_end_write_failed"
+		return fmt.Errorf("write response end: %w", err)
+	}
+	outcome = "completed"
+
+	r.writeStreamRequestOutput(req, status, time.Since(started), nil)
+	return nil
+}
+
+func requestBodyFromChunks(ctx context.Context, chunks <-chan requestBodyChunk) (io.ReadCloser, *atomic.Int64) {
+	reader, writer := io.Pipe()
+	var requestBytes atomic.Int64
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				_ = writer.CloseWithError(ctx.Err())
+				return
+			case chunk := <-chunks:
+				if chunk.end {
+					_ = writer.Close()
+					return
+				}
+				if len(chunk.data) == 0 {
+					continue
+				}
+				requestBytes.Add(int64(len(chunk.data)))
+				if _, err := writer.Write(chunk.data); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	return reader, &requestBytes
+}
+
+func newActiveStream(cancel context.CancelFunc, chunks chan requestBodyChunk) *activeStream {
+	return &activeStream{
+		cancel: cancel,
+		chunks: chunks,
+		done:   make(chan struct{}),
+	}
+}
+
+func (s *activeStream) closeDone() {
+	s.doneOnce.Do(func() {
+		close(s.done)
+	})
+}
+
+func (r *Runner) addActiveStream(streamID string, stream *activeStream) {
 	if streamID == "" {
 		return
 	}
 	r.activeMu.Lock()
 	defer r.activeMu.Unlock()
-	r.activeStreams[streamID] = cancel
+	r.activeStreams[streamID] = stream
 }
 
 func (r *Runner) cancelActiveStream(streamID string) bool {
 	r.activeMu.Lock()
-	cancel, ok := r.activeStreams[streamID]
+	stream, ok := r.activeStreams[streamID]
 	r.activeMu.Unlock()
 	if !ok {
 		return false
 	}
-	cancel()
+	stream.cancel()
+	stream.closeDone()
 	return true
+}
+
+func (r *Runner) deliverActiveStreamChunk(ctx context.Context, streamID string, chunk requestBodyChunk) error {
+	r.activeMu.Lock()
+	stream, ok := r.activeStreams[streamID]
+	r.activeMu.Unlock()
+	if !ok || stream.chunks == nil {
+		return fmt.Errorf("unknown stream")
+	}
+
+	select {
+	case stream.chunks <- chunk:
+		return nil
+	case <-stream.done:
+		return fmt.Errorf("stream closed")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (r *Runner) removeActiveStream(streamID string) {
@@ -374,10 +582,30 @@ func (r *Runner) removeActiveStream(streamID string) {
 	}
 	r.activeMu.Lock()
 	defer r.activeMu.Unlock()
-	delete(r.activeStreams, streamID)
+	stream, ok := r.activeStreams[streamID]
+	if ok {
+		stream.closeDone()
+		delete(r.activeStreams, streamID)
+	}
 }
 
 func (r *Runner) logLocalRequest(streamID, tunnelID string, req httpwire.Request, status int, outcome string, responseBytes int64, duration time.Duration, err error) {
+	r.logLocalRequestFields(
+		streamID,
+		tunnelID,
+		req.Method,
+		req.Path,
+		req.Query,
+		status,
+		outcome,
+		int64(len(req.Body)),
+		responseBytes,
+		duration,
+		err,
+	)
+}
+
+func (r *Runner) logLocalRequestFields(streamID, tunnelID, method, path, query string, status int, outcome string, requestBytes, responseBytes int64, duration time.Duration, err error) {
 	level := slog.LevelInfo
 	if err != nil || status >= 500 {
 		level = slog.LevelWarn
@@ -386,11 +614,11 @@ func (r *Runner) logLocalRequest(streamID, tunnelID string, req httpwire.Request
 	attrs := []slog.Attr{
 		slog.String("stream_id", streamID),
 		slog.String("tunnel_id", tunnelID),
-		slog.String("method", req.Method),
-		slog.String("path", requestDisplayPath(req.Path, req.Query)),
+		slog.String("method", method),
+		slog.String("path", requestDisplayPath(path, query)),
 		slog.Int("status", status),
 		slog.String("outcome", outcome),
-		slog.Int("request_bytes", len(req.Body)),
+		slog.Int64("request_bytes", requestBytes),
 		slog.Int64("response_bytes", responseBytes),
 		slog.Int64("duration_ms", duration.Milliseconds()),
 	}
@@ -402,14 +630,22 @@ func (r *Runner) logLocalRequest(streamID, tunnelID string, req httpwire.Request
 }
 
 func (r *Runner) writeRequestOutput(req httpwire.Request, status int, duration time.Duration, err error) {
+	r.writeRequestOutputFields(req.Method, req.Path, req.Query, status, duration, err)
+}
+
+func (r *Runner) writeStreamRequestOutput(req httpwire.RequestStart, status int, duration time.Duration, err error) {
+	r.writeRequestOutputFields(req.Method, req.Path, req.Query, status, duration, err)
+}
+
+func (r *Runner) writeRequestOutputFields(method, path, query string, status int, duration time.Duration, err error) {
 	r.outputMu.Lock()
 	defer r.outputMu.Unlock()
 
 	if err != nil {
-		fmt.Fprintf(r.output, "%s %s -> error %dms: %s\n", req.Method, requestDisplayPath(req.Path, req.Query), duration.Milliseconds(), err)
+		fmt.Fprintf(r.output, "%s %s -> error %dms: %s\n", method, requestDisplayPath(path, query), duration.Milliseconds(), err)
 		return
 	}
-	fmt.Fprintf(r.output, "%s %s -> %d %dms\n", req.Method, requestDisplayPath(req.Path, req.Query), status, duration.Milliseconds())
+	fmt.Fprintf(r.output, "%s %s -> %d %dms\n", method, requestDisplayPath(path, query), status, duration.Milliseconds())
 }
 
 func (r *Runner) write(ctx context.Context, conn *websocket.Conn, env messages.Envelope) error {
