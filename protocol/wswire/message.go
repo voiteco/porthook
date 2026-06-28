@@ -18,6 +18,13 @@ type Message struct {
 	BinaryBody bool
 }
 
+func ReadLimitForChunkBytes(chunkBytes int) int64 {
+	if chunkBytes <= 0 {
+		chunkBytes = 32 << 10
+	}
+	return int64(chunkBytes)*2 + 16<<10
+}
+
 func Read(ctx context.Context, conn *websocket.Conn) (Message, error) {
 	messageType, data, err := conn.Read(ctx)
 	if err != nil {

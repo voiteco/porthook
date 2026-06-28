@@ -73,6 +73,14 @@ func TestReadAndWriteBinaryBody(t *testing.T) {
 	}
 }
 
+func TestReadLimitForChunkBytes(t *testing.T) {
+	got := ReadLimitForChunkBytes(32 << 10)
+	want := int64(80 << 10)
+	if got != want {
+		t.Fatalf("read limit = %d, want %d", got, want)
+	}
+}
+
 func testWebSocketPair(t *testing.T) *websocket.Conn {
 	t.Helper()
 

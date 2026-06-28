@@ -110,6 +110,7 @@ func (r *Runner) runOnce(ctx context.Context, wsURL string, restored bool) (bool
 	if err != nil {
 		return false, fmt.Errorf("connect to gateway %s: %w", wsURL, err)
 	}
+	conn.SetReadLimit(wswire.ReadLimitForChunkBytes(r.cfg.StreamChunkBytes))
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	if err := r.authenticate(handshakeCtx, conn); err != nil {

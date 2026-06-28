@@ -21,6 +21,7 @@ import (
 	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
 	"github.com/voiteco/porthook/protocol/names"
+	"github.com/voiteco/porthook/protocol/wswire"
 	"github.com/voiteco/porthook/server/gateway/internal/registry"
 )
 
@@ -128,6 +129,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("agent websocket accept failed", "error", err)
 		return
 	}
+	conn.SetReadLimit(wswire.ReadLimitForChunkBytes(s.cfg.StreamChunkBytes))
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	ctx, cancel := contextWithTimeout(r.Context(), s.cfg.HandshakeTimeout)
