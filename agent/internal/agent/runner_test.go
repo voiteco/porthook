@@ -385,6 +385,151 @@ func TestRunnerHandlesStreamedHTTPRequest(t *testing.T) {
 	}
 }
 
+func TestRunnerStreamsLocalResponseBeforeCompletion(t *testing.T) {
+	releaseSecond := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseSecond) })
+
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("first-"))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		select {
+		case <-releaseSecond:
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = w.Write([]byte("second"))
+	}))
+	defer local.Close()
+
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		ctx := r.Context()
+		readAuthAndRegistration(t, ctx, conn)
+
+		start, err := messages.NewStream(messages.TypeHTTPRequestStart, "str_slow", "tun_test", httpwire.RequestStart{
+			Method: http.MethodGet,
+			Path:   "/slow",
+		})
+		if err != nil {
+			t.Errorf("NewStream start returned error: %v", err)
+			return
+		}
+		if err := wswire.WriteEnvelope(ctx, conn, start); err != nil {
+			t.Errorf("write request start returned error: %v", err)
+			return
+		}
+		end, err := messages.NewStream(messages.TypeHTTPRequestEnd, "str_slow", "tun_test", nil)
+		if err != nil {
+			t.Errorf("NewStream end returned error: %v", err)
+			return
+		}
+		if err := wswire.WriteEnvelope(ctx, conn, end); err != nil {
+			t.Errorf("write request end returned error: %v", err)
+			return
+		}
+
+		gotStart := false
+		gotFirstChunk := false
+		var responseBody bytes.Buffer
+		for {
+			msg, err := wswire.Read(ctx, conn)
+			if err != nil {
+				t.Errorf("read response returned error: %v", err)
+				return
+			}
+			response := msg.Envelope
+			if response.StreamID != "str_slow" {
+				t.Errorf("stream id = %s, want str_slow", response.StreamID)
+				return
+			}
+
+			switch response.Type {
+			case messages.TypeHTTPResponseStart:
+				payload, err := messages.DecodePayload[httpwire.ResponseStart](response)
+				if err != nil {
+					t.Errorf("DecodePayload response start returned error: %v", err)
+					return
+				}
+				if payload.Status != http.StatusOK {
+					t.Errorf("status = %d, want 200", payload.Status)
+					return
+				}
+				gotStart = true
+			case messages.TypeHTTPResponseBody:
+				if !gotStart {
+					t.Errorf("response body arrived before response start")
+					return
+				}
+				if msg.BinaryBody {
+					responseBody.Write(msg.Body)
+				} else {
+					payload, err := messages.DecodePayload[httpwire.BodyChunk](response)
+					if err != nil {
+						t.Errorf("DecodePayload response body returned error: %v", err)
+						return
+					}
+					responseBody.Write(payload.Data)
+				}
+				if !gotFirstChunk && strings.Contains(responseBody.String(), "first-") {
+					gotFirstChunk = true
+					releaseOnce.Do(func() { close(releaseSecond) })
+				}
+			case messages.TypeHTTPResponseEnd:
+				if !gotFirstChunk {
+					t.Errorf("response ended before first chunk was observed")
+					return
+				}
+				if responseBody.String() != "first-second" {
+					t.Errorf("response body = %q, want first-second", responseBody.String())
+				}
+				return
+			default:
+				t.Errorf("response type = %s, want streaming response", response.Type)
+				return
+			}
+		}
+	}))
+	defer gateway.Close()
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:          gateway.URL,
+		Token:              "dev-token",
+		RequestedSubdomain: "demo",
+		LocalTarget:        local.URL,
+		AgentVersion:       "test",
+		RequestTimeout:     5 * time.Second,
+		StreamChunkBytes:   64,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !bytes.Contains(output.Bytes(), []byte("GET /slow -> 200")) {
+		t.Fatalf("output does not contain request log: %q", output.String())
+	}
+}
+
 func TestRunnerHandlesConcurrentHTTPRequests(t *testing.T) {
 	const requestCount = 6
 

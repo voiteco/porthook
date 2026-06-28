@@ -298,6 +298,70 @@ func TestPublicRequestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPublicRequestStreamsBodyAcrossChunks(t *testing.T) {
+	cfg := testConfig()
+	cfg.StreamChunkBytes = 4
+	cfg.MaxBodyBytes = 64
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	wantBody := strings.Repeat("abcd", 5) + "tail"
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, payload, body, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if payload.ContentLength != int64(len(wantBody)) {
+			agentErr <- errString("content length was not forwarded")
+			return
+		}
+		if string(body) != wantBody {
+			agentErr <- errString("chunked request body was not forwarded")
+			return
+		}
+
+		agentErr <- writeStreamedResponse(ctx, conn, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+			Status: http.StatusOK,
+			Body:   []byte("ok"),
+		})
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, publicServer.URL+"/upload", strings.NewReader(wantBody))
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
 func TestPublicRequestRejectsLargeBody(t *testing.T) {
 	cfg := testConfig()
 	cfg.MaxBodyBytes = 3
@@ -806,6 +870,48 @@ func TestContextWithTimeoutAllowsZeroTimeout(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("context was canceled immediately")
 	default:
+	}
+}
+
+func TestAgentSessionDeliveryAppliesBackpressure(t *testing.T) {
+	ch := make(chan wswire.Message, 1)
+	session := &agentSession{
+		done: make(chan struct{}),
+		pending: map[string]chan wswire.Message{
+			"str_test": ch,
+		},
+	}
+
+	env, err := messages.NewStream(messages.TypeHTTPResponseBody, "str_test", "tun_test", nil)
+	if err != nil {
+		t.Fatalf("NewStream returned error: %v", err)
+	}
+	msg := wswire.Message{Envelope: env, BinaryBody: true, Body: []byte("chunk")}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if !session.deliver(ctx, msg) {
+		t.Fatal("first deliver returned false")
+	}
+
+	delivered := make(chan struct{})
+	go func() {
+		session.deliver(ctx, msg)
+		close(delivered)
+	}()
+
+	select {
+	case <-delivered:
+		t.Fatal("deliver returned while pending channel was full")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	<-ch
+	select {
+	case <-delivered:
+	case <-time.After(time.Second):
+		t.Fatal("deliver did not complete after pending channel had capacity")
 	}
 }
 

@@ -16,10 +16,18 @@ SKIP_BUILD="${PORTHOOK_SMOKE_SKIP_BUILD:-0}"
 TMP_DIR="$(mktemp -d)"
 FIXTURE_DIR="${TMP_DIR}/fixture"
 LOG_DIR="${TMP_DIR}/logs"
+UPLOAD_FILE="${TMP_DIR}/upload.bin"
+UPLOAD_RESPONSE_FILE="${TMP_DIR}/upload-response.bin"
 MARKER="porthook smoke ok"
 
 mkdir -p "${FIXTURE_DIR}" "${LOG_DIR}"
 printf '%s\n' "${MARKER}" > "${FIXTURE_DIR}/smoke.txt"
+python3 - "${UPLOAD_FILE}" <<'PY'
+import pathlib
+import sys
+
+pathlib.Path(sys.argv[1]).write_bytes((b"porthook-stream-" * 5000) + b"ok")
+PY
 
 pids=()
 
@@ -95,6 +103,7 @@ wait_for_log() {
 }
 
 require_command curl
+require_command cmp
 require_command python3
 
 if [[ "${SKIP_BUILD}" != "1" ]]; then
@@ -104,8 +113,47 @@ if [[ "${SKIP_BUILD}" != "1" ]]; then
 	)
 fi
 
-python3 -m http.server "${LOCAL_PORT}" --bind 127.0.0.1 --directory "${FIXTURE_DIR}" \
-	>"${LOG_DIR}/local-http.log" 2>&1 &
+python3 - "${LOCAL_PORT}" "${FIXTURE_DIR}" \
+	>"${LOG_DIR}/local-http.log" 2>&1 <<'PY' &
+import http.server
+import pathlib
+import sys
+
+port = int(sys.argv[1])
+fixture_dir = pathlib.Path(sys.argv[2])
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self):
+        if self.path != "/smoke.txt":
+            self.send_error(404)
+            return
+        body = (fixture_dir / "smoke.txt").read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if self.path != "/echo":
+            self.send_error(404)
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        return
+
+with http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler) as server:
+    server.serve_forever()
+PY
 pids+=("$!")
 wait_for_url "http://127.0.0.1:${LOCAL_PORT}/smoke.txt" "local HTTP service"
 
@@ -133,5 +181,19 @@ if [[ "${response}" != "${MARKER}" ]]; then
 fi
 
 wait_for_log "${LOG_DIR}/agent.log" "GET /smoke.txt -> 200" "agent request log"
+
+curl -fsS \
+	-H "Host: ${SUBDOMAIN}.localhost" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary "@${UPLOAD_FILE}" \
+	"http://127.0.0.1:${PUBLIC_PORT}/echo" \
+	-o "${UPLOAD_RESPONSE_FILE}"
+
+if ! cmp -s "${UPLOAD_FILE}" "${UPLOAD_RESPONSE_FILE}"; then
+	echo "Unexpected upload echo response" >&2
+	exit 1
+fi
+
+wait_for_log "${LOG_DIR}/agent.log" "POST /echo -> 200" "agent upload request log"
 
 echo "Smoke test passed: http://${SUBDOMAIN}.localhost:${PUBLIC_PORT}/smoke.txt"
