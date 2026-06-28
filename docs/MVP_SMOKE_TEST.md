@@ -92,6 +92,6 @@ Expected result:
 
 ## Notes
 
-The MVP uses JSON messages over WebSocket with chunked `start/body/end` frames for HTTP bodies. The current transport is intentionally simple and can move to binary chunks later without changing the public CLI flow.
+The MVP uses JSON messages over WebSocket for control and stream start/end messages, plus binary WebSocket frames for HTTP body chunks. The local smoke test covers both a simple GET and a larger POST echo through the tunnel.
 
 The Docker Compose path is documented in [../deploy/compose/README.md](../deploy/compose/README.md).

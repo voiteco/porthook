@@ -259,9 +259,9 @@ Future transports may include HTTP/2 streams, QUIC, or a custom TCP multiplexer.
 
 ### 10.2 Message Types
 
-Control messages should be JSON.
+Control messages and stream start/end messages should be JSON.
 
-Payload messages may be binary once request forwarding is implemented.
+HTTP body messages use binary WebSocket frames with stream metadata and raw body bytes. JSON body chunk payloads may be accepted for compatibility.
 
 Initial control messages:
 

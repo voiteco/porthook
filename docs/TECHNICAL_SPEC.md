@@ -124,9 +124,9 @@ The protocol has two layers:
 - Control messages for authentication, tunnel registration, and lifecycle.
 - Stream messages for HTTP request and response forwarding.
 
-Control messages are JSON.
+Control messages and stream start/end messages are JSON.
 
-HTTP request and response bodies use chunked JSON stream messages. The gateway and agent still understand the original whole-body `http.request` and `http.response` messages for compatibility, but the public forwarding path uses `start/body/end` frames.
+HTTP request and response bodies use binary WebSocket frames tagged as `http.request.body` and `http.response.body`. The gateway and agent still understand the original whole-body `http.request` and `http.response` messages, plus JSON body chunk payloads, for compatibility. The public forwarding path uses `start/body/end` frames with binary body chunks.
 
 Every forwarded HTTP request is assigned a stream ID created by the gateway.
 
@@ -240,9 +240,11 @@ http.stream.cancel
 }
 ```
 
-### 10.2 Body Chunk Payload
+### 10.2 Body Chunk Frames
 
 Used by `http.request.body` and `http.response.body`.
+
+The primary transport is a binary WebSocket frame with Porthook body-frame metadata followed by raw body bytes. Implementations may also accept the JSON compatibility payload:
 
 ```json
 {
@@ -573,8 +575,7 @@ Manual smoke test:
 
 ## 20. Open Technical Questions
 
-- Should control and body messages share one WebSocket frame format from day one?
-- Should binary body frames be implemented before public alpha?
+- Should control and body messages share one WebSocket frame format later?
 - Should the first gateway expose one port or separate public and agent ports?
 - Should the root Go module include all components or should modules be split early?
 - Which WebSocket library should be used?
