@@ -19,6 +19,7 @@ import (
 
 	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
+	"github.com/voiteco/porthook/protocol/wswire"
 )
 
 const agentWebSocketPath = "/agent/connect"
@@ -217,8 +218,8 @@ func errorPayloadMessage(payload messages.ErrorPayload) string {
 
 func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID string) error {
 	for {
-		var env messages.Envelope
-		if err := wsjson.Read(ctx, conn, &env); err != nil {
+		msg, err := wswire.Read(ctx, conn)
+		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -227,6 +228,7 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 			}
 			return fmt.Errorf("read gateway message: %w", err)
 		}
+		env := msg.Envelope
 
 		switch env.Type {
 		case messages.TypeHTTPRequest:
@@ -252,17 +254,23 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 				_ = r.handleHTTPStream(streamCtx, conn, tunnelID, env, req, stream.chunks)
 			}(env, req, stream)
 		case messages.TypeHTTPRequestBody:
-			payload, err := messages.DecodePayload[httpwire.BodyChunk](env)
-			if err != nil {
-				r.logger.Warn("decode request body failed", "stream_id", env.StreamID, "error", err)
-				continue
+			var data []byte
+			if msg.BinaryBody {
+				data = msg.Body
+			} else {
+				payload, err := messages.DecodePayload[httpwire.BodyChunk](env)
+				if err != nil {
+					r.logger.Warn("decode request body failed", "stream_id", env.StreamID, "error", err)
+					continue
+				}
+				data = payload.Data
 			}
-			if len(payload.Data) > r.cfg.StreamChunkBytes {
-				r.logger.Warn("request body chunk too large", "stream_id", env.StreamID, "chunk_bytes", len(payload.Data))
+			if len(data) > r.cfg.StreamChunkBytes {
+				r.logger.Warn("request body chunk too large", "stream_id", env.StreamID, "chunk_bytes", len(data))
 				r.cancelActiveStream(env.StreamID)
 				continue
 			}
-			if err := r.deliverActiveStreamChunk(ctx, env.StreamID, requestBodyChunk{data: payload.Data}); err != nil {
+			if err := r.deliverActiveStreamChunk(ctx, env.StreamID, requestBodyChunk{data: data}); err != nil {
 				r.logger.Warn("deliver request body failed", "stream_id", env.StreamID, "error", err)
 			}
 		case messages.TypeHTTPRequestEnd:
@@ -436,13 +444,7 @@ func (r *Runner) handleHTTPStream(
 		return r.write(ctx, conn, start)
 	}
 	writeResponseBody := func(chunk []byte) error {
-		bodyEnv, err := messages.NewStream(messages.TypeHTTPResponseBody, env.StreamID, tunnelID, httpwire.BodyChunk{
-			Data: chunk,
-		})
-		if err != nil {
-			return err
-		}
-		return r.write(ctx, conn, bodyEnv)
+		return r.writeBinaryBody(ctx, conn, messages.TypeHTTPResponseBody, env.StreamID, tunnelID, chunk)
 	}
 
 	status, responseBytes, err = ForwardHTTPStream(
@@ -653,7 +655,15 @@ func (r *Runner) write(ctx context.Context, conn *websocket.Conn, env messages.E
 	defer r.sendMu.Unlock()
 	writeCtx, cancel := contextWithTimeout(ctx, r.cfg.WebSocketWriteTimeout)
 	defer cancel()
-	return wsjson.Write(writeCtx, conn, env)
+	return wswire.WriteEnvelope(writeCtx, conn, env)
+}
+
+func (r *Runner) writeBinaryBody(ctx context.Context, conn *websocket.Conn, typ messages.Type, streamID, tunnelID string, body []byte) error {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+	writeCtx, cancel := contextWithTimeout(ctx, r.cfg.WebSocketWriteTimeout)
+	defer cancel()
+	return wswire.WriteBinaryBody(writeCtx, conn, typ, streamID, tunnelID, body)
 }
 
 func (r *Runner) ping(ctx context.Context, conn *websocket.Conn) error {

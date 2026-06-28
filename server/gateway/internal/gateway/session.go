@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 
 	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
+	"github.com/voiteco/porthook/protocol/wswire"
 	"github.com/voiteco/porthook/server/gateway/internal/registry"
 )
 
@@ -39,7 +39,7 @@ type agentSession struct {
 	streams  chan struct{}
 
 	pendingMu sync.RWMutex
-	pending   map[string]chan messages.Envelope
+	pending   map[string]chan wswire.Message
 }
 
 func newAgentSession(conn *websocket.Conn, tunnel *registry.Session, writeTimeout time.Duration, maxConcurrentStreams int) *agentSession {
@@ -53,7 +53,7 @@ func newAgentSession(conn *websocket.Conn, tunnel *registry.Session, writeTimeou
 		writeTO: writeTimeout,
 		done:    make(chan struct{}),
 		streams: streams,
-		pending: make(map[string]chan messages.Envelope),
+		pending: make(map[string]chan wswire.Message),
 	}
 }
 
@@ -63,7 +63,7 @@ func (s *agentSession) roundTrip(ctx context.Context, streamID string, req httpw
 	}
 	defer s.releaseStream()
 
-	ch := make(chan messages.Envelope, 1)
+	ch := make(chan wswire.Message, 1)
 	s.addPending(streamID, ch)
 	defer s.removePending(streamID)
 
@@ -81,7 +81,8 @@ func (s *agentSession) roundTrip(ctx context.Context, streamID string, req httpw
 		return httpwire.Response{}, ctx.Err()
 	case <-s.done:
 		return httpwire.Response{}, errors.New("agent disconnected")
-	case respEnv := <-ch:
+	case respMsg := <-ch:
+		respEnv := respMsg.Envelope
 		switch respEnv.Type {
 		case messages.TypeHTTPResponse:
 			return messages.DecodePayload[httpwire.Response](respEnv)
@@ -112,7 +113,7 @@ func (s *agentSession) streamRoundTrip(
 	}
 	defer s.releaseStream()
 
-	ch := make(chan messages.Envelope, 32)
+	ch := make(chan wswire.Message, 32)
 	s.addPending(streamID, ch)
 	defer s.removePending(streamID)
 
@@ -167,13 +168,7 @@ func (s *agentSession) writeRequestBody(ctx context.Context, streamID string, bo
 				return sent, ErrRequestBodyTooLarge
 			}
 			chunk := append([]byte(nil), buf[:n]...)
-			env, err := messages.NewStream(messages.TypeHTTPRequestBody, streamID, s.tunnel.TunnelID, httpwire.BodyChunk{
-				Data: chunk,
-			})
-			if err != nil {
-				return sent, err
-			}
-			if err := s.write(ctx, env); err != nil {
+			if err := s.writeBinaryBody(ctx, messages.TypeHTTPRequestBody, streamID, chunk); err != nil {
 				return sent, fmt.Errorf("write request body: %w", err)
 			}
 		}
@@ -189,7 +184,7 @@ func (s *agentSession) writeRequestBody(ctx context.Context, streamID string, bo
 func (s *agentSession) readStreamResponse(
 	ctx context.Context,
 	streamID string,
-	ch <-chan messages.Envelope,
+	ch <-chan wswire.Message,
 	chunkBytes int,
 	writeResponseStart func(httpwire.ResponseStart),
 	writeResponseBody func([]byte) (int, error),
@@ -207,7 +202,8 @@ func (s *agentSession) readStreamResponse(
 			return result, ctx.Err()
 		case <-s.done:
 			return result, errors.New("agent disconnected")
-		case respEnv := <-ch:
+		case respMsg := <-ch:
+			respEnv := respMsg.Envelope
 			switch respEnv.Type {
 			case messages.TypeHTTPResponseStart:
 				resp, err := messages.DecodePayload[httpwire.ResponseStart](respEnv)
@@ -224,19 +220,16 @@ func (s *agentSession) readStreamResponse(
 				if !responseStarted {
 					return result, errors.New("response body received before response start")
 				}
-				chunk, err := messages.DecodePayload[httpwire.BodyChunk](respEnv)
+				chunk, err := responseBodyChunk(respMsg, chunkBytes)
 				if err != nil {
 					return result, err
 				}
-				if len(chunk.Data) > chunkBytes {
-					return result, fmt.Errorf("response chunk exceeds %d bytes", chunkBytes)
-				}
-				n, err := writeResponseBody(chunk.Data)
+				n, err := writeResponseBody(chunk)
 				result.ResponseBytes += int64(n)
 				if err != nil {
 					return result, err
 				}
-				if n != len(chunk.Data) {
+				if n != len(chunk) {
 					return result, io.ErrShortWrite
 				}
 			case messages.TypeHTTPResponseEnd:
@@ -259,6 +252,23 @@ func (s *agentSession) readStreamResponse(
 			}
 		}
 	}
+}
+
+func responseBodyChunk(msg wswire.Message, chunkBytes int) ([]byte, error) {
+	var chunk []byte
+	if msg.BinaryBody {
+		chunk = msg.Body
+	} else {
+		payload, err := messages.DecodePayload[httpwire.BodyChunk](msg.Envelope)
+		if err != nil {
+			return nil, err
+		}
+		chunk = payload.Data
+	}
+	if len(chunk) > chunkBytes {
+		return nil, fmt.Errorf("response chunk exceeds %d bytes", chunkBytes)
+	}
+	return chunk, nil
 }
 
 func (s *agentSession) handleWholeResponse(
@@ -359,7 +369,15 @@ func (s *agentSession) write(ctx context.Context, env messages.Envelope) error {
 	defer s.sendMu.Unlock()
 	writeCtx, cancel := contextWithTimeout(ctx, s.writeTO)
 	defer cancel()
-	return wsjson.Write(writeCtx, s.conn, env)
+	return wswire.WriteEnvelope(writeCtx, s.conn, env)
+}
+
+func (s *agentSession) writeBinaryBody(ctx context.Context, typ messages.Type, streamID string, body []byte) error {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	writeCtx, cancel := contextWithTimeout(ctx, s.writeTO)
+	defer cancel()
+	return wswire.WriteBinaryBody(writeCtx, s.conn, typ, streamID, s.tunnel.TunnelID, body)
 }
 
 func (s *agentSession) ping(ctx context.Context, timeout time.Duration) error {
@@ -405,11 +423,12 @@ func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 	defer s.closeDone()
 
 	for {
-		var env messages.Envelope
-		if err := wsjson.Read(ctx, s.conn, &env); err != nil {
+		msg, err := wswire.Read(ctx, s.conn)
+		if err != nil {
 			logger.Info("agent read loop stopped", "tunnel_id", s.tunnel.TunnelID, "error", err)
 			return
 		}
+		env := msg.Envelope
 
 		switch env.Type {
 		case messages.TypePing:
@@ -427,7 +446,7 @@ func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 			messages.TypeHTTPResponseBody,
 			messages.TypeHTTPResponseEnd,
 			messages.TypeHTTPStreamError:
-			if !s.deliver(env) {
+			if !s.deliver(ctx, msg) {
 				logger.Warn("received response for unknown stream", "tunnel_id", s.tunnel.TunnelID, "stream_id", env.StreamID)
 			}
 		default:
@@ -436,7 +455,7 @@ func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 	}
 }
 
-func (s *agentSession) addPending(streamID string, ch chan messages.Envelope) {
+func (s *agentSession) addPending(streamID string, ch chan wswire.Message) {
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
 	s.pending[streamID] = ch
@@ -448,17 +467,18 @@ func (s *agentSession) removePending(streamID string) {
 	delete(s.pending, streamID)
 }
 
-func (s *agentSession) deliver(env messages.Envelope) bool {
+func (s *agentSession) deliver(ctx context.Context, msg wswire.Message) bool {
 	s.pendingMu.RLock()
-	ch, ok := s.pending[env.StreamID]
+	ch, ok := s.pending[msg.Envelope.StreamID]
 	s.pendingMu.RUnlock()
 	if !ok {
 		return false
 	}
 
 	select {
-	case ch <- env:
-	default:
+	case ch <- msg:
+	case <-ctx.Done():
+	case <-s.done:
 	}
 	return true
 }

@@ -20,6 +20,7 @@ import (
 
 	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
+	"github.com/voiteco/porthook/protocol/wswire"
 )
 
 func TestBuildWebSocketURL(t *testing.T) {
@@ -295,19 +296,12 @@ func TestRunnerHandlesStreamedHTTPRequest(t *testing.T) {
 			t.Errorf("NewStream start returned error: %v", err)
 			return
 		}
-		if err := wsjson.Write(ctx, conn, start); err != nil {
+		if err := wswire.WriteEnvelope(ctx, conn, start); err != nil {
 			t.Errorf("write request start returned error: %v", err)
 			return
 		}
 		for _, data := range []string{"pay", "load"} {
-			body, err := messages.NewStream(messages.TypeHTTPRequestBody, "str_stream", "tun_test", httpwire.BodyChunk{
-				Data: []byte(data),
-			})
-			if err != nil {
-				t.Errorf("NewStream body returned error: %v", err)
-				return
-			}
-			if err := wsjson.Write(ctx, conn, body); err != nil {
+			if err := wswire.WriteBinaryBody(ctx, conn, messages.TypeHTTPRequestBody, "str_stream", "tun_test", []byte(data)); err != nil {
 				t.Errorf("write request body returned error: %v", err)
 				return
 			}
@@ -317,18 +311,19 @@ func TestRunnerHandlesStreamedHTTPRequest(t *testing.T) {
 			t.Errorf("NewStream end returned error: %v", err)
 			return
 		}
-		if err := wsjson.Write(ctx, conn, end); err != nil {
+		if err := wswire.WriteEnvelope(ctx, conn, end); err != nil {
 			t.Errorf("write request end returned error: %v", err)
 			return
 		}
 
 		var responseBody bytes.Buffer
 		for {
-			var response messages.Envelope
-			if err := wsjson.Read(ctx, conn, &response); err != nil {
+			msg, err := wswire.Read(ctx, conn)
+			if err != nil {
 				t.Errorf("read response returned error: %v", err)
 				return
 			}
+			response := msg.Envelope
 			if response.StreamID != "str_stream" {
 				t.Errorf("stream id = %s, want str_stream", response.StreamID)
 				return
@@ -345,12 +340,16 @@ func TestRunnerHandlesStreamedHTTPRequest(t *testing.T) {
 					return
 				}
 			case messages.TypeHTTPResponseBody:
-				payload, err := messages.DecodePayload[httpwire.BodyChunk](response)
-				if err != nil {
-					t.Errorf("DecodePayload response body returned error: %v", err)
-					return
+				if msg.BinaryBody {
+					responseBody.Write(msg.Body)
+				} else {
+					payload, err := messages.DecodePayload[httpwire.BodyChunk](response)
+					if err != nil {
+						t.Errorf("DecodePayload response body returned error: %v", err)
+						return
+					}
+					responseBody.Write(payload.Data)
 				}
-				responseBody.Write(payload.Data)
 			case messages.TypeHTTPResponseEnd:
 				if responseBody.String() != "local-ok" {
 					t.Errorf("response body = %q, want local-ok", responseBody.String())

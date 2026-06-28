@@ -18,6 +18,7 @@ import (
 
 	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
+	"github.com/voiteco/porthook/protocol/wswire"
 )
 
 func TestAgentWebSocketAuthAndRegister(t *testing.T) {
@@ -831,10 +832,11 @@ func errUnexpectedType(got, want messages.Type) error {
 }
 
 func readStreamedRequest(ctx context.Context, conn *websocket.Conn) (messages.Envelope, httpwire.RequestStart, []byte, error) {
-	var startEnv messages.Envelope
-	if err := wsjson.Read(ctx, conn, &startEnv); err != nil {
+	startMsg, err := wswire.Read(ctx, conn)
+	if err != nil {
 		return messages.Envelope{}, httpwire.RequestStart{}, nil, err
 	}
+	startEnv := startMsg.Envelope
 	if startEnv.Type != messages.TypeHTTPRequestStart {
 		return messages.Envelope{}, httpwire.RequestStart{}, nil, errUnexpectedType(startEnv.Type, messages.TypeHTTPRequestStart)
 	}
@@ -846,21 +848,26 @@ func readStreamedRequest(ctx context.Context, conn *websocket.Conn) (messages.En
 
 	var body bytes.Buffer
 	for {
-		var env messages.Envelope
-		if err := wsjson.Read(ctx, conn, &env); err != nil {
+		msg, err := wswire.Read(ctx, conn)
+		if err != nil {
 			return messages.Envelope{}, httpwire.RequestStart{}, nil, err
 		}
+		env := msg.Envelope
 		if env.StreamID != startEnv.StreamID {
 			return messages.Envelope{}, httpwire.RequestStart{}, nil, errString("stream id changed while reading request")
 		}
 
 		switch env.Type {
 		case messages.TypeHTTPRequestBody:
-			chunk, err := messages.DecodePayload[httpwire.BodyChunk](env)
-			if err != nil {
-				return messages.Envelope{}, httpwire.RequestStart{}, nil, err
+			if msg.BinaryBody {
+				body.Write(msg.Body)
+			} else {
+				chunk, err := messages.DecodePayload[httpwire.BodyChunk](env)
+				if err != nil {
+					return messages.Envelope{}, httpwire.RequestStart{}, nil, err
+				}
+				body.Write(chunk.Data)
 			}
-			body.Write(chunk.Data)
 		case messages.TypeHTTPRequestEnd:
 			return startEnv, start, body.Bytes(), nil
 		default:
@@ -877,17 +884,11 @@ func writeStreamedResponse(ctx context.Context, conn *websocket.Conn, streamID, 
 	if err != nil {
 		return err
 	}
-	if err := wsjson.Write(ctx, conn, start); err != nil {
+	if err := wswire.WriteEnvelope(ctx, conn, start); err != nil {
 		return err
 	}
 	if len(resp.Body) > 0 {
-		body, err := messages.NewStream(messages.TypeHTTPResponseBody, streamID, tunnelID, httpwire.BodyChunk{
-			Data: resp.Body,
-		})
-		if err != nil {
-			return err
-		}
-		if err := wsjson.Write(ctx, conn, body); err != nil {
+		if err := wswire.WriteBinaryBody(ctx, conn, messages.TypeHTTPResponseBody, streamID, tunnelID, resp.Body); err != nil {
 			return err
 		}
 	}
@@ -895,7 +896,7 @@ func writeStreamedResponse(ctx context.Context, conn *websocket.Conn, streamID, 
 	if err != nil {
 		return err
 	}
-	return wsjson.Write(ctx, conn, end)
+	return wswire.WriteEnvelope(ctx, conn, end)
 }
 
 func testConfig() Config {
