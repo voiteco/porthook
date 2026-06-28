@@ -231,9 +231,13 @@ Responsibilities:
 
 The dashboard is useful, but not required for the first tunnel MVP.
 
-## 10. Tunnel Protocol v0.1
+## 10. Tunnel Protocol v0.2
 
-The first protocol should optimize for simplicity over maximum performance.
+Protocol negotiation now happens in `auth.request` and `auth.ok` to keep backward compatibility safe:
+
+- `auth.request` carries `protocol_version` and `capabilities`.
+- `auth.ok` returns gateway protocol capabilities.
+- `auth.error` uses `unsupported_protocol` for incompatible clients.
 
 Recommended transport: WebSocket over TLS.
 
@@ -283,6 +287,40 @@ Initial control messages:
 - `http.stream.cancel`
 - `ping`
 - `pong`
+
+`auth.request` example:
+
+```json
+{
+  "type": "auth.request",
+  "payload": {
+    "token": "secret-token",
+    "agent_version": "0.1.0",
+    "protocol_version": "0.2",
+    "capabilities": [
+      "stream_start_end",
+      "binary_body_frames",
+      "stream_cancel"
+    ]
+  }
+}
+```
+
+`auth.ok` example:
+
+```json
+{
+  "type": "auth.ok",
+  "payload": {
+    "protocol_version": "0.2",
+    "capabilities": [
+      "stream_start_end",
+      "binary_body_frames",
+      "stream_cancel"
+    ]
+  }
+}
+```
 
 ### 10.3 Stream Identity
 

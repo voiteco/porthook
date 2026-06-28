@@ -128,6 +128,19 @@ Control messages and stream start/end messages are JSON.
 
 HTTP request and response bodies use binary WebSocket frames tagged as `http.request.body` and `http.response.body`. The gateway and agent still understand the original whole-body `http.request` and `http.response` messages, plus JSON body chunk payloads, for compatibility. The public forwarding path uses `start/body/end` frames with binary body chunks.
 
+Protocol negotiation is handled in the auth handshake:
+
+- `auth.request` includes `protocol_version` and `capabilities`.
+- `auth.ok` returns the gateway protocol version and capability list.
+- The gateway rejects agents with missing/invalid protocol information as `unsupported_protocol`.
+- The agent rejects gateways that do not report compatible protocol version/capabilities.
+
+Required capabilities for stream-aware HTTP:
+
+- `stream_start_end`
+- `binary_body_frames`
+- `stream_cancel`
+
 Every forwarded HTTP request is assigned a stream ID created by the gateway.
 
 ## 8. Message Envelope
@@ -174,7 +187,13 @@ Sent by agent after opening the WebSocket.
   "type": "auth.request",
   "payload": {
     "token": "secret-token",
-    "agent_version": "0.1.0"
+    "agent_version": "0.1.0",
+    "protocol_version": "0.2",
+    "capabilities": [
+      "stream_start_end",
+      "binary_body_frames",
+      "stream_cancel"
+    ]
   }
 }
 ```
@@ -205,6 +224,34 @@ Sent by gateway when the tunnel is active.
     "tunnel_id": "tun_123",
     "public_url": "https://demo.porthook.example",
     "subdomain": "demo"
+  }
+}
+```
+
+### 9.4 auth.ok
+
+```json
+{
+  "type": "auth.ok",
+  "payload": {
+    "protocol_version": "0.2",
+    "capabilities": [
+      "stream_start_end",
+      "binary_body_frames",
+      "stream_cancel"
+    ]
+  }
+}
+```
+
+### 9.5 auth.error
+
+```json
+{
+  "type": "auth.error",
+  "payload": {
+    "code": "unsupported_protocol",
+    "message": "agent protocol version \"0.1\" is not supported, expected \"0.2\""
   }
 }
 ```

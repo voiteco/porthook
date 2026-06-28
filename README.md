@@ -140,3 +140,5 @@ The implementation-focused technical specification lives in [docs/TECHNICAL_SPEC
 The first Go MVP smoke test lives in [docs/MVP_SMOKE_TEST.md](./docs/MVP_SMOKE_TEST.md).
 
 The pre-alpha release process lives in [docs/RELEASE.md](./docs/RELEASE.md).
+
+Release notes are maintained in [CHANGELOG.md](./CHANGELOG.md).

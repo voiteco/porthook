@@ -35,7 +35,11 @@ func TestAgentWebSocketAuthAndRegister(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{Token: "dev-token"})
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "dev-token",
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
 	if err != nil {
 		t.Fatalf("New auth returned error: %v", err)
 	}
@@ -49,6 +53,16 @@ func TestAgentWebSocketAuthAndRegister(t *testing.T) {
 	}
 	if authResp.Type != messages.TypeAuthOK {
 		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthOK)
+	}
+	authOKPayload, err := messages.DecodePayload[messages.AuthOK](authResp)
+	if err != nil {
+		t.Fatalf("decode auth ok returned error: %v", err)
+	}
+	if authOKPayload.ProtocolVersion != messages.ProtocolVersion {
+		t.Fatalf("auth protocol version = %q, want %q", authOKPayload.ProtocolVersion, messages.ProtocolVersion)
+	}
+	if len(authOKPayload.Capabilities) != len(messages.DefaultProtocolCapabilities()) {
+		t.Fatalf("auth capabilities count = %d, want %d", len(authOKPayload.Capabilities), len(messages.DefaultProtocolCapabilities()))
 	}
 
 	reg, err := messages.New(messages.TypeTunnelRegister, messages.TunnelRegister{
@@ -83,6 +97,98 @@ func TestAgentWebSocketAuthAndRegister(t *testing.T) {
 	}
 	if payload.PublicURL != "http://demo.localhost:8080" {
 		t.Fatalf("public url = %q, want http://demo.localhost:8080", payload.PublicURL)
+	}
+}
+
+func TestAgentWebSocketRejectsUnsupportedProtocol(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	httpServer := httptest.NewServer(server.AgentHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "dev-token",
+		ProtocolVersion: "0.1",
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
+	if err != nil {
+		t.Fatalf("New auth returned error: %v", err)
+	}
+	if err := wsjson.Write(ctx, conn, auth); err != nil {
+		t.Fatalf("write auth returned error: %v", err)
+	}
+
+	var authResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &authResp); err != nil {
+		t.Fatalf("read auth response returned error: %v", err)
+	}
+	if authResp.Type != messages.TypeAuthError {
+		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthError)
+	}
+
+	payload, err := messages.DecodePayload[messages.ErrorPayload](authResp)
+	if err != nil {
+		t.Fatalf("decode auth error returned error: %v", err)
+	}
+	if payload.Code != "unsupported_protocol" {
+		t.Fatalf("auth error code = %q, want unsupported_protocol", payload.Code)
+	}
+	if !strings.Contains(payload.Message, "protocol version") {
+		t.Fatalf("auth error message = %q, want protocol version mismatch", payload.Message)
+	}
+}
+
+func TestAgentWebSocketRejectsMissingCapabilities(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	httpServer := httptest.NewServer(server.AgentHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "dev-token",
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    []string{messages.CapabilityStreamStartEnd},
+	})
+	if err != nil {
+		t.Fatalf("New auth returned error: %v", err)
+	}
+	if err := wsjson.Write(ctx, conn, auth); err != nil {
+		t.Fatalf("write auth returned error: %v", err)
+	}
+
+	var authResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &authResp); err != nil {
+		t.Fatalf("read auth response returned error: %v", err)
+	}
+	if authResp.Type != messages.TypeAuthError {
+		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthError)
+	}
+
+	payload, err := messages.DecodePayload[messages.ErrorPayload](authResp)
+	if err != nil {
+		t.Fatalf("decode auth error returned error: %v", err)
+	}
+	if payload.Code != "unsupported_protocol" {
+		t.Fatalf("auth error code = %q, want unsupported_protocol", payload.Code)
+	}
+	if !strings.Contains(payload.Message, messages.CapabilityBinaryBodyFrame) {
+		t.Fatalf("auth error message = %q, want binary_body_frames", payload.Message)
 	}
 }
 
@@ -698,7 +804,11 @@ func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{Token: "wrong"})
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "wrong",
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
 	if err != nil {
 		t.Fatalf("New auth returned error: %v", err)
 	}
@@ -742,7 +852,11 @@ func registerAgentAndRead(t *testing.T, ctx context.Context, conn *websocket.Con
 
 func authenticateAgentForTest(t *testing.T, ctx context.Context, conn *websocket.Conn) {
 	t.Helper()
-	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{Token: "dev-token"})
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "dev-token",
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
 	if err != nil {
 		t.Fatalf("New auth returned error: %v", err)
 	}

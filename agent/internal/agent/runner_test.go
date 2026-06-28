@@ -156,7 +156,23 @@ func TestRunnerHandlesHTTPRequest(t *testing.T) {
 			t.Errorf("auth type = %s, want %s", auth.Type, messages.TypeAuthRequest)
 			return
 		}
-		authOK, _ := messages.New(messages.TypeAuthOK, messages.AuthOK{})
+		authPayload, err := messages.DecodePayload[messages.AuthRequest](auth)
+		if err != nil {
+			t.Errorf("decode auth request returned error: %v", err)
+			return
+		}
+		if authPayload.ProtocolVersion != messages.ProtocolVersion {
+			t.Errorf("auth protocol version = %q, want %q", authPayload.ProtocolVersion, messages.ProtocolVersion)
+			return
+		}
+		if len(authPayload.Capabilities) != len(messages.DefaultProtocolCapabilities()) {
+			t.Errorf("auth capabilities = %d, want %d", len(authPayload.Capabilities), len(messages.DefaultProtocolCapabilities()))
+			return
+		}
+		authOK, _ := messages.New(messages.TypeAuthOK, messages.AuthOK{
+			ProtocolVersion: messages.ProtocolVersion,
+			Capabilities:    messages.DefaultProtocolCapabilities(),
+		})
 		if err := wsjson.Write(ctx, conn, authOK); err != nil {
 			t.Errorf("write auth ok returned error: %v", err)
 			return
@@ -797,6 +813,75 @@ func TestRunnerDoesNotReconnectAfterAuthError(t *testing.T) {
 	}
 }
 
+func TestRunnerDoesNotReconnectAfterUnsupportedProtocolAuthOK(t *testing.T) {
+	var connections atomic.Int32
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+		connections.Add(1)
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusPolicyViolation, "auth failed")
+
+		var auth messages.Envelope
+		if err := wsjson.Read(r.Context(), conn, &auth); err != nil {
+			t.Errorf("read auth returned error: %v", err)
+			return
+		}
+
+		authPayload, err := messages.DecodePayload[messages.AuthRequest](auth)
+		if err != nil {
+			t.Errorf("decode auth request returned error: %v", err)
+			return
+		}
+		if authPayload.Token != "dev-token" {
+			t.Errorf("auth token = %q, want dev-token", authPayload.Token)
+		}
+
+		authOK, _ := messages.New(messages.TypeAuthOK, messages.AuthOK{
+			ProtocolVersion: "0.1",
+			Capabilities:    []string{"old"},
+		})
+		if err := wsjson.Write(r.Context(), conn, authOK); err != nil {
+			t.Errorf("write auth ok returned error: %v", err)
+		}
+	}))
+	defer gateway.Close()
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:             gateway.URL,
+		Token:                 "dev-token",
+		LocalTarget:           "http://localhost:3000",
+		ReconnectInitialDelay: time.Millisecond,
+		ReconnectMaxDelay:     time.Millisecond,
+		ReconnectJitter:       0,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := runner.Run(ctx)
+	if err == nil {
+		t.Fatal("Run returned nil error")
+	}
+	if !strings.Contains(err.Error(), "gateway protocol is incompatible") {
+		t.Fatalf("error = %q, want protocol mismatch error", err.Error())
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("connections = %d, want 1", got)
+	}
+	if strings.Contains(output.String(), "retrying") || strings.Contains(output.String(), "reconnecting") {
+		t.Fatalf("output = %q, want no reconnect output", output.String())
+	}
+}
+
 func TestRunnerCancelsLocalRequestOnStreamCancel(t *testing.T) {
 	localStarted := make(chan struct{})
 	localCanceled := make(chan struct{})
@@ -896,7 +981,24 @@ func readAuthAndRegistration(t *testing.T, ctx context.Context, conn *websocket.
 	if auth.Type != messages.TypeAuthRequest {
 		t.Fatalf("auth type = %s, want %s", auth.Type, messages.TypeAuthRequest)
 	}
-	authOK, _ := messages.New(messages.TypeAuthOK, messages.AuthOK{})
+	authPayload, err := messages.DecodePayload[messages.AuthRequest](auth)
+	if err != nil {
+		t.Fatalf("decode auth request returned error: %v", err)
+	}
+	if authPayload.ProtocolVersion != messages.ProtocolVersion {
+		t.Fatalf("auth protocol version = %q, want %q", authPayload.ProtocolVersion, messages.ProtocolVersion)
+	}
+	if len(authPayload.Capabilities) != len(messages.DefaultProtocolCapabilities()) {
+		t.Fatalf("auth capabilities = %d, want %d", len(authPayload.Capabilities), len(messages.DefaultProtocolCapabilities()))
+	}
+
+	authOK, err := messages.New(messages.TypeAuthOK, messages.AuthOK{
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
+	if err != nil {
+		t.Fatalf("New auth OK returned error: %v", err)
+	}
 	if err := wsjson.Write(ctx, conn, authOK); err != nil {
 		t.Fatalf("write auth ok returned error: %v", err)
 	}

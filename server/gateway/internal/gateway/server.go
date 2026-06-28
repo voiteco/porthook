@@ -184,8 +184,28 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) er
 		_ = wsjson.Write(ctx, conn, authErr)
 		return errors.New("invalid token")
 	}
+	if payload.ProtocolVersion != messages.ProtocolVersion {
+		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
+			Code:    "unsupported_protocol",
+			Message: fmt.Sprintf("protocol version %q is not supported, expected %q", payload.ProtocolVersion, messages.ProtocolVersion),
+		})
+		_ = wsjson.Write(ctx, conn, authErr)
+		return fmt.Errorf("unsupported protocol version %q", payload.ProtocolVersion)
+	}
+	missing := messages.MissingRequiredCapabilities(payload.Capabilities, messages.DefaultProtocolCapabilities())
+	if len(missing) > 0 {
+		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
+			Code:    "unsupported_protocol",
+			Message: fmt.Sprintf("agent protocol is missing capabilities: %s", strings.Join(missing, ", ")),
+		})
+		_ = wsjson.Write(ctx, conn, authErr)
+		return fmt.Errorf("agent capabilities missing: %v", strings.Join(missing, ", "))
+	}
 
-	authOK, err := messages.New(messages.TypeAuthOK, messages.AuthOK{})
+	authOK, err := messages.New(messages.TypeAuthOK, messages.AuthOK{
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
 	if err != nil {
 		return err
 	}

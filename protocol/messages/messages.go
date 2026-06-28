@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 )
 
 type Type string
@@ -31,6 +32,20 @@ const (
 	TypeHTTPStreamCancel  Type = "http.stream.cancel"
 )
 
+const ProtocolVersion = "0.2"
+
+const (
+	CapabilityStreamStartEnd  = "stream_start_end"
+	CapabilityBinaryBodyFrame = "binary_body_frames"
+	CapabilityStreamCancel    = "stream_cancel"
+)
+
+var defaultProtocolCapabilities = []string{
+	CapabilityStreamStartEnd,
+	CapabilityBinaryBodyFrame,
+	CapabilityStreamCancel,
+}
+
 type Envelope struct {
 	Type     Type            `json:"type"`
 	StreamID string          `json:"stream_id,omitempty"`
@@ -39,11 +54,41 @@ type Envelope struct {
 }
 
 type AuthRequest struct {
-	Token        string `json:"token"`
-	AgentVersion string `json:"agent_version,omitempty"`
+	Token           string   `json:"token"`
+	AgentVersion    string   `json:"agent_version,omitempty"`
+	ProtocolVersion string   `json:"protocol_version,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
 }
 
-type AuthOK struct{}
+type AuthOK struct {
+	ProtocolVersion string   `json:"protocol_version,omitempty"`
+	Capabilities    []string `json:"capabilities,omitempty"`
+}
+
+func DefaultProtocolCapabilities() []string {
+	return append([]string(nil), defaultProtocolCapabilities...)
+}
+
+func MissingRequiredCapabilities(capabilities []string, required []string) []string {
+	if len(required) == 0 {
+		return nil
+	}
+
+	missingMap := make(map[string]struct{}, len(required))
+	for _, capability := range required {
+		missingMap[capability] = struct{}{}
+	}
+	for _, capability := range capabilities {
+		delete(missingMap, capability)
+	}
+
+	missing := make([]string, 0, len(missingMap))
+	for capability := range missingMap {
+		missing = append(missing, capability)
+	}
+	sort.Strings(missing)
+	return missing
+}
 
 type ErrorPayload struct {
 	Code    string `json:"code"`

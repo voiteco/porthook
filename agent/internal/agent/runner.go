@@ -135,8 +135,10 @@ func (r *Runner) runOnce(ctx context.Context, wsURL string, restored bool) (bool
 
 func (r *Runner) authenticate(ctx context.Context, conn *websocket.Conn) error {
 	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
-		Token:        r.cfg.Token,
-		AgentVersion: r.cfg.AgentVersion,
+		Token:           r.cfg.Token,
+		AgentVersion:    r.cfg.AgentVersion,
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
 	})
 	if err != nil {
 		return err
@@ -151,6 +153,13 @@ func (r *Runner) authenticate(ctx context.Context, conn *websocket.Conn) error {
 	}
 	switch resp.Type {
 	case messages.TypeAuthOK:
+		payload, err := messages.DecodePayload[messages.AuthOK](resp)
+		if err != nil {
+			return permanent(err)
+		}
+		if err := r.validateAuthOK(payload); err != nil {
+			return permanent(err)
+		}
 		return nil
 	case messages.TypeAuthError:
 		payload, err := messages.DecodePayload[messages.ErrorPayload](resp)
@@ -161,6 +170,19 @@ func (r *Runner) authenticate(ctx context.Context, conn *websocket.Conn) error {
 	default:
 		return permanent(fmt.Errorf("unexpected auth response %s", resp.Type))
 	}
+}
+
+func (r *Runner) validateAuthOK(payload messages.AuthOK) error {
+	if payload.ProtocolVersion != messages.ProtocolVersion {
+		return fmt.Errorf("gateway protocol version %q is not supported, expected %q", payload.ProtocolVersion, messages.ProtocolVersion)
+	}
+
+	missing := messages.MissingRequiredCapabilities(payload.Capabilities, messages.DefaultProtocolCapabilities())
+	if len(missing) > 0 {
+		return fmt.Errorf("gateway protocol is incompatible: missing capabilities: %s", strings.Join(missing, ", "))
+	}
+
+	return nil
 }
 
 func (r *Runner) registerTunnel(ctx context.Context, conn *websocket.Conn) (messages.TunnelRegistered, error) {

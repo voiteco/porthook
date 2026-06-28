@@ -9,7 +9,7 @@ The release workflow is intentionally conservative for the pre-alpha stage: it r
 Use semantic version tags:
 
 ```sh
-v0.1.0
+v0.2.0
 ```
 
 The tag name is injected into the CLI and gateway binaries. After download, users can verify the embedded version:
@@ -27,8 +27,8 @@ Before pushing a tag, run:
 make fmt-check
 make test
 make vet
-make smoke-local VERSION=v0.1.0
-make release-build VERSION=v0.1.0
+make smoke-local VERSION=v0.2.0
+make release-build VERSION=v0.2.0
 make release-checksums
 ```
 
@@ -51,8 +51,8 @@ On macOS, run the binary that matches the local architecture:
 Create and push an annotated tag:
 
 ```sh
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin v0.2.0
 ```
 
 GitHub Actions will create a prerelease and upload:

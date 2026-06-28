@@ -4,13 +4,16 @@ package messages
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
 func TestNewEnvelopeEncodesPayload(t *testing.T) {
 	env, err := New(TypeAuthRequest, AuthRequest{
-		Token:        "dev-token",
-		AgentVersion: "test",
+		Token:           "dev-token",
+		AgentVersion:    "test",
+		ProtocolVersion: ProtocolVersion,
+		Capabilities:    []string{"stream_start_end"},
 	})
 	if err != nil {
 		t.Fatalf("New returned error: %v", err)
@@ -35,6 +38,12 @@ func TestNewEnvelopeEncodesPayload(t *testing.T) {
 	}
 	if payload.AgentVersion != "test" {
 		t.Fatalf("payload agent version = %q, want test", payload.AgentVersion)
+	}
+	if payload.ProtocolVersion != ProtocolVersion {
+		t.Fatalf("payload protocol version = %q, want %q", payload.ProtocolVersion, ProtocolVersion)
+	}
+	if !reflect.DeepEqual(payload.Capabilities, []string{"stream_start_end"}) {
+		t.Fatalf("payload capabilities = %v, want [stream_start_end]", payload.Capabilities)
 	}
 }
 
@@ -92,5 +101,37 @@ func TestStreamingMessageTypeValues(t *testing.T) {
 		if string(got) != want {
 			t.Fatalf("type = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestDefaultProtocolCapabilities(t *testing.T) {
+	capabilities := DefaultProtocolCapabilities()
+	if len(capabilities) != 3 {
+		t.Fatalf("capabilities length = %d, want 3", len(capabilities))
+	}
+	if !reflect.DeepEqual(capabilities, []string{
+		CapabilityStreamStartEnd,
+		CapabilityBinaryBodyFrame,
+		CapabilityStreamCancel,
+	}) {
+		t.Fatalf("capabilities = %v, want %v", capabilities, []string{
+			CapabilityStreamStartEnd,
+			CapabilityBinaryBodyFrame,
+			CapabilityStreamCancel,
+		})
+	}
+}
+
+func TestMissingRequiredCapabilities(t *testing.T) {
+	missing := MissingRequiredCapabilities([]string{"stream_start_end"}, []string{
+		CapabilityStreamStartEnd,
+		CapabilityBinaryBodyFrame,
+		CapabilityStreamCancel,
+	})
+	if len(missing) != 2 {
+		t.Fatalf("missing = %v, want 2", missing)
+	}
+	if missing[0] != CapabilityBinaryBodyFrame || missing[1] != CapabilityStreamCancel {
+		t.Fatalf("missing = %v, want sorted list without offered capabilities", missing)
 	}
 }
