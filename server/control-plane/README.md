@@ -18,6 +18,7 @@ go run ./server/control-plane/cmd/porthook-control-plane
 | --- | --- | --- |
 | `PORTHOOK_CONTROL_ADDR` | `:8082` | Control-plane HTTP listener address. |
 | `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Bearer token required for token creation and revocation. If empty, token creation and revocation return `401 Unauthorized`. |
+| `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | empty | Bearer token required for token validation requests from the gateway. If empty, validation returns `401 Unauthorized`. |
 | `PORTHOOK_DATABASE_URL` | empty | Postgres connection URL. If empty, the process uses in-memory storage for development. |
 
 ## API
@@ -35,6 +36,7 @@ Validate a token:
 
 ```sh
 curl -sS -X POST http://localhost:8082/api/v1/tokens/validate \
+  -H 'Authorization: Bearer validator-secret' \
   -H 'Content-Type: application/json' \
   -d '{"token":"ph_...","scope":"register_tunnel"}'
 ```
@@ -48,4 +50,4 @@ curl -i -X DELETE http://localhost:8082/api/v1/tokens/tok_... \
 
 The token plaintext is returned only once at creation time. Storage keeps only a hash.
 
-Set `PORTHOOK_CONTROL_ADMIN_TOKEN` before creating or revoking tokens.
+Set `PORTHOOK_CONTROL_ADMIN_TOKEN` before creating or revoking tokens. Set `PORTHOOK_CONTROL_VALIDATOR_TOKEN` and configure the same value as `PORTHOOK_CONTROL_PLANE_TOKEN` on the gateway before using control-plane token validation.

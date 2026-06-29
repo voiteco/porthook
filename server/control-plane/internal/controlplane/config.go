@@ -9,16 +9,18 @@ const (
 )
 
 type Config struct {
-	Addr        string
-	AdminToken  string
-	DatabaseURL string
+	Addr           string
+	AdminToken     string
+	ValidatorToken string
+	DatabaseURL    string
 }
 
 func ConfigFromEnv() Config {
 	cfg := Config{
-		Addr:        envString("PORTHOOK_CONTROL_ADDR", defaultAddr),
-		AdminToken:  os.Getenv("PORTHOOK_CONTROL_ADMIN_TOKEN"),
-		DatabaseURL: os.Getenv("PORTHOOK_DATABASE_URL"),
+		Addr:           envString("PORTHOOK_CONTROL_ADDR", defaultAddr),
+		AdminToken:     os.Getenv("PORTHOOK_CONTROL_ADMIN_TOKEN"),
+		ValidatorToken: os.Getenv("PORTHOOK_CONTROL_VALIDATOR_TOKEN"),
+		DatabaseURL:    os.Getenv("PORTHOOK_DATABASE_URL"),
 	}
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr

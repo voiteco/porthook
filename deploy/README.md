@@ -19,14 +19,14 @@ The current Docker Compose gateway smoke path is documented in [compose/README.m
 The gateway can run in two authentication modes:
 
 - Static-token mode for local development: set `PORTHOOK_STATIC_TOKEN`.
-- Control-plane mode for self-hosted deployments: set `PORTHOOK_CONTROL_PLANE_URL` on the gateway and run `porthook-control-plane` with `PORTHOOK_DATABASE_URL`.
+- Control-plane mode for self-hosted deployments: set `PORTHOOK_CONTROL_PLANE_URL` and `PORTHOOK_CONTROL_PLANE_TOKEN` on the gateway, and run `porthook-control-plane` with `PORTHOOK_DATABASE_URL` and `PORTHOOK_CONTROL_VALIDATOR_TOKEN`.
 
 Minimal production shape:
 
 1. Run Postgres.
-2. Run `porthook-control-plane` with `PORTHOOK_DATABASE_URL` and `PORTHOOK_CONTROL_ADMIN_TOKEN`.
+2. Run `porthook-control-plane` with `PORTHOOK_DATABASE_URL`, `PORTHOOK_CONTROL_ADMIN_TOKEN`, and `PORTHOOK_CONTROL_VALIDATOR_TOKEN`.
 3. Create an agent token through `POST /api/v1/tokens`.
-4. Run `porthook-gateway` with `PORTHOOK_CONTROL_PLANE_URL` pointing at the control plane.
+4. Run `porthook-gateway` with `PORTHOOK_CONTROL_PLANE_URL` pointing at the control plane and `PORTHOOK_CONTROL_PLANE_TOKEN` matching the control-plane validator token.
 5. Run the local agent with `porthook login --server <gateway-agent-url> --token <created-token>`.
 
 Operators still need to configure wildcard DNS and TLS in front of the public gateway listener for real internet traffic.

@@ -34,6 +34,7 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_PUBLIC_URL` | `http://localhost:8080` | Base public URL printed by the agent. |
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` | Static agent authentication token. |
 | `PORTHOOK_CONTROL_PLANE_URL` | empty | Optional control-plane base URL for token validation. Static token auth is used when empty. |
+| `PORTHOOK_CONTROL_PLANE_TOKEN` | empty | Bearer token used when calling the control-plane validation endpoint. Required when `PORTHOOK_CONTROL_PLANE_URL` is set. |
 | `PORTHOOK_CONTROL_PLANE_TIMEOUT` | `5s` | Timeout for control-plane token validation requests. |
 | `PORTHOOK_MAX_BODY_BYTES` | `1048576` | Maximum public request body forwarded through a tunnel. |
 | `PORTHOOK_MAX_CONCURRENT_STREAMS` | `64` | Maximum concurrent public requests per tunnel. |

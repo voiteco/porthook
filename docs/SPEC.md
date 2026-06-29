@@ -482,6 +482,8 @@ Initial control-plane endpoints:
 
 ```text
 POST /api/v1/tokens
+POST /api/v1/tokens/validate
+DELETE /api/v1/tokens/{id}
 GET  /api/v1/tunnels
 GET  /api/v1/tunnels/{id}
 POST /api/v1/reserved-subdomains
@@ -531,7 +533,10 @@ PORTHOOK_ROOT_DOMAIN=porthook.example
 PORTHOOK_PUBLIC_URL=https://porthook.example
 PORTHOOK_TOKEN_SECRET=...
 PORTHOOK_CONTROL_PLANE_URL=http://control-plane:8082
+PORTHOOK_CONTROL_PLANE_TOKEN=validator-secret
 PORTHOOK_CONTROL_PLANE_TIMEOUT=5s
+PORTHOOK_CONTROL_ADMIN_TOKEN=...
+PORTHOOK_CONTROL_VALIDATOR_TOKEN=...
 PORTHOOK_DATABASE_URL=...
 PORTHOOK_REDIS_URL=...
 PORTHOOK_RATE_LIMIT_RPS=60
