@@ -5,7 +5,7 @@ VERSION ?= dev
 LDFLAGS ?= -s -w -X main.version=$(VERSION)
 RELEASE_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: build clean docker-build docker-build-gateway fmt fmt-check release-build release-checksums smoke-local test vet
+.PHONY: build clean docker-build docker-build-gateway fmt fmt-check release-build release-checksums smoke-control-plane smoke-local test vet
 
 build:
 	mkdir -p $(BIN_DIR)
@@ -50,6 +50,9 @@ release-checksums:
 
 smoke-local:
 	VERSION=$(VERSION) ./scripts/smoke-local.sh
+
+smoke-control-plane:
+	VERSION=$(VERSION) ./scripts/smoke-control-plane.sh
 
 test:
 	$(GO) test ./...

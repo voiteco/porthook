@@ -4,7 +4,8 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
-- No unreleased changes.
+### Added
+- Added a control-plane integration smoke test for token creation, CLI login, gateway validation, and HTTP round-trip.
 
 ## [0.3.0] - 2026-06-29
 

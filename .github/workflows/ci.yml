@@ -41,6 +41,9 @@ jobs:
       - name: Run local smoke test
         run: make smoke-local VERSION=ci-smoke
 
+      - name: Run control-plane smoke test
+        run: make smoke-control-plane VERSION=ci-smoke
+
       - name: Build release binaries
         run: make release-build VERSION=ci
 

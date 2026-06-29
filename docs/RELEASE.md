@@ -29,6 +29,7 @@ make fmt-check
 make test
 make vet
 make smoke-local VERSION=v0.3.0
+make smoke-control-plane VERSION=v0.3.0
 make release-build VERSION=v0.3.0
 make release-checksums
 ```

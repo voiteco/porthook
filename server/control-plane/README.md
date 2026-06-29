@@ -51,3 +51,9 @@ curl -i -X DELETE http://localhost:8082/api/v1/tokens/tok_... \
 The token plaintext is returned only once at creation time. Storage keeps only a hash.
 
 Set `PORTHOOK_CONTROL_ADMIN_TOKEN` before creating or revoking tokens. Set `PORTHOOK_CONTROL_VALIDATOR_TOKEN` and configure the same value as `PORTHOOK_CONTROL_PLANE_TOKEN` on the gateway before using control-plane token validation.
+
+The local control-plane integration path can be checked with:
+
+```sh
+make smoke-control-plane
+```
