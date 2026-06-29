@@ -113,6 +113,20 @@ func TestCreateTokenRequiresAdminAuthorization(t *testing.T) {
 	}
 }
 
+func TestCreateTokenRequiresConfiguredAdminToken(t *testing.T) {
+	server := NewServer(Config{}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens", "", map[string]any{
+		"name": "agent",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
 func postJSON(t *testing.T, client *http.Client, url, bearer string, payload any) *http.Response {
 	t.Helper()
 

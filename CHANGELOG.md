@@ -12,6 +12,7 @@ All notable changes to Porthook are documented here.
 - Added `porthook-control-plane` to local and release builds.
 
 ### Fixed
+- Disabled control-plane token creation and revocation when no admin token is configured.
 - Updated the agent protocol mismatch test expectation to match the current explicit version error.
 
 ## [0.2.0] - 2026-06-28
