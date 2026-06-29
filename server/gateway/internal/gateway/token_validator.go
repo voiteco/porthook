@@ -5,6 +5,8 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -31,12 +33,13 @@ func (v errorTokenValidator) ValidateAgentToken(context.Context, string) (bool, 
 }
 
 func (v staticTokenValidator) ValidateAgentToken(_ context.Context, token string) (bool, error) {
-	return token != "" && token == v.token, nil
+	return secretEqual(token, v.token), nil
 }
 
 type controlPlaneTokenValidator struct {
-	endpoint string
-	client   *http.Client
+	endpoint    string
+	bearerToken string
+	client      *http.Client
 }
 
 type validateTokenRequest struct {
@@ -52,6 +55,10 @@ func newAgentTokenValidator(cfg Config) (agentTokenValidator, error) {
 	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
 		return staticTokenValidator{token: cfg.StaticToken}, nil
 	}
+	controlPlaneToken := strings.TrimSpace(cfg.ControlPlaneToken)
+	if controlPlaneToken == "" {
+		return nil, fmt.Errorf("control plane token is required when control plane URL is configured")
+	}
 
 	parsed, err := url.Parse(cfg.ControlPlaneURL)
 	if err != nil {
@@ -65,7 +72,8 @@ func newAgentTokenValidator(cfg Config) (agentTokenValidator, error) {
 	parsed.Fragment = ""
 
 	return controlPlaneTokenValidator{
-		endpoint: parsed.String(),
+		endpoint:    parsed.String(),
+		bearerToken: controlPlaneToken,
 		client: &http.Client{
 			Timeout: cfg.ControlPlaneTimeout,
 		},
@@ -86,6 +94,7 @@ func (v controlPlaneTokenValidator) ValidateAgentToken(ctx context.Context, toke
 		return false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+v.bearerToken)
 
 	resp, err := v.client.Do(req)
 	if err != nil {
@@ -101,6 +110,15 @@ func (v controlPlaneTokenValidator) ValidateAgentToken(ctx context.Context, toke
 		return false, fmt.Errorf("decode token validation: %w", err)
 	}
 	return result.Valid, nil
+}
+
+func secretEqual(got, want string) bool {
+	if got == "" || want == "" {
+		return false
+	}
+	gotHash := sha256.Sum256([]byte(got))
+	wantHash := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) == 1
 }
 
 func joinURLPath(basePath, requestPath string) string {

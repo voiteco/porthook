@@ -8,10 +8,12 @@ All notable changes to Porthook are documented here.
 - Added basic per-tunnel gateway request rate limiting with configurable request-per-second and burst limits.
 - Added a self-hosted control-plane token API with create, validate, and revoke endpoints.
 - Added optional gateway token validation through the control plane.
+- Added a shared gateway-to-control-plane validator token for token validation requests.
 - Added `porthook login` and `porthook logout` for saved agent server/token configuration.
 - Added `porthook-control-plane` to local and release builds.
 
 ### Fixed
+- Switched gateway static token and control-plane bearer checks to constant-time secret comparisons.
 - Disabled control-plane token creation and revocation when no admin token is configured.
 - Updated the agent protocol mismatch test expectation to match the current explicit version error.
 

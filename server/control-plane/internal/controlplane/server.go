@@ -4,9 +4,10 @@ package controlplane
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -107,6 +108,10 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.validatorAuthorized(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	var req validateTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -144,10 +149,28 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authorized(r *http.Request) bool {
-	if s.cfg.AdminToken == "" {
+	return authorizedBearer(r, s.cfg.AdminToken)
+}
+
+func (s *Server) validatorAuthorized(r *http.Request) bool {
+	return authorizedBearer(r, s.cfg.ValidatorToken)
+}
+
+func authorizedBearer(r *http.Request, configuredToken string) bool {
+	if configuredToken == "" {
 		return false
 	}
-	return r.Header.Get("Authorization") == fmt.Sprintf("Bearer %s", s.cfg.AdminToken)
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return ok && secretEqual(token, configuredToken)
+}
+
+func secretEqual(got, want string) bool {
+	if got == "" || want == "" {
+		return false
+	}
+	gotHash := sha256.Sum256([]byte(got))
+	wantHash := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) == 1
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

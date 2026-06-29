@@ -199,6 +199,9 @@ func TestAgentWebSocketValidatesTokenThroughControlPlane(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		if r.Header.Get("Authorization") != "Bearer validator-secret" {
+			t.Errorf("authorization = %q, want validator bearer", r.Header.Get("Authorization"))
+		}
 		var req struct {
 			Token string `json:"token"`
 			Scope string `json:"scope"`
@@ -224,6 +227,7 @@ func TestAgentWebSocketValidatesTokenThroughControlPlane(t *testing.T) {
 	cfg := testConfig()
 	cfg.StaticToken = "static-token"
 	cfg.ControlPlaneURL = controlPlane.URL
+	cfg.ControlPlaneToken = "validator-secret"
 	server := NewServer(cfg, slog.Default())
 	httpServer := httptest.NewServer(server.AgentHandler())
 	defer httpServer.Close()
@@ -267,6 +271,7 @@ func TestAgentWebSocketRejectsInvalidControlPlaneToken(t *testing.T) {
 	cfg := testConfig()
 	cfg.StaticToken = "static-token"
 	cfg.ControlPlaneURL = controlPlane.URL
+	cfg.ControlPlaneToken = "validator-secret"
 	server := NewServer(cfg, slog.Default())
 	httpServer := httptest.NewServer(server.AgentHandler())
 	defer httpServer.Close()
@@ -312,6 +317,52 @@ func TestAgentWebSocketFailsClosedForInvalidControlPlaneURL(t *testing.T) {
 	cfg := testConfig()
 	cfg.StaticToken = "dev-token"
 	cfg.ControlPlaneURL = "://bad-url"
+	cfg.ControlPlaneToken = "validator-secret"
+	server := NewServer(cfg, slog.Default())
+	httpServer := httptest.NewServer(server.AgentHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "dev-token",
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
+	if err != nil {
+		t.Fatalf("New auth returned error: %v", err)
+	}
+	if err := wsjson.Write(ctx, conn, auth); err != nil {
+		t.Fatalf("write auth returned error: %v", err)
+	}
+
+	var authResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &authResp); err != nil {
+		t.Fatalf("read auth response returned error: %v", err)
+	}
+	if authResp.Type != messages.TypeAuthError {
+		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthError)
+	}
+	payload, err := messages.DecodePayload[messages.ErrorPayload](authResp)
+	if err != nil {
+		t.Fatalf("decode auth error returned error: %v", err)
+	}
+	if payload.Code != "auth_unavailable" {
+		t.Fatalf("auth error code = %q, want auth_unavailable", payload.Code)
+	}
+}
+
+func TestAgentWebSocketFailsClosedWhenControlPlaneTokenMissing(t *testing.T) {
+	cfg := testConfig()
+	cfg.StaticToken = "dev-token"
+	cfg.ControlPlaneURL = "http://control.example"
 	server := NewServer(cfg, slog.Default())
 	httpServer := httptest.NewServer(server.AgentHandler())
 	defer httpServer.Close()

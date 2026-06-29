@@ -31,7 +31,10 @@ func TestHealthEndpoints(t *testing.T) {
 }
 
 func TestTokenLifecycle(t *testing.T) {
-	server := NewServer(Config{AdminToken: "admin-secret"}, tokens.NewService(tokens.NewMemoryStore()))
+	server := NewServer(Config{
+		AdminToken:     "admin-secret",
+		ValidatorToken: "validator-secret",
+	}, tokens.NewService(tokens.NewMemoryStore()))
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 
@@ -52,7 +55,7 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Fatalf("created token missing id or token: %+v", created)
 	}
 
-	validateResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "", map[string]any{
+	validateResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "validator-secret", map[string]any{
 		"token": created.Token,
 		"scope": tokens.ScopeRegisterTunnel,
 	})
@@ -82,7 +85,7 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Fatalf("revoke status = %d, want 204", revokeResp.StatusCode)
 	}
 
-	validateResp = postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "", map[string]any{
+	validateResp = postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "validator-secret", map[string]any{
 		"token": created.Token,
 		"scope": tokens.ScopeRegisterTunnel,
 	})
@@ -120,6 +123,36 @@ func TestCreateTokenRequiresConfiguredAdminToken(t *testing.T) {
 
 	resp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens", "", map[string]any{
 		"name": "agent",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestValidateTokenRequiresValidatorAuthorization(t *testing.T) {
+	server := NewServer(Config{ValidatorToken: "validator-secret"}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "", map[string]any{
+		"token": "ph_test",
+		"scope": tokens.ScopeRegisterTunnel,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestValidateTokenRequiresConfiguredValidatorToken(t *testing.T) {
+	server := NewServer(Config{}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "validator-secret", map[string]any{
+		"token": "ph_test",
+		"scope": tokens.ScopeRegisterTunnel,
 	})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {

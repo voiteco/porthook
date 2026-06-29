@@ -39,6 +39,7 @@ type Config struct {
 	PublicURL                  string
 	StaticToken                string
 	ControlPlaneURL            string
+	ControlPlaneToken          string
 	ControlPlaneTimeout        time.Duration
 	MaxBodyBytes               int64
 	MaxConcurrentStreams       int
@@ -65,6 +66,7 @@ func ConfigFromEnv() Config {
 		PublicURL:                  envString("PORTHOOK_PUBLIC_URL", defaultPublicURL),
 		StaticToken:                envString("PORTHOOK_STATIC_TOKEN", defaultStaticToken),
 		ControlPlaneURL:            envString("PORTHOOK_CONTROL_PLANE_URL", ""),
+		ControlPlaneToken:          envString("PORTHOOK_CONTROL_PLANE_TOKEN", ""),
 		ControlPlaneTimeout:        envDuration("PORTHOOK_CONTROL_PLANE_TIMEOUT", defaultControlPlaneTimeout),
 		MaxBodyBytes:               envInt64("PORTHOOK_MAX_BODY_BYTES", defaultMaxBodyBytes),
 		MaxConcurrentStreams:       envInt("PORTHOOK_MAX_CONCURRENT_STREAMS", defaultMaxConcurrentStreams),
