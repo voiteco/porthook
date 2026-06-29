@@ -871,7 +871,7 @@ func TestRunnerDoesNotReconnectAfterUnsupportedProtocolAuthOK(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run returned nil error")
 	}
-	if !strings.Contains(err.Error(), "gateway protocol is incompatible") {
+	if !strings.Contains(err.Error(), `gateway protocol version "0.1" is not supported`) {
 		t.Fatalf("error = %q, want protocol mismatch error", err.Error())
 	}
 	if got := connections.Load(); got != 1 {

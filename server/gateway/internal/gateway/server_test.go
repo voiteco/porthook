@@ -790,6 +790,98 @@ func TestPublicRequestRejectsWhenStreamLimitExceeded(t *testing.T) {
 	}
 }
 
+func TestPublicRequestRejectsWhenRateLimitExceeded(t *testing.T) {
+	cfg := testConfig()
+	cfg.RateLimitRequestsPerSecond = 1
+	cfg.RateLimitBurst = 1
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	secondForwarded := make(chan struct{})
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if err := writeStreamedResponse(ctx, conn, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+			Status: http.StatusOK,
+			Body:   []byte("first-ok"),
+		}); err != nil {
+			agentErr <- err
+			return
+		}
+
+		readCtx, cancelRead := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancelRead()
+		secondReqEnv, _, _, err := readStreamedRequest(readCtx, conn)
+		if err != nil {
+			agentErr <- nil
+			return
+		}
+		close(secondForwarded)
+		agentErr <- writeStreamedResponse(ctx, conn, secondReqEnv.StreamID, secondReqEnv.TunnelID, httpwire.Response{
+			Status: http.StatusOK,
+			Body:   []byte("second-ok"),
+		})
+	}()
+
+	firstReq, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/first", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	firstReq.Host = "demo.localhost"
+	firstResp, err := publicServer.Client().Do(firstReq)
+	if err != nil {
+		t.Fatalf("first public request returned error: %v", err)
+	}
+	firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		t.Fatalf("first status = %d, want 200", firstResp.StatusCode)
+	}
+
+	secondReq, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/second", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	secondReq.Host = "demo.localhost"
+	secondResp, err := publicServer.Client().Do(secondReq)
+	if err != nil {
+		t.Fatalf("second public request returned error: %v", err)
+	}
+	secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, want 429", secondResp.StatusCode)
+	}
+	if secondResp.Header.Get("Retry-After") == "" {
+		t.Fatal("second response missing Retry-After header")
+	}
+
+	select {
+	case <-secondForwarded:
+		t.Fatal("rate-limited request was forwarded to the agent")
+	default:
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
 func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	httpServer := httptest.NewServer(server.AgentHandler())

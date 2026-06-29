@@ -26,6 +26,8 @@ Default development configuration:
 | `PORTHOOK_ROOT_DOMAIN` | `localhost` |
 | `PORTHOOK_PUBLIC_URL` | `http://localhost:8080` |
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` |
+| `PORTHOOK_RATE_LIMIT_RPS` | `60` |
+| `PORTHOOK_RATE_LIMIT_BURST` | `120` |
 
 ## Smoke Test
 

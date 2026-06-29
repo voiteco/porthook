@@ -249,7 +249,14 @@ func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn) (*age
 		return nil, fmt.Errorf("write tunnel registered: %w", err)
 	}
 
-	return newAgentSession(conn, tunnel, s.cfg.WebSocketWriteTimeout, s.cfg.MaxConcurrentStreams), nil
+	return newAgentSession(
+		conn,
+		tunnel,
+		s.cfg.WebSocketWriteTimeout,
+		s.cfg.MaxConcurrentStreams,
+		s.cfg.RateLimitRequestsPerSecond,
+		s.cfg.RateLimitBurst,
+	), nil
 }
 
 func (s *Server) registerTunnelSession(ctx context.Context, conn *websocket.Conn, payload messages.TunnelRegister) (*registry.Session, error) {
@@ -416,6 +423,14 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tunnelID = session.tunnel.TunnelID
+
+	if !session.allowRequest(time.Now()) {
+		status = http.StatusTooManyRequests
+		outcome = "rate_limited"
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "tunnel rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
 
 	streamID, err = newStreamID()
 	if err != nil {

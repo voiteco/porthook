@@ -4,7 +4,11 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
-- No unreleased changes.
+### Added
+- Added basic per-tunnel gateway request rate limiting with configurable request-per-second and burst limits.
+
+### Fixed
+- Updated the agent protocol mismatch test expectation to match the current explicit version error.
 
 ## [0.2.0] - 2026-06-28
 

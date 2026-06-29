@@ -37,12 +37,13 @@ type agentSession struct {
 	done     chan struct{}
 	doneOnce sync.Once
 	streams  chan struct{}
+	limiter  *rateLimiter
 
 	pendingMu sync.RWMutex
 	pending   map[string]chan wswire.Message
 }
 
-func newAgentSession(conn *websocket.Conn, tunnel *registry.Session, writeTimeout time.Duration, maxConcurrentStreams int) *agentSession {
+func newAgentSession(conn *websocket.Conn, tunnel *registry.Session, writeTimeout time.Duration, maxConcurrentStreams, rateLimitRPS, rateLimitBurst int) *agentSession {
 	var streams chan struct{}
 	if maxConcurrentStreams > 0 {
 		streams = make(chan struct{}, maxConcurrentStreams)
@@ -53,8 +54,13 @@ func newAgentSession(conn *websocket.Conn, tunnel *registry.Session, writeTimeou
 		writeTO: writeTimeout,
 		done:    make(chan struct{}),
 		streams: streams,
+		limiter: newRateLimiter(rateLimitRPS, rateLimitBurst, time.Now()),
 		pending: make(map[string]chan wswire.Message),
 	}
+}
+
+func (s *agentSession) allowRequest(now time.Time) bool {
+	return s.limiter.allow(now)
 }
 
 func (s *agentSession) roundTrip(ctx context.Context, streamID string, req httpwire.Request) (httpwire.Response, error) {
