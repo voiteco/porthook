@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package tokens
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+)
+
+type PostgresStore struct {
+	db *sql.DB
+}
+
+func NewPostgresStore(db *sql.DB) (*PostgresStore, error) {
+	if db == nil {
+		return nil, errors.New("database is required")
+	}
+	return &PostgresStore{db: db}, nil
+}
+
+func (s *PostgresStore) Migrate(ctx context.Context) error {
+	for _, statement := range PostgresSchemaStatements() {
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("apply token schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) Create(ctx context.Context, record TokenRecord) error {
+	scopesJSON, err := encodeScopes(record.Scopes)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.ExecContext(
+		ctx,
+		`INSERT INTO api_tokens (id, name, token_hash, scopes_json, created_at, revoked_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		record.ID,
+		record.Name,
+		record.TokenHash,
+		scopesJSON,
+		record.CreatedAt,
+		record.RevokedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert token: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) LookupByHash(ctx context.Context, tokenHash string) (TokenRecord, bool, error) {
+	return s.lookup(ctx, `SELECT id, name, token_hash, scopes_json, created_at, revoked_at FROM api_tokens WHERE token_hash = $1`, tokenHash)
+}
+
+func (s *PostgresStore) LookupByID(ctx context.Context, id string) (TokenRecord, bool, error) {
+	return s.lookup(ctx, `SELECT id, name, token_hash, scopes_json, created_at, revoked_at FROM api_tokens WHERE id = $1`, id)
+}
+
+func (s *PostgresStore) Revoke(ctx context.Context, id string, revokedAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = $1 WHERE id = $2`, revokedAt, id)
+	if err != nil {
+		return fmt.Errorf("revoke token: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) lookup(ctx context.Context, query, value string) (TokenRecord, bool, error) {
+	var record TokenRecord
+	var scopesJSON string
+	var revokedAt sql.NullTime
+	err := s.db.QueryRowContext(ctx, query, value).Scan(
+		&record.ID,
+		&record.Name,
+		&record.TokenHash,
+		&scopesJSON,
+		&record.CreatedAt,
+		&revokedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TokenRecord{}, false, nil
+	}
+	if err != nil {
+		return TokenRecord{}, false, fmt.Errorf("lookup token: %w", err)
+	}
+	record.Scopes, err = decodeScopes(scopesJSON)
+	if err != nil {
+		return TokenRecord{}, false, err
+	}
+	if revokedAt.Valid {
+		record.RevokedAt = &revokedAt.Time
+	}
+	return record, true, nil
+}
+
+func encodeScopes(scopes []string) (string, error) {
+	data, err := json.Marshal(cloneScopes(scopes))
+	if err != nil {
+		return "", fmt.Errorf("encode scopes: %w", err)
+	}
+	return string(data), nil
+}
+
+func decodeScopes(raw string) ([]string, error) {
+	var scopes []string
+	if err := json.Unmarshal([]byte(raw), &scopes); err != nil {
+		return nil, fmt.Errorf("decode scopes: %w", err)
+	}
+	return scopes, nil
+}
