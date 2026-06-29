@@ -4,6 +4,10 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+- No unreleased changes.
+
+## [0.3.0] - 2026-06-29
+
 ### Added
 - Added basic per-tunnel gateway request rate limiting with configurable request-per-second and burst limits.
 - Added a self-hosted control-plane token API with create, validate, and revoke endpoints.
