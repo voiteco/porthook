@@ -43,9 +43,9 @@ type Config struct {
 }
 
 func ConfigFromEnv() Config {
-	return normalizeConfig(Config{
-		ServerURL:             envString("PORTHOOK_SERVER_URL", defaultServerURL),
-		Token:                 envString("PORTHOOK_TOKEN", defaultToken),
+	cfg := Config{
+		ServerURL:             defaultServerURL,
+		Token:                 defaultToken,
 		HandshakeTimeout:      envDuration("PORTHOOK_HANDSHAKE_TIMEOUT", defaultHandshakeTimeout),
 		RequestTimeout:        envDuration("PORTHOOK_REQUEST_TIMEOUT", defaultRequestTimeout),
 		MaxResponseBodyBytes:  envInt64("PORTHOOK_MAX_RESPONSE_BODY_BYTES", defaultMaxResponseBodyBytes),
@@ -56,7 +56,21 @@ func ConfigFromEnv() Config {
 		ReconnectInitialDelay: envDuration("PORTHOOK_RECONNECT_INITIAL_DELAY", defaultReconnectInitialDelay),
 		ReconnectMaxDelay:     envDuration("PORTHOOK_RECONNECT_MAX_DELAY", defaultReconnectMaxDelay),
 		ReconnectJitter:       envDuration("PORTHOOK_RECONNECT_JITTER", defaultReconnectJitter),
-	})
+	}
+
+	if fileCfg, ok, err := LoadConfigFile(); err == nil && ok {
+		if fileCfg.ServerURL != "" {
+			cfg.ServerURL = fileCfg.ServerURL
+		}
+		if fileCfg.Token != "" {
+			cfg.Token = fileCfg.Token
+		}
+	}
+
+	cfg.ServerURL = envString("PORTHOOK_SERVER_URL", cfg.ServerURL)
+	cfg.Token = envString("PORTHOOK_TOKEN", cfg.Token)
+
+	return normalizeConfig(cfg)
 }
 
 func normalizeConfig(cfg Config) Config {

@@ -3,8 +3,11 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/voiteco/porthook/agent/internal/agent"
 )
 
 func TestParseHTTPConfigRejectsInvalidSubdomain(t *testing.T) {
@@ -24,5 +27,72 @@ func TestParseHTTPConfigAcceptsValidSubdomain(t *testing.T) {
 	}
 	if cfg.RequestedSubdomain != "demo-1" {
 		t.Fatalf("subdomain = %q, want demo-1", cfg.RequestedSubdomain)
+	}
+}
+
+func TestRunLoginWritesConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("PORTHOOK_CONFIG_PATH", path)
+
+	if err := run([]string{"login", "--server", "https://tunnel.example.com", "--token", "ph_login"}); err != nil {
+		t.Fatalf("run login returned error: %v", err)
+	}
+
+	loaded, ok, err := agent.LoadConfigFile()
+	if err != nil {
+		t.Fatalf("LoadConfigFile returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("login did not write config file")
+	}
+	if loaded.ServerURL != "https://tunnel.example.com" || loaded.Token != "ph_login" {
+		t.Fatalf("loaded config = %+v, want login values", loaded)
+	}
+}
+
+func TestRunLogoutRemovesConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("PORTHOOK_CONFIG_PATH", path)
+	if err := agent.SaveConfigFile(agent.ConfigFile{
+		ServerURL: "https://tunnel.example.com",
+		Token:     "ph_login",
+	}); err != nil {
+		t.Fatalf("SaveConfigFile returned error: %v", err)
+	}
+
+	if err := run([]string{"logout"}); err != nil {
+		t.Fatalf("run logout returned error: %v", err)
+	}
+
+	_, ok, err := agent.LoadConfigFile()
+	if err != nil {
+		t.Fatalf("LoadConfigFile returned error: %v", err)
+	}
+	if ok {
+		t.Fatal("logout left config file behind")
+	}
+}
+
+func TestParseHTTPConfigUsesSavedLogin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("PORTHOOK_CONFIG_PATH", path)
+	t.Setenv("PORTHOOK_SERVER_URL", "")
+	t.Setenv("PORTHOOK_TOKEN", "")
+	if err := agent.SaveConfigFile(agent.ConfigFile{
+		ServerURL: "https://saved.example.com",
+		Token:     "ph_saved",
+	}); err != nil {
+		t.Fatalf("SaveConfigFile returned error: %v", err)
+	}
+
+	cfg, err := parseHTTPConfig([]string{"3000"})
+	if err != nil {
+		t.Fatalf("parseHTTPConfig returned error: %v", err)
+	}
+	if cfg.ServerURL != "https://saved.example.com" {
+		t.Fatalf("server URL = %q, want saved login", cfg.ServerURL)
+	}
+	if cfg.Token != "ph_saved" {
+		t.Fatalf("token = %q, want saved login", cfg.Token)
 	}
 }
