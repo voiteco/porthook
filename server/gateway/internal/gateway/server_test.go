@@ -5,6 +5,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -189,6 +190,121 @@ func TestAgentWebSocketRejectsMissingCapabilities(t *testing.T) {
 	}
 	if !strings.Contains(payload.Message, messages.CapabilityBinaryBodyFrame) {
 		t.Fatalf("auth error message = %q, want binary_body_frames", payload.Message)
+	}
+}
+
+func TestAgentWebSocketValidatesTokenThroughControlPlane(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/tokens/validate" {
+			http.NotFound(w, r)
+			return
+		}
+		var req struct {
+			Token string `json:"token"`
+			Scope string `json:"scope"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("Decode returned error: %v", err)
+			return
+		}
+		if req.Token != "control-token" {
+			t.Errorf("token = %q, want control-token", req.Token)
+		}
+		if req.Scope != "register_tunnel" {
+			t.Errorf("scope = %q, want register_tunnel", req.Scope)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"valid":    true,
+			"token_id": "tok_test",
+			"scopes":   []string{"register_tunnel"},
+		})
+	}))
+	defer controlPlane.Close()
+
+	cfg := testConfig()
+	cfg.StaticToken = "static-token"
+	cfg.ControlPlaneURL = controlPlane.URL
+	server := NewServer(cfg, slog.Default())
+	httpServer := httptest.NewServer(server.AgentHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "control-token",
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
+	if err != nil {
+		t.Fatalf("New auth returned error: %v", err)
+	}
+	if err := wsjson.Write(ctx, conn, auth); err != nil {
+		t.Fatalf("write auth returned error: %v", err)
+	}
+
+	var authResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &authResp); err != nil {
+		t.Fatalf("read auth response returned error: %v", err)
+	}
+	if authResp.Type != messages.TypeAuthOK {
+		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthOK)
+	}
+}
+
+func TestAgentWebSocketRejectsInvalidControlPlaneToken(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"valid": false})
+	}))
+	defer controlPlane.Close()
+
+	cfg := testConfig()
+	cfg.StaticToken = "static-token"
+	cfg.ControlPlaneURL = controlPlane.URL
+	server := NewServer(cfg, slog.Default())
+	httpServer := httptest.NewServer(server.AgentHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "wrong",
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
+	if err != nil {
+		t.Fatalf("New auth returned error: %v", err)
+	}
+	if err := wsjson.Write(ctx, conn, auth); err != nil {
+		t.Fatalf("write auth returned error: %v", err)
+	}
+
+	var authResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &authResp); err != nil {
+		t.Fatalf("read auth response returned error: %v", err)
+	}
+	if authResp.Type != messages.TypeAuthError {
+		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthError)
+	}
+	payload, err := messages.DecodePayload[messages.ErrorPayload](authResp)
+	if err != nil {
+		t.Fatalf("decode auth error returned error: %v", err)
+	}
+	if payload.Code != "invalid_token" {
+		t.Fatalf("auth error code = %q, want invalid_token", payload.Code)
 	}
 }
 
