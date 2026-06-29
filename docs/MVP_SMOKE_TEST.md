@@ -22,11 +22,20 @@ make smoke-local
 
 The automated smoke test builds local binaries, starts a temporary local HTTP fixture, starts `porthook-gateway`, starts the `porthook` agent, sends a public request through the tunnel, verifies the response body, and cleans up all started processes.
 
+To verify the self-hosted control-plane authentication path:
+
+```sh
+make smoke-control-plane
+```
+
+The control-plane smoke test starts `porthook-control-plane`, creates an agent token through `POST /api/v1/tokens`, saves it with `porthook login`, starts the gateway in control-plane validation mode, starts the agent from the saved login config, and verifies GET and POST round-trips through the tunnel.
+
 Default automated ports can be overridden with:
 
 - `PORTHOOK_SMOKE_LOCAL_PORT`
 - `PORTHOOK_SMOKE_PUBLIC_PORT`
 - `PORTHOOK_SMOKE_AGENT_PORT`
+- `PORTHOOK_SMOKE_CONTROL_PORT`
 
 The manual steps below are useful when debugging the individual processes.
 

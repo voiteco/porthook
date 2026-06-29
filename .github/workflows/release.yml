@@ -37,6 +37,9 @@ jobs:
       - name: Run local smoke test
         run: make smoke-local VERSION="$VERSION"
 
+      - name: Run control-plane smoke test
+        run: make smoke-control-plane VERSION="$VERSION"
+
       - name: Build release binaries
         run: make release-build VERSION="$VERSION"
 

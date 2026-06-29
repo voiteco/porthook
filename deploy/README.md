@@ -29,4 +29,10 @@ Minimal production shape:
 4. Run `porthook-gateway` with `PORTHOOK_CONTROL_PLANE_URL` pointing at the control plane and `PORTHOOK_CONTROL_PLANE_TOKEN` matching the control-plane validator token.
 5. Run the local agent with `porthook login --server <gateway-agent-url> --token <created-token>`.
 
+The end-to-end control-plane path can be checked locally with:
+
+```sh
+make smoke-control-plane
+```
+
 Operators still need to configure wildcard DNS and TLS in front of the public gateway listener for real internet traffic.
