@@ -53,7 +53,7 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 	tokenValidator, err := newAgentTokenValidator(cfg)
 	if err != nil {
 		logger.Warn("gateway token validator configuration failed", "error", err)
-		tokenValidator = staticTokenValidator{token: cfg.StaticToken}
+		tokenValidator = errorTokenValidator{err: err}
 	}
 
 	return &Server{

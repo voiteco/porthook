@@ -22,6 +22,14 @@ type staticTokenValidator struct {
 	token string
 }
 
+type errorTokenValidator struct {
+	err error
+}
+
+func (v errorTokenValidator) ValidateAgentToken(context.Context, string) (bool, error) {
+	return false, v.err
+}
+
 func (v staticTokenValidator) ValidateAgentToken(_ context.Context, token string) (bool, error) {
 	return token != "" && token == v.token, nil
 }
