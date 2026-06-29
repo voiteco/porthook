@@ -116,7 +116,7 @@ The public edge service that terminates HTTP or HTTPS, routes hostnames to activ
 
 ### Control Plane
 
-The API layer for users, tokens, tunnel sessions, reserved names, and limits.
+The API layer for users, tokens, tunnel sessions, reserved names, and limits. The current implementation includes `porthook-control-plane` for self-hosted token creation, validation, and revocation.
 
 ### Dashboard
 
