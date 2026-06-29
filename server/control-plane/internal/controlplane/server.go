@@ -145,7 +145,7 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authorized(r *http.Request) bool {
 	if s.cfg.AdminToken == "" {
-		return true
+		return false
 	}
 	return r.Header.Get("Authorization") == fmt.Sprintf("Bearer %s", s.cfg.AdminToken)
 }

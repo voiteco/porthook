@@ -17,7 +17,7 @@ go run ./server/control-plane/cmd/porthook-control-plane
 | Environment variable | Default | Description |
 | --- | --- | --- |
 | `PORTHOOK_CONTROL_ADDR` | `:8082` | Control-plane HTTP listener address. |
-| `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Bearer token required for token creation and revocation. |
+| `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Bearer token required for token creation and revocation. If empty, token creation and revocation return `401 Unauthorized`. |
 | `PORTHOOK_DATABASE_URL` | empty | Postgres connection URL. If empty, the process uses in-memory storage for development. |
 
 ## API
@@ -47,3 +47,5 @@ curl -i -X DELETE http://localhost:8082/api/v1/tokens/tok_... \
 ```
 
 The token plaintext is returned only once at creation time. Storage keeps only a hash.
+
+Set `PORTHOOK_CONTROL_ADMIN_TOKEN` before creating or revoking tokens.
