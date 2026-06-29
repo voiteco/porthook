@@ -44,6 +44,25 @@ func run(args []string) error {
 		defer stop()
 
 		return runner.Run(ctx)
+	case "login":
+		cfg, err := parseLoginConfig(args[1:])
+		if err != nil {
+			return err
+		}
+		if err := agent.SaveConfigFile(cfg); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stdout, "Login saved")
+		return nil
+	case "logout":
+		if len(args) > 1 {
+			return usageError()
+		}
+		if err := agent.RemoveConfigFile(); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stdout, "Login removed")
+		return nil
 	case "version", "--version", "-version":
 		fmt.Fprintln(os.Stdout, version)
 		return nil
@@ -102,6 +121,33 @@ func parseHTTPConfig(args []string) (agent.Config, error) {
 	return cfg, nil
 }
 
+func parseLoginConfig(args []string) (agent.ConfigFile, error) {
+	defaults := agent.ConfigFromEnv()
+	serverURL := defaults.ServerURL
+	var token string
+
+	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&serverURL, "server", serverURL, "gateway agent URL")
+	fs.StringVar(&token, "token", token, "agent authentication token")
+	if err := fs.Parse(args); err != nil {
+		return agent.ConfigFile{}, err
+	}
+	if fs.NArg() > 0 {
+		return agent.ConfigFile{}, fmt.Errorf("usage: porthook login --server URL --token TOKEN")
+	}
+	if strings.TrimSpace(serverURL) == "" {
+		return agent.ConfigFile{}, fmt.Errorf("server URL is required")
+	}
+	if strings.TrimSpace(token) == "" {
+		return agent.ConfigFile{}, fmt.Errorf("token is required")
+	}
+	return agent.ConfigFile{
+		ServerURL: serverURL,
+		Token:     token,
+	}, nil
+}
+
 func usageError() error {
-	return fmt.Errorf("usage: porthook http <port> [--server URL] [--token TOKEN] [--subdomain NAME]\n       porthook version")
+	return fmt.Errorf("usage: porthook login --server URL --token TOKEN\n       porthook logout\n       porthook http <port> [--server URL] [--token TOKEN] [--subdomain NAME]\n       porthook version")
 }
