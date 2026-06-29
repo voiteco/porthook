@@ -33,6 +33,8 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_ROOT_DOMAIN` | `localhost` | Root domain used for subdomain routing. |
 | `PORTHOOK_PUBLIC_URL` | `http://localhost:8080` | Base public URL printed by the agent. |
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` | Static agent authentication token. |
+| `PORTHOOK_CONTROL_PLANE_URL` | empty | Optional control-plane base URL for token validation. Static token auth is used when empty. |
+| `PORTHOOK_CONTROL_PLANE_TIMEOUT` | `5s` | Timeout for control-plane token validation requests. |
 | `PORTHOOK_MAX_BODY_BYTES` | `1048576` | Maximum public request body forwarded through a tunnel. |
 | `PORTHOOK_MAX_CONCURRENT_STREAMS` | `64` | Maximum concurrent public requests per tunnel. |
 | `PORTHOOK_RATE_LIMIT_RPS` | `60` | Maximum public requests per second per tunnel. |

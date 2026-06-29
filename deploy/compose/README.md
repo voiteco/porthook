@@ -4,6 +4,8 @@ This directory contains the first self-hosted Docker Compose path for the gatewa
 
 The Compose stack runs only `porthook-gateway`. The local HTTP service and `porthook` agent still run on the host during the MVP smoke test.
 
+For production-like token management, run `porthook-control-plane` and Postgres separately, then set `PORTHOOK_CONTROL_PLANE_URL` on the gateway. The gateway-only Compose file intentionally keeps the local smoke path small.
+
 ## Start the Gateway
 
 From the repository root:

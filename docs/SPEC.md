@@ -116,7 +116,7 @@ The first MVP does not need:
 ### 7.1 Start a Tunnel
 
 ```sh
-porthook login
+porthook login --server https://tunnel.example.com --token ph_...
 porthook http 3000
 ```
 
@@ -502,7 +502,7 @@ This endpoint upgrades to WebSocket.
 Commands:
 
 ```text
-porthook login
+porthook login --server <url> --token <token>
 porthook logout
 porthook http <port>
 porthook http <port> --subdomain <name>
@@ -530,6 +530,8 @@ Gateway configuration:
 PORTHOOK_ROOT_DOMAIN=porthook.example
 PORTHOOK_PUBLIC_URL=https://porthook.example
 PORTHOOK_TOKEN_SECRET=...
+PORTHOOK_CONTROL_PLANE_URL=http://control-plane:8082
+PORTHOOK_CONTROL_PLANE_TIMEOUT=5s
 PORTHOOK_DATABASE_URL=...
 PORTHOOK_REDIS_URL=...
 PORTHOOK_RATE_LIMIT_RPS=60
@@ -541,6 +543,7 @@ Agent configuration:
 ```text
 PORTHOOK_SERVER_URL=https://porthook.example
 PORTHOOK_TOKEN=...
+PORTHOOK_CONFIG_PATH=
 ```
 
 ## 18. Deployment

@@ -11,6 +11,7 @@ build:
 	mkdir -p $(BIN_DIR)
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/porthook ./agent/cmd/porthook
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/porthook-gateway ./server/gateway/cmd/porthook-gateway
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/porthook-control-plane ./server/control-plane/cmd/porthook-control-plane
 
 clean:
 	rm -rf $(BIN_DIR) $(DIST_DIR)
@@ -33,11 +34,12 @@ release-build:
 		arch=$${target#*/}; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook_$${os}_$${arch} ./agent/cmd/porthook; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook-gateway_$${os}_$${arch} ./server/gateway/cmd/porthook-gateway; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook-control-plane_$${os}_$${arch} ./server/control-plane/cmd/porthook-control-plane; \
 	done
 
 release-checksums:
 	cd $(DIST_DIR) && set -eu; \
-	files="$$(printf '%s\n' porthook-gateway_* porthook_* | sort)"; \
+	files="$$(printf '%s\n' porthook-control-plane_* porthook-gateway_* porthook_* | sort)"; \
 	if [ "$$(uname -s)" = "Darwin" ]; then \
 		shasum -a 256 $$files > SHA256SUMS; \
 	elif command -v sha256sum >/dev/null 2>&1; then \
