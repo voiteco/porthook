@@ -16,6 +16,8 @@ const (
 	defaultStaticToken           = "dev-token"
 	defaultMaxBodyBytes          = 1 << 20
 	defaultMaxConcurrentStreams  = 64
+	defaultRateLimitRPS          = 60
+	defaultRateLimitBurst        = 120
 	defaultStreamChunkBytes      = 32 << 10
 	defaultReadHeaderTimeout     = 5 * time.Second
 	defaultReadTimeout           = 30 * time.Second
@@ -30,46 +32,50 @@ const (
 )
 
 type Config struct {
-	PublicAddr            string
-	AgentAddr             string
-	RootDomain            string
-	PublicURL             string
-	StaticToken           string
-	MaxBodyBytes          int64
-	MaxConcurrentStreams  int
-	StreamChunkBytes      int
-	ReadHeaderTimeout     time.Duration
-	ReadTimeout           time.Duration
-	WriteTimeout          time.Duration
-	IdleTimeout           time.Duration
-	HandshakeTimeout      time.Duration
-	StreamTimeout         time.Duration
-	WebSocketWriteTimeout time.Duration
-	WebSocketPingInterval time.Duration
-	WebSocketPongTimeout  time.Duration
-	ShutdownTimeout       time.Duration
+	PublicAddr                 string
+	AgentAddr                  string
+	RootDomain                 string
+	PublicURL                  string
+	StaticToken                string
+	MaxBodyBytes               int64
+	MaxConcurrentStreams       int
+	RateLimitRequestsPerSecond int
+	RateLimitBurst             int
+	StreamChunkBytes           int
+	ReadHeaderTimeout          time.Duration
+	ReadTimeout                time.Duration
+	WriteTimeout               time.Duration
+	IdleTimeout                time.Duration
+	HandshakeTimeout           time.Duration
+	StreamTimeout              time.Duration
+	WebSocketWriteTimeout      time.Duration
+	WebSocketPingInterval      time.Duration
+	WebSocketPongTimeout       time.Duration
+	ShutdownTimeout            time.Duration
 }
 
 func ConfigFromEnv() Config {
 	return normalizeConfig(Config{
-		PublicAddr:            envString("PORTHOOK_ADDR", defaultPublicAddr),
-		AgentAddr:             envString("PORTHOOK_AGENT_ADDR", defaultAgentAddr),
-		RootDomain:            envString("PORTHOOK_ROOT_DOMAIN", defaultRootDomain),
-		PublicURL:             envString("PORTHOOK_PUBLIC_URL", defaultPublicURL),
-		StaticToken:           envString("PORTHOOK_STATIC_TOKEN", defaultStaticToken),
-		MaxBodyBytes:          envInt64("PORTHOOK_MAX_BODY_BYTES", defaultMaxBodyBytes),
-		MaxConcurrentStreams:  envInt("PORTHOOK_MAX_CONCURRENT_STREAMS", defaultMaxConcurrentStreams),
-		StreamChunkBytes:      envInt("PORTHOOK_STREAM_CHUNK_BYTES", defaultStreamChunkBytes),
-		ReadHeaderTimeout:     envDuration("PORTHOOK_READ_HEADER_TIMEOUT", defaultReadHeaderTimeout),
-		ReadTimeout:           envDuration("PORTHOOK_READ_TIMEOUT", defaultReadTimeout),
-		WriteTimeout:          envDuration("PORTHOOK_WRITE_TIMEOUT", defaultWriteTimeout),
-		IdleTimeout:           envDuration("PORTHOOK_IDLE_TIMEOUT", defaultIdleTimeout),
-		HandshakeTimeout:      envDuration("PORTHOOK_HANDSHAKE_TIMEOUT", defaultHandshakeTimeout),
-		StreamTimeout:         envDuration("PORTHOOK_STREAM_TIMEOUT", defaultStreamTimeout),
-		WebSocketWriteTimeout: envDuration("PORTHOOK_WS_WRITE_TIMEOUT", defaultWebSocketWriteTimeout),
-		WebSocketPingInterval: envDuration("PORTHOOK_WS_PING_INTERVAL", defaultWebSocketPingInterval),
-		WebSocketPongTimeout:  envDuration("PORTHOOK_WS_PONG_TIMEOUT", defaultWebSocketPongTimeout),
-		ShutdownTimeout:       envDuration("PORTHOOK_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
+		PublicAddr:                 envString("PORTHOOK_ADDR", defaultPublicAddr),
+		AgentAddr:                  envString("PORTHOOK_AGENT_ADDR", defaultAgentAddr),
+		RootDomain:                 envString("PORTHOOK_ROOT_DOMAIN", defaultRootDomain),
+		PublicURL:                  envString("PORTHOOK_PUBLIC_URL", defaultPublicURL),
+		StaticToken:                envString("PORTHOOK_STATIC_TOKEN", defaultStaticToken),
+		MaxBodyBytes:               envInt64("PORTHOOK_MAX_BODY_BYTES", defaultMaxBodyBytes),
+		MaxConcurrentStreams:       envInt("PORTHOOK_MAX_CONCURRENT_STREAMS", defaultMaxConcurrentStreams),
+		RateLimitRequestsPerSecond: envInt("PORTHOOK_RATE_LIMIT_RPS", defaultRateLimitRPS),
+		RateLimitBurst:             envInt("PORTHOOK_RATE_LIMIT_BURST", defaultRateLimitBurst),
+		StreamChunkBytes:           envInt("PORTHOOK_STREAM_CHUNK_BYTES", defaultStreamChunkBytes),
+		ReadHeaderTimeout:          envDuration("PORTHOOK_READ_HEADER_TIMEOUT", defaultReadHeaderTimeout),
+		ReadTimeout:                envDuration("PORTHOOK_READ_TIMEOUT", defaultReadTimeout),
+		WriteTimeout:               envDuration("PORTHOOK_WRITE_TIMEOUT", defaultWriteTimeout),
+		IdleTimeout:                envDuration("PORTHOOK_IDLE_TIMEOUT", defaultIdleTimeout),
+		HandshakeTimeout:           envDuration("PORTHOOK_HANDSHAKE_TIMEOUT", defaultHandshakeTimeout),
+		StreamTimeout:              envDuration("PORTHOOK_STREAM_TIMEOUT", defaultStreamTimeout),
+		WebSocketWriteTimeout:      envDuration("PORTHOOK_WS_WRITE_TIMEOUT", defaultWebSocketWriteTimeout),
+		WebSocketPingInterval:      envDuration("PORTHOOK_WS_PING_INTERVAL", defaultWebSocketPingInterval),
+		WebSocketPongTimeout:       envDuration("PORTHOOK_WS_PONG_TIMEOUT", defaultWebSocketPongTimeout),
+		ShutdownTimeout:            envDuration("PORTHOOK_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
 	})
 }
 
@@ -94,6 +100,12 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.MaxConcurrentStreams <= 0 {
 		cfg.MaxConcurrentStreams = defaultMaxConcurrentStreams
+	}
+	if cfg.RateLimitRequestsPerSecond <= 0 {
+		cfg.RateLimitRequestsPerSecond = defaultRateLimitRPS
+	}
+	if cfg.RateLimitBurst <= 0 {
+		cfg.RateLimitBurst = defaultRateLimitBurst
 	}
 	if cfg.StreamChunkBytes <= 0 {
 		cfg.StreamChunkBytes = defaultStreamChunkBytes
