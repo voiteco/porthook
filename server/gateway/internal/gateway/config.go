@@ -14,6 +14,7 @@ const (
 	defaultRootDomain            = "localhost"
 	defaultPublicURL             = "http://localhost:8080"
 	defaultStaticToken           = "dev-token"
+	defaultControlPlaneTimeout   = 5 * time.Second
 	defaultMaxBodyBytes          = 1 << 20
 	defaultMaxConcurrentStreams  = 64
 	defaultRateLimitRPS          = 60
@@ -37,6 +38,8 @@ type Config struct {
 	RootDomain                 string
 	PublicURL                  string
 	StaticToken                string
+	ControlPlaneURL            string
+	ControlPlaneTimeout        time.Duration
 	MaxBodyBytes               int64
 	MaxConcurrentStreams       int
 	RateLimitRequestsPerSecond int
@@ -61,6 +64,8 @@ func ConfigFromEnv() Config {
 		RootDomain:                 envString("PORTHOOK_ROOT_DOMAIN", defaultRootDomain),
 		PublicURL:                  envString("PORTHOOK_PUBLIC_URL", defaultPublicURL),
 		StaticToken:                envString("PORTHOOK_STATIC_TOKEN", defaultStaticToken),
+		ControlPlaneURL:            envString("PORTHOOK_CONTROL_PLANE_URL", ""),
+		ControlPlaneTimeout:        envDuration("PORTHOOK_CONTROL_PLANE_TIMEOUT", defaultControlPlaneTimeout),
 		MaxBodyBytes:               envInt64("PORTHOOK_MAX_BODY_BYTES", defaultMaxBodyBytes),
 		MaxConcurrentStreams:       envInt("PORTHOOK_MAX_CONCURRENT_STREAMS", defaultMaxConcurrentStreams),
 		RateLimitRequestsPerSecond: envInt("PORTHOOK_RATE_LIMIT_RPS", defaultRateLimitRPS),
@@ -94,6 +99,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.StaticToken == "" {
 		cfg.StaticToken = defaultStaticToken
+	}
+	if cfg.ControlPlaneTimeout <= 0 {
+		cfg.ControlPlaneTimeout = defaultControlPlaneTimeout
 	}
 	if cfg.MaxBodyBytes <= 0 {
 		cfg.MaxBodyBytes = defaultMaxBodyBytes

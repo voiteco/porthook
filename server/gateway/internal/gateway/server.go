@@ -36,6 +36,7 @@ type Server struct {
 	cfg      Config
 	logger   *slog.Logger
 	registry *registry.Registry
+	tokens   agentTokenValidator
 
 	sessionsMu sync.RWMutex
 	sessions   map[string]*agentSession
@@ -49,11 +50,17 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 		logger = slog.Default()
 	}
 	cfg = normalizeConfig(cfg)
+	tokenValidator, err := newAgentTokenValidator(cfg)
+	if err != nil {
+		logger.Warn("gateway token validator configuration failed", "error", err)
+		tokenValidator = staticTokenValidator{token: cfg.StaticToken}
+	}
 
 	return &Server{
 		cfg:      cfg,
 		logger:   logger,
 		registry: registry.New(),
+		tokens:   tokenValidator,
 		sessions: make(map[string]*agentSession),
 
 		generateSubdomain: names.RandomSubdomain,
@@ -176,7 +183,16 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) er
 	if err != nil {
 		return err
 	}
-	if payload.Token == "" || payload.Token != s.cfg.StaticToken {
+	validToken, err := s.tokens.ValidateAgentToken(ctx, payload.Token)
+	if err != nil {
+		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
+			Code:    "auth_unavailable",
+			Message: "token validation failed",
+		})
+		_ = wsjson.Write(ctx, conn, authErr)
+		return fmt.Errorf("validate token: %w", err)
+	}
+	if !validToken {
 		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
 			Code:    "invalid_token",
 			Message: "invalid token",
