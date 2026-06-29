@@ -14,7 +14,7 @@ The first implementation target is an HTTP reverse tunnel MVP built from:
 - A Go gateway server.
 - A public tunnel protocol.
 - Docker Compose deployment.
-- Optional control-plane and dashboard components after the tunnel core works.
+- Control-plane token management, with dashboard components after the tunnel core works.
 
 Private hosted-service implementation details belong outside this repository.
 
@@ -58,10 +58,11 @@ Agent tunnel multiplexer
 Local service
 ```
 
-The MVP has two required binaries:
+The MVP has three required binaries:
 
 - `porthook-agent`: local CLI agent.
 - `porthook-gateway`: public gateway server.
+- `porthook-control-plane`: token management API for self-hosted deployments.
 
 The final user-facing CLI command should be named `porthook`.
 
@@ -393,6 +394,8 @@ Agent responsibilities:
 MVP commands:
 
 ```text
+porthook login --server <url> --token <token>
+porthook logout
 porthook http <port>
 porthook http <port> --server <url>
 porthook http <port> --token <token>
@@ -403,8 +406,6 @@ porthook version
 Future commands:
 
 ```text
-porthook login
-porthook logout
 porthook tunnels
 ```
 
@@ -454,6 +455,8 @@ PORTHOOK_AGENT_ADDR=:8081
 PORTHOOK_ROOT_DOMAIN=porthook.example
 PORTHOOK_PUBLIC_URL=https://porthook.example
 PORTHOOK_STATIC_TOKEN=dev-token
+PORTHOOK_CONTROL_PLANE_URL=http://control-plane:8082
+PORTHOOK_CONTROL_PLANE_TIMEOUT=5s
 PORTHOOK_MAX_BODY_BYTES=1048576
 PORTHOOK_MAX_CONCURRENT_STREAMS=64
 PORTHOOK_RATE_LIMIT_RPS=60
@@ -476,6 +479,7 @@ Agent environment variables:
 ```text
 PORTHOOK_SERVER_URL=https://porthook.example
 PORTHOOK_TOKEN=dev-token
+PORTHOOK_CONFIG_PATH=
 PORTHOOK_HANDSHAKE_TIMEOUT=10s
 PORTHOOK_REQUEST_TIMEOUT=30s
 PORTHOOK_MAX_RESPONSE_BODY_BYTES=1048576
@@ -489,6 +493,14 @@ PORTHOOK_RECONNECT_JITTER=250ms
 ```
 
 Static token authentication is acceptable for the first proof of concept.
+
+Control-plane environment variables:
+
+```text
+PORTHOOK_CONTROL_ADDR=:8082
+PORTHOOK_CONTROL_ADMIN_TOKEN=...
+PORTHOOK_DATABASE_URL=postgres://...
+```
 
 Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
 

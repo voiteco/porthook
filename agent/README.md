@@ -7,6 +7,7 @@ The agent is the local CLI users run on their machines.
 Current command shape:
 
 ```sh
+porthook login --server http://localhost:8081 --token dev-token
 porthook http 3000 --server http://localhost:8081 --token dev-token --subdomain demo
 ```
 
@@ -19,6 +20,7 @@ Responsibilities:
 - Cancel local requests when the gateway cancels a stream.
 - Print public URLs and request logs.
 - Reconnect with backoff after transient gateway disconnects.
+- Persist self-hosted server and token defaults with `porthook login`.
 
 The initial implementation is written in Go and uses a WebSocket connection to the gateway.
 
@@ -30,6 +32,7 @@ CLI flags take precedence for the command they configure. Environment variables 
 | --- | --- | --- |
 | `PORTHOOK_SERVER_URL` | `http://localhost:8081` | Gateway agent listener URL. |
 | `PORTHOOK_TOKEN` | `dev-token` | Static agent authentication token. |
+| `PORTHOOK_CONFIG_PATH` | OS config dir | Optional path for the JSON login config file. |
 | `PORTHOOK_HANDSHAKE_TIMEOUT` | `10s` | WebSocket dial, authentication, and tunnel registration timeout. |
 | `PORTHOOK_REQUEST_TIMEOUT` | `30s` | Local service request timeout. |
 | `PORTHOOK_MAX_RESPONSE_BODY_BYTES` | `1048576` | Maximum local response body sent through the tunnel. |
@@ -44,3 +47,5 @@ CLI flags take precedence for the command they configure. Environment variables 
 Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
 
 Authentication and tunnel registration errors stop the agent immediately. Transient dial and WebSocket disconnects are retried until the process is stopped.
+
+CLI flags override environment variables. Environment variables override saved login config. Saved login config overrides local development defaults.

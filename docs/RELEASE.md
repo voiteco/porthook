@@ -44,6 +44,7 @@ On macOS, run the binary that matches the local architecture:
 ```sh
 ./dist/porthook_darwin_arm64 version
 ./dist/porthook-gateway_darwin_arm64 version
+./dist/porthook-control-plane_darwin_arm64 version
 ```
 
 ## Create a Release
@@ -65,6 +66,10 @@ GitHub Actions will create a prerelease and upload:
 - `porthook-gateway_linux_arm64`
 - `porthook-gateway_darwin_amd64`
 - `porthook-gateway_darwin_arm64`
+- `porthook-control-plane_linux_amd64`
+- `porthook-control-plane_linux_arm64`
+- `porthook-control-plane_darwin_amd64`
+- `porthook-control-plane_darwin_arm64`
 - `SHA256SUMS`
 
 ## Install a Binary
@@ -81,6 +86,13 @@ The gateway binary supports the same version check:
 ```sh
 chmod +x porthook-gateway_linux_amd64
 ./porthook-gateway_linux_amd64 version
+```
+
+The control-plane binary does too:
+
+```sh
+chmod +x porthook-control-plane_linux_amd64
+./porthook-control-plane_linux_amd64 version
 ```
 
 For a full local tunnel verification after building from source, see [MVP_SMOKE_TEST.md](./MVP_SMOKE_TEST.md).

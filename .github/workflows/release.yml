@@ -44,6 +44,7 @@ jobs:
         run: |
           test "$(./dist/porthook_linux_amd64 version)" = "$VERSION"
           test "$(./dist/porthook-gateway_linux_amd64 version)" = "$VERSION"
+          test "$(./dist/porthook-control-plane_linux_amd64 version)" = "$VERSION"
 
       - name: Generate checksums
         run: make release-checksums

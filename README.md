@@ -4,7 +4,7 @@ Porthook is an open-source reverse tunnel service for exposing local development
 
 This repository is the public self-hosted product. Private commercial, hosted-cloud, pricing, and operating plans should live in separate private repositories.
 
-Project status: pre-alpha. The local MVP HTTP tunnel prototype is implemented and covered by `make smoke-local`.
+Project status: pre-alpha. The local MVP HTTP tunnel prototype is implemented and covered by `make smoke-local`; control-plane token management is in early implementation.
 
 ## What It Does
 
@@ -41,6 +41,7 @@ The first product shape is intentionally narrow:
 - CLI agent for macOS, Linux, and Windows.
 - Wildcard subdomain routing.
 - Token-based tunnel authentication.
+- Optional control-plane token validation for self-hosted deployments.
 - Basic request logs for local debugging.
 - Agent reconnects for transient gateway disconnects.
 - A simple dashboard after the tunnel core is stable.
@@ -129,7 +130,7 @@ A web UI for active tunnels, request history, tokens, and domains.
 4. Token authentication and tunnel registration.
 5. Docker Compose self-hosting.
 6. Request logging and CLI polish.
-7. Dashboard and control-plane API.
+7. Control-plane API and dashboard.
 
 ## Specification
 
