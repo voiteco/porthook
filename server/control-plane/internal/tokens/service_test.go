@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestServiceCreatesAndValidatesToken(t *testing.T) {
@@ -57,22 +58,63 @@ func TestServiceRejectsUnknownToken(t *testing.T) {
 
 func TestServiceEnforcesScopes(t *testing.T) {
 	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(store)
+	token := "ph_limited"
+
+	if err := store.Create(ctx, TokenRecord{
+		ID:        "tok_limited",
+		Name:      "limited",
+		TokenHash: HashToken(token),
+		Scopes:    nil,
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("store Create returned error: %v", err)
+	}
+
+	result, err := service.ValidateToken(ctx, token, ScopeRegisterTunnel)
+	if err != nil {
+		t.Fatalf("ValidateToken returned error: %v", err)
+	}
+	if result.Valid {
+		t.Fatal("token validated for a missing scope")
+	}
+}
+
+func TestServiceRejectsUnknownCreateScope(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	_, err := service.CreateToken(ctx, CreateTokenRequest{
+		Name:   "bad scope",
+		Scopes: []string{"typo_scope"},
+	})
+	if err == nil {
+		t.Fatal("CreateToken returned nil error")
+	}
+	if !strings.Contains(err.Error(), `unsupported token scope "typo_scope"`) {
+		t.Fatalf("error = %q, want unsupported scope guidance", err.Error())
+	}
+}
+
+func TestServiceRejectsUnknownValidationScope(t *testing.T) {
+	ctx := context.Background()
 	service := NewService(NewMemoryStore())
 
 	created, err := service.CreateToken(ctx, CreateTokenRequest{
-		Name:   "limited",
+		Name:   "known scope",
 		Scopes: []string{ScopeRegisterTunnel},
 	})
 	if err != nil {
 		t.Fatalf("CreateToken returned error: %v", err)
 	}
 
-	result, err := service.ValidateToken(ctx, created.Token, "reserve_subdomain")
-	if err != nil {
-		t.Fatalf("ValidateToken returned error: %v", err)
+	_, err = service.ValidateToken(ctx, created.Token, "typo_scope")
+	if err == nil {
+		t.Fatal("ValidateToken returned nil error")
 	}
-	if result.Valid {
-		t.Fatal("token validated for a missing scope")
+	if !strings.Contains(err.Error(), `unsupported token scope "typo_scope"`) {
+		t.Fatalf("error = %q, want unsupported scope guidance", err.Error())
 	}
 }
 

@@ -8,6 +8,9 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -18,12 +21,15 @@ import (
 type Server struct {
 	cfg     Config
 	service *tokens.Service
+	logger  *slog.Logger
 }
 
 type validateTokenRequest struct {
 	Token string `json:"token"`
 	Scope string `json:"scope,omitempty"`
 }
+
+const maxJSONBodyBytes = 1 << 20
 
 func NewServer(cfg Config, service *tokens.Service) *Server {
 	if cfg.Addr == "" {
@@ -32,6 +38,7 @@ func NewServer(cfg Config, service *tokens.Service) *Server {
 	return &Server{
 		cfg:     cfg,
 		service: service,
+		logger:  slog.Default(),
 	}
 }
 
@@ -82,7 +89,7 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		methodNotAllowed(w, "GET, POST")
 		return
 	}
 	if !s.authorized(r) {
@@ -95,26 +102,32 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.logger.Info("control-plane tokens listed", "count", len(listed.Tokens))
 		writeJSON(w, http.StatusOK, listed)
 		return
 	}
 
 	var req tokens.CreateTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	created, err := s.service.CreateToken(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		status := http.StatusBadRequest
+		if !isTokenRequestError(err) {
+			status = http.StatusInternalServerError
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
+	s.logger.Info("control-plane token created", "token_id", created.ID, "name", created.Name, "scopes", created.Scopes)
 	writeJSON(w, http.StatusCreated, created)
 }
 
 func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		methodNotAllowed(w, "POST")
 		return
 	}
 	if !s.validatorAuthorized(r) {
@@ -123,13 +136,17 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req validateTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	result, err := s.service.ValidateToken(r.Context(), req.Token, req.Scope)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		if errors.Is(err, tokens.ErrUnsupportedScope) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -137,7 +154,7 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		methodNotAllowed(w, "DELETE")
 		return
 	}
 	if !s.authorized(r) {
@@ -154,6 +171,7 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.logger.Info("control-plane token revoked", "token_id", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -186,4 +204,39 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(dst); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return fmt.Errorf("json body is too large: maximum %d bytes", maxJSONBodyBytes)
+		}
+		if errors.Is(err, io.EOF) {
+			return errors.New("json body is required")
+		}
+		return fmt.Errorf("invalid json: %w", err)
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return fmt.Errorf("invalid json: %w", err)
+	}
+	return errors.New("invalid json: multiple json values")
+}
+
+func methodNotAllowed(w http.ResponseWriter, allow string) {
+	w.Header().Set("Allow", allow)
+	w.WriteHeader(http.StatusMethodNotAllowed)
+}
+
+func isTokenRequestError(err error) bool {
+	return errors.Is(err, tokens.ErrTokenNameRequired) || errors.Is(err, tokens.ErrUnsupportedScope)
 }

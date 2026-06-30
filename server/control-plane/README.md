@@ -6,6 +6,12 @@ The control plane owns users, tokens, tunnel metadata, reserved names, and limit
 
 Current scope is token management for self-hosted gateway authentication.
 
+Supported token scopes:
+
+- `register_tunnel`
+
+Token APIs reject unknown scopes and malformed JSON. Token admin operations are logged without plaintext token values.
+
 Run locally:
 
 ```sh

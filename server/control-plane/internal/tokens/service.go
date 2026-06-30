@@ -10,11 +10,17 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
 
-var ErrTokenNameRequired = errors.New("token name is required")
+var (
+	ErrTokenNameRequired = errors.New("token name is required")
+	ErrUnsupportedScope  = errors.New("unsupported token scope")
+)
+
+var knownScopes = []string{ScopeRegisterTunnel}
 
 type Service struct {
 	store Store
@@ -47,7 +53,10 @@ func (s *Service) CreateToken(ctx context.Context, req CreateTokenRequest) (Crea
 		return CreatedToken{}, err
 	}
 
-	scopes := normalizeScopes(req.Scopes)
+	scopes, err := normalizeScopes(req.Scopes)
+	if err != nil {
+		return CreatedToken{}, err
+	}
 	if len(scopes) == 0 {
 		scopes = []string{ScopeRegisterTunnel}
 	}
@@ -87,6 +96,10 @@ func (s *Service) ValidateToken(ctx context.Context, token, requiredScope string
 	}
 	if !ok || record.RevokedAt != nil {
 		return ValidationResult{Valid: false}, nil
+	}
+	requiredScope = strings.TrimSpace(requiredScope)
+	if requiredScope != "" && !isKnownScope(requiredScope) {
+		return ValidationResult{}, fmt.Errorf("%w %q", ErrUnsupportedScope, requiredScope)
 	}
 	if requiredScope != "" && !hasScope(record.Scopes, requiredScope) {
 		return ValidationResult{Valid: false}, nil
@@ -144,7 +157,7 @@ func randomSecret(prefix string, bytesLen int) (string, error) {
 	return prefix + base64.RawURLEncoding.EncodeToString(data), nil
 }
 
-func normalizeScopes(scopes []string) []string {
+func normalizeScopes(scopes []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(scopes))
 	out := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
@@ -152,13 +165,20 @@ func normalizeScopes(scopes []string) []string {
 		if scope == "" {
 			continue
 		}
+		if !isKnownScope(scope) {
+			return nil, fmt.Errorf("%w %q", ErrUnsupportedScope, scope)
+		}
 		if _, ok := seen[scope]; ok {
 			continue
 		}
 		seen[scope] = struct{}{}
 		out = append(out, scope)
 	}
-	return out
+	return out, nil
+}
+
+func isKnownScope(scope string) bool {
+	return slices.Contains(knownScopes, scope)
 }
 
 func hasScope(scopes []string, required string) bool {
