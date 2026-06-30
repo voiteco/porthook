@@ -100,6 +100,42 @@ func (s *Service) ListReservations(ctx context.Context) (ListReservationsRespons
 	return ListReservationsResponse{ReservedSubdomains: out}, nil
 }
 
+func (s *Service) GetReservation(ctx context.Context, id string) (ReservationSummary, bool, error) {
+	if s == nil || s.store == nil {
+		return ReservationSummary{}, false, errors.New("reserved subdomain store is required")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ReservationSummary{}, false, nil
+	}
+	record, ok, err := s.store.LookupByID(ctx, id)
+	if err != nil {
+		return ReservationSummary{}, false, err
+	}
+	if !ok {
+		return ReservationSummary{}, false, nil
+	}
+	return summarize(record), true, nil
+}
+
+func (s *Service) GetReservationByName(ctx context.Context, name string) (ReservationSummary, bool, error) {
+	if s == nil || s.store == nil {
+		return ReservationSummary{}, false, errors.New("reserved subdomain store is required")
+	}
+	name, err := NormalizeName(name)
+	if err != nil {
+		return ReservationSummary{}, false, err
+	}
+	record, ok, err := s.store.LookupByName(ctx, name)
+	if err != nil {
+		return ReservationSummary{}, false, err
+	}
+	if !ok {
+		return ReservationSummary{}, false, nil
+	}
+	return summarize(record), true, nil
+}
+
 func (s *Service) DeleteReservation(ctx context.Context, id string) error {
 	if s == nil || s.store == nil {
 		return errors.New("reserved subdomain store is required")
@@ -119,6 +155,15 @@ func (s *Service) DeleteReservation(ctx context.Context, id string) error {
 		return fmt.Errorf("delete reserved subdomain: %w", err)
 	}
 	return nil
+}
+
+func summarize(record ReservationRecord) ReservationSummary {
+	return ReservationSummary{
+		ID:        record.ID,
+		Name:      record.Name,
+		TokenID:   record.TokenID,
+		CreatedAt: record.CreatedAt,
+	}
 }
 
 func (s *Service) Authorize(ctx context.Context, tokenID, subdomain string) (AuthorizationResult, error) {

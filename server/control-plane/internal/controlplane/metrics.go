@@ -24,6 +24,14 @@ type metrics struct {
 	reservationAuthorizationsTotal       atomic.Uint64
 	reservationAuthorizationAllowedTotal atomic.Uint64
 	reservationAuthorizationDeniedTotal  atomic.Uint64
+	accessPolicyAdminCreatesTotal        atomic.Uint64
+	accessPolicyAdminListsTotal          atomic.Uint64
+	accessPolicyAdminUpdatesTotal        atomic.Uint64
+	accessPolicyAdminDeletesTotal        atomic.Uint64
+	accessPolicyEvaluationsTotal         atomic.Uint64
+	accessPolicyEvaluationAllowedTotal   atomic.Uint64
+	accessPolicyEvaluationDeniedTotal    atomic.Uint64
+	accessPolicyEvaluationErrorsTotal    atomic.Uint64
 	authFailuresTotal                    atomic.Uint64
 	readinessFailuresTotal               atomic.Uint64
 }
@@ -51,6 +59,14 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetric(w, "porthook_control_plane_reservation_authorizations_total", "Reserved subdomain authorization requests handled by the control plane.", "counter", s.metrics.reservationAuthorizationsTotal.Load())
 	writeMetric(w, "porthook_control_plane_reservation_authorization_allowed_total", "Reserved subdomain authorization requests that returned allowed=true.", "counter", s.metrics.reservationAuthorizationAllowedTotal.Load())
 	writeMetric(w, "porthook_control_plane_reservation_authorization_denied_total", "Reserved subdomain authorization requests that returned allowed=false.", "counter", s.metrics.reservationAuthorizationDeniedTotal.Load())
+	writeMetric(w, "porthook_control_plane_access_policy_admin_creates_total", "Successful access policy create operations.", "counter", s.metrics.accessPolicyAdminCreatesTotal.Load())
+	writeMetric(w, "porthook_control_plane_access_policy_admin_lists_total", "Successful access policy list operations.", "counter", s.metrics.accessPolicyAdminListsTotal.Load())
+	writeMetric(w, "porthook_control_plane_access_policy_admin_updates_total", "Successful access policy update operations.", "counter", s.metrics.accessPolicyAdminUpdatesTotal.Load())
+	writeMetric(w, "porthook_control_plane_access_policy_admin_deletes_total", "Successful access policy delete operations.", "counter", s.metrics.accessPolicyAdminDeletesTotal.Load())
+	writeMetric(w, "porthook_control_plane_access_policy_evaluations_total", "Access policy evaluation requests handled by the control plane.", "counter", s.metrics.accessPolicyEvaluationsTotal.Load())
+	writeMetric(w, "porthook_control_plane_access_policy_evaluation_allowed_total", "Access policy evaluation requests that returned allowed=true.", "counter", s.metrics.accessPolicyEvaluationAllowedTotal.Load())
+	writeMetric(w, "porthook_control_plane_access_policy_evaluation_denied_total", "Access policy evaluation requests that returned allowed=false.", "counter", s.metrics.accessPolicyEvaluationDeniedTotal.Load())
+	writeMetric(w, "porthook_control_plane_access_policy_evaluation_errors_total", "Access policy evaluation requests that failed before producing a result.", "counter", s.metrics.accessPolicyEvaluationErrorsTotal.Load())
 	writeMetric(w, "porthook_control_plane_auth_failures_total", "Bearer authorization failures on control-plane endpoints.", "counter", s.metrics.authFailuresTotal.Load())
 	writeMetric(w, "porthook_control_plane_readiness_failures_total", "Readiness checks that failed.", "counter", s.metrics.readinessFailuresTotal.Load())
 }
@@ -80,6 +96,11 @@ func (s *Server) writeInventoryMetrics(w http.ResponseWriter, r *http.Request) {
 	listedReservations, err := s.reservations.ListReservations(r.Context())
 	if err == nil {
 		writeMetric(w, "porthook_control_plane_reserved_subdomains", "Current reserved subdomain records in the control plane.", "gauge", uint64(len(listedReservations.ReservedSubdomains)))
+	}
+
+	listedAccessPolicies, err := s.accessPolicies.ListPolicies(r.Context())
+	if err == nil {
+		writeMetric(w, "porthook_control_plane_access_policies", "Current access policy records in the control plane.", "gauge", uint64(len(listedAccessPolicies.AccessPolicies)))
 	}
 }
 

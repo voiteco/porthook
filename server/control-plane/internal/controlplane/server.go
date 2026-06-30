@@ -16,18 +16,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/voiteco/porthook/server/control-plane/internal/access"
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 	"github.com/voiteco/porthook/server/dashboard"
 )
 
 type Server struct {
-	cfg          Config
-	service      *tokens.Service
-	reservations *reserved.Service
-	logger       *slog.Logger
-	metrics      metrics
-	startedAt    time.Time
+	cfg            Config
+	service        *tokens.Service
+	reservations   *reserved.Service
+	accessPolicies *access.Service
+	logger         *slog.Logger
+	metrics        metrics
+	startedAt      time.Time
 }
 
 type validateTokenRequest struct {
@@ -38,6 +40,20 @@ type validateTokenRequest struct {
 type authorizeReservedSubdomainRequest struct {
 	TokenID   string `json:"token_id"`
 	Subdomain string `json:"subdomain"`
+}
+
+type evaluateAccessPolicyRequest struct {
+	Subdomain     string `json:"subdomain"`
+	RemoteIP      string `json:"remote_ip,omitempty"`
+	BasicUsername string `json:"basic_username,omitempty"`
+	BasicPassword string `json:"basic_password,omitempty"`
+	BearerToken   string `json:"bearer_token,omitempty"`
+}
+
+type evaluateAccessPolicyResponse struct {
+	Allowed bool              `json:"allowed"`
+	Mode    access.PolicyMode `json:"mode"`
+	Reason  string            `json:"reason,omitempty"`
 }
 
 type statusResponse struct {
@@ -52,6 +68,14 @@ const maxJSONBodyBytes = 1 << 20
 const readinessTimeout = 2 * time.Second
 
 func NewServer(cfg Config, service *tokens.Service, reservationServices ...*reserved.Service) *Server {
+	reservationService := reserved.NewService(reserved.NewMemoryStore())
+	if len(reservationServices) > 0 && reservationServices[0] != nil {
+		reservationService = reservationServices[0]
+	}
+	return NewServerWithAccessPolicies(cfg, service, reservationService, nil)
+}
+
+func NewServerWithAccessPolicies(cfg Config, service *tokens.Service, reservationService *reserved.Service, accessPolicyService *access.Service) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
 	}
@@ -61,16 +85,19 @@ func NewServer(cfg Config, service *tokens.Service, reservationServices ...*rese
 	if service == nil {
 		service = tokens.NewService(tokens.NewMemoryStore())
 	}
-	reservationService := reserved.NewService(reserved.NewMemoryStore())
-	if len(reservationServices) > 0 && reservationServices[0] != nil {
-		reservationService = reservationServices[0]
+	if reservationService == nil {
+		reservationService = reserved.NewService(reserved.NewMemoryStore())
+	}
+	if accessPolicyService == nil {
+		accessPolicyService = access.NewService(access.NewMemoryStore())
 	}
 	return &Server{
-		cfg:          cfg,
-		service:      service,
-		reservations: reservationService,
-		logger:       slog.Default(),
-		startedAt:    time.Now().UTC(),
+		cfg:            cfg,
+		service:        service,
+		reservations:   reservationService,
+		accessPolicies: accessPolicyService,
+		logger:         slog.Default(),
+		startedAt:      time.Now().UTC(),
 	}
 }
 
@@ -114,6 +141,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/tokens", s.handleTokens)
 	mux.HandleFunc("/api/v1/tokens/", s.handleTokenByID)
 	mux.HandleFunc("/api/v1/tokens/validate", s.handleValidateToken)
+	mux.HandleFunc("/api/v1/access-policies", s.handleAccessPolicies)
+	mux.HandleFunc("/api/v1/access-policies/", s.handleAccessPolicyByID)
+	mux.HandleFunc("/api/v1/access-policies/evaluate", s.handleEvaluateAccessPolicy)
 	mux.HandleFunc("/api/v1/reserved-subdomains", s.handleReservedSubdomains)
 	mux.HandleFunc("/api/v1/reserved-subdomains/", s.handleReservedSubdomainByID)
 	mux.HandleFunc("/api/v1/reserved-subdomains/authorize", s.handleAuthorizeReservedSubdomain)
@@ -383,6 +413,231 @@ func (s *Server) handleAuthorizeReservedSubdomain(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleAccessPolicies(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/v1/access-policies" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		methodNotAllowed(w, "GET, POST")
+		return
+	}
+	if !s.authorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.Bool("token_configured", s.cfg.AdminToken != ""),
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method == http.MethodGet {
+		listed, err := s.accessPolicies.ListPolicies(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.metrics.accessPolicyAdminListsTotal.Add(1)
+		s.logAudit(r, slog.LevelInfo, "control-plane access policies listed", "control_plane.access_policies_listed", slog.Int("count", len(listed.AccessPolicies)))
+		writeJSON(w, http.StatusOK, listed)
+		return
+	}
+
+	var req access.CreatePolicyRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, ok, err := s.reservations.GetReservation(r.Context(), req.ReservedSubdomainID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	} else if !ok {
+		http.Error(w, "reserved_subdomain_id was not found", http.StatusBadRequest)
+		return
+	}
+	created, err := s.accessPolicies.CreatePolicy(r.Context(), req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, access.ErrPolicyAlreadyExists):
+			status = http.StatusConflict
+		case isAccessPolicyRequestError(err):
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	s.metrics.accessPolicyAdminCreatesTotal.Add(1)
+	s.logAudit(r, slog.LevelInfo, "control-plane access policy created", "control_plane.access_policy_created",
+		slog.String("access_policy_id", created.ID),
+		slog.String("reserved_subdomain_id", created.ReservedSubdomainID),
+		slog.String("mode", string(created.Mode)),
+	)
+	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleAccessPolicyByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPut && r.Method != http.MethodDelete {
+		methodNotAllowed(w, "GET, PUT, DELETE")
+		return
+	}
+	if !s.authorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.Bool("token_configured", s.cfg.AdminToken != ""),
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/access-policies/")
+	if id == "" || id == "evaluate" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		policy, ok, err := s.accessPolicies.GetPolicy(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			http.Error(w, access.ErrPolicyNotFound.Error(), http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, policy)
+	case http.MethodPut:
+		var req access.UpdatePolicyRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		updated, err := s.accessPolicies.UpdatePolicy(r.Context(), id, req)
+		if err != nil {
+			status := http.StatusInternalServerError
+			switch {
+			case errors.Is(err, access.ErrPolicyNotFound):
+				status = http.StatusNotFound
+			case isAccessPolicyRequestError(err):
+				status = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		s.metrics.accessPolicyAdminUpdatesTotal.Add(1)
+		s.logAudit(r, slog.LevelInfo, "control-plane access policy updated", "control_plane.access_policy_updated",
+			slog.String("access_policy_id", updated.ID),
+			slog.String("reserved_subdomain_id", updated.ReservedSubdomainID),
+			slog.String("mode", string(updated.Mode)),
+		)
+		writeJSON(w, http.StatusOK, updated)
+	case http.MethodDelete:
+		if err := s.accessPolicies.DeletePolicy(r.Context(), id); err != nil {
+			if errors.Is(err, access.ErrPolicyNotFound) {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.metrics.accessPolicyAdminDeletesTotal.Add(1)
+		s.logAudit(r, slog.LevelInfo, "control-plane access policy deleted", "control_plane.access_policy_deleted", slog.String("access_policy_id", id))
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (s *Server) handleEvaluateAccessPolicy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, "POST")
+		return
+	}
+	if !s.validatorAuthorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "validator"),
+			slog.Bool("token_configured", s.cfg.ValidatorToken != ""),
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req evaluateAccessPolicyRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.Subdomain = strings.TrimSpace(req.Subdomain)
+	if req.Subdomain == "" {
+		http.Error(w, "subdomain is required", http.StatusBadRequest)
+		return
+	}
+	if req.RemoteIP == "" {
+		req.RemoteIP = remoteIP(r.RemoteAddr)
+	}
+
+	s.metrics.accessPolicyEvaluationsTotal.Add(1)
+	result, reservation, err := s.evaluateAccessPolicy(r.Context(), req)
+	if err != nil {
+		s.metrics.accessPolicyEvaluationErrorsTotal.Add(1)
+		status := http.StatusInternalServerError
+		if isReservationRequestError(err) {
+			status = http.StatusBadRequest
+		}
+		s.logAudit(r, slog.LevelWarn, "control-plane access policy evaluation failed", "control_plane.access_policy_evaluation_failed",
+			slog.String("subdomain", req.Subdomain),
+			slog.Int("status", status),
+			slog.Any("error", err),
+		)
+		http.Error(w, err.Error(), status)
+		return
+	}
+	if result.Allowed {
+		s.metrics.accessPolicyEvaluationAllowedTotal.Add(1)
+	} else {
+		s.metrics.accessPolicyEvaluationDeniedTotal.Add(1)
+	}
+	attrs := []slog.Attr{
+		slog.String("subdomain", req.Subdomain),
+		slog.String("mode", string(result.Mode)),
+		slog.Bool("allowed", result.Allowed),
+		slog.String("reason", result.Reason),
+	}
+	if reservation.ID != "" {
+		attrs = append(attrs, slog.String("reservation_id", reservation.ID))
+	}
+	s.logAudit(r, slog.LevelInfo, "control-plane access policy evaluated", "control_plane.access_policy_evaluated", attrs...)
+	writeJSON(w, http.StatusOK, evaluateAccessPolicyResponse{
+		Allowed: result.Allowed,
+		Mode:    result.Mode,
+		Reason:  result.Reason,
+	})
+}
+
+func (s *Server) evaluateAccessPolicy(ctx context.Context, req evaluateAccessPolicyRequest) (access.CheckPolicyResult, reserved.ReservationSummary, error) {
+	reservation, ok, err := s.reservations.GetReservationByName(ctx, req.Subdomain)
+	if err != nil {
+		return access.CheckPolicyResult{}, reserved.ReservationSummary{}, err
+	}
+	if !ok {
+		return access.CheckPolicyResult{Allowed: true, Mode: access.ModePublic, Reason: "not_reserved"}, reserved.ReservationSummary{}, nil
+	}
+
+	result, err := s.accessPolicies.CheckPolicy(ctx, access.CheckPolicyRequest{
+		ReservedSubdomainID: reservation.ID,
+		RemoteIP:            req.RemoteIP,
+		BasicUsername:       req.BasicUsername,
+		BasicPassword:       req.BasicPassword,
+		BearerToken:         req.BearerToken,
+	})
+	if err != nil {
+		return access.CheckPolicyResult{}, reserved.ReservationSummary{}, err
+	}
+	return result, reservation, nil
+}
+
 func (s *Server) handleReservedSubdomainByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		methodNotAllowed(w, "DELETE")
@@ -465,7 +720,10 @@ func (s *Server) ready(ctx context.Context) error {
 	if err := s.service.Ready(ctx); err != nil {
 		return err
 	}
-	return s.reservations.Ready(ctx)
+	if err := s.reservations.Ready(ctx); err != nil {
+		return err
+	}
+	return s.accessPolicies.Ready(ctx)
 }
 
 func secretEqual(got, want string) bool {
@@ -553,4 +811,14 @@ func isReservationRequestError(err error) bool {
 	return errors.Is(err, reserved.ErrReservationNameRequired) ||
 		errors.Is(err, reserved.ErrReservationTokenIDRequired) ||
 		strings.Contains(err.Error(), "invalid reserved subdomain")
+}
+
+func isAccessPolicyRequestError(err error) bool {
+	return errors.Is(err, access.ErrPolicyReservedSubdomainIDRequired) ||
+		errors.Is(err, access.ErrPolicyModeRequired) ||
+		errors.Is(err, access.ErrPolicyModeUnsupported) ||
+		errors.Is(err, access.ErrPolicySecretRequired) ||
+		errors.Is(err, access.ErrPolicyBasicUsernameRequired) ||
+		errors.Is(err, access.ErrPolicyIPAllowlistRequired) ||
+		strings.Contains(err.Error(), "invalid ip allowlist")
 }
