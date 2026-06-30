@@ -99,6 +99,27 @@ func (s *Service) ValidateToken(ctx context.Context, token, requiredScope string
 	}, nil
 }
 
+func (s *Service) ListTokens(ctx context.Context) (ListTokensResponse, error) {
+	if s == nil || s.store == nil {
+		return ListTokensResponse{}, errors.New("token store is required")
+	}
+	records, err := s.store.List(ctx)
+	if err != nil {
+		return ListTokensResponse{}, err
+	}
+	out := make([]TokenSummary, 0, len(records))
+	for _, record := range records {
+		out = append(out, TokenSummary{
+			ID:        record.ID,
+			Name:      record.Name,
+			Scopes:    cloneScopes(record.Scopes),
+			CreatedAt: record.CreatedAt,
+			RevokedAt: cloneTimePtr(record.RevokedAt),
+		})
+	}
+	return ListTokensResponse{Tokens: out}, nil
+}
+
 func (s *Service) RevokeToken(ctx context.Context, id string) error {
 	if s == nil || s.store == nil {
 		return errors.New("token store is required")

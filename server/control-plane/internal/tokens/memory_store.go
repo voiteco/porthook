@@ -5,6 +5,7 @@ package tokens
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 )
@@ -56,6 +57,23 @@ func (s *MemoryStore) LookupByHash(_ context.Context, tokenHash string) (TokenRe
 	return cloneRecord(record), true, nil
 }
 
+func (s *MemoryStore) List(_ context.Context) ([]TokenRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	records := make([]TokenRecord, 0, len(s.byID))
+	for _, record := range s.byID {
+		records = append(records, cloneRecord(record))
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
+			return records[i].ID < records[j].ID
+		}
+		return records[i].CreatedAt.After(records[j].CreatedAt)
+	})
+	return records, nil
+}
+
 func (s *MemoryStore) LookupByID(_ context.Context, id string) (TokenRecord, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -82,13 +100,18 @@ func (s *MemoryStore) Revoke(_ context.Context, id string, revokedAt time.Time) 
 
 func cloneRecord(record TokenRecord) TokenRecord {
 	record.Scopes = cloneScopes(record.Scopes)
-	if record.RevokedAt != nil {
-		revokedAt := *record.RevokedAt
-		record.RevokedAt = &revokedAt
-	}
+	record.RevokedAt = cloneTimePtr(record.RevokedAt)
 	return record
 }
 
 func cloneScopes(scopes []string) []string {
 	return append([]string(nil), scopes...)
+}
+
+func cloneTimePtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
 }

@@ -62,13 +62,13 @@ Postgres is available only inside the Compose network as `postgres:5432`.
 Create an agent token through the control plane:
 
 ```sh
-curl -sS -X POST http://localhost:8082/api/v1/tokens \
-  -H 'Authorization: Bearer change-me-admin-token' \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"local agent","scopes":["register_tunnel"]}'
+printf '%s' 'change-me-admin-token' | porthook tokens create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --name 'local agent'
 ```
 
-The response includes the plaintext token once. Use it with the agent:
+The output includes the plaintext token once. Use it with the agent:
 
 ```sh
 printf '%s' 'ph_...' | porthook login --server http://localhost:8081 --token-stdin

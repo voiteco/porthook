@@ -55,6 +55,33 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Fatalf("created token missing id or token: %+v", created)
 	}
 
+	listReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/tokens", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	listReq.Header.Set("Authorization", "Bearer admin-secret")
+	listResp, err := httpServer.Client().Do(listReq)
+	if err != nil {
+		t.Fatalf("list returned error: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listResp.StatusCode)
+	}
+	var listed tokens.ListTokensResponse
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode token list returned error: %v", err)
+	}
+	if len(listed.Tokens) != 1 {
+		t.Fatalf("listed tokens = %d, want 1", len(listed.Tokens))
+	}
+	if listed.Tokens[0].ID != created.ID || listed.Tokens[0].Name != created.Name {
+		t.Fatalf("listed token = %+v, want created token summary", listed.Tokens[0])
+	}
+	if listed.Tokens[0].RevokedAt != nil {
+		t.Fatalf("listed token revoked_at = %v, want nil", listed.Tokens[0].RevokedAt)
+	}
+
 	validateResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "validator-secret", map[string]any{
 		"token": created.Token,
 		"scope": tokens.ScopeRegisterTunnel,
@@ -85,6 +112,27 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Fatalf("revoke status = %d, want 204", revokeResp.StatusCode)
 	}
 
+	listReq, err = http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/tokens", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	listReq.Header.Set("Authorization", "Bearer admin-secret")
+	listResp, err = httpServer.Client().Do(listReq)
+	if err != nil {
+		t.Fatalf("list revoked returned error: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list revoked status = %d, want 200", listResp.StatusCode)
+	}
+	listed = tokens.ListTokensResponse{}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode revoked token list returned error: %v", err)
+	}
+	if len(listed.Tokens) != 1 || listed.Tokens[0].RevokedAt == nil {
+		t.Fatalf("listed revoked tokens = %+v, want revoked token", listed.Tokens)
+	}
+
 	validateResp = postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "validator-secret", map[string]any{
 		"token": created.Token,
 		"scope": tokens.ScopeRegisterTunnel,
@@ -99,6 +147,21 @@ func TestTokenLifecycle(t *testing.T) {
 	}
 	if validation.Valid {
 		t.Fatal("revoked token validated")
+	}
+}
+
+func TestListTokensRequiresAdminAuthorization(t *testing.T) {
+	server := NewServer(Config{AdminToken: "admin-secret"}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/tokens")
+	if err != nil {
+		t.Fatalf("GET tokens returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
 	}
 }
 

@@ -25,9 +25,39 @@ For a local Postgres-backed stack with the gateway, see [../../deploy/compose/RE
 | Environment variable | Default | Description |
 | --- | --- | --- |
 | `PORTHOOK_CONTROL_ADDR` | `:8082` | Control-plane HTTP listener address. |
-| `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Bearer token required for token creation and revocation. If empty, token creation and revocation return `401 Unauthorized`. |
+| `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Bearer token required for token creation, listing, and revocation. If empty, those requests return `401 Unauthorized`. |
 | `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | empty | Bearer token required for token validation requests from the gateway. If empty, validation returns `401 Unauthorized`. |
 | `PORTHOOK_DATABASE_URL` | empty | Postgres connection URL. If empty, the process uses in-memory storage for development. |
+
+## CLI
+
+Create an agent token:
+
+```sh
+printf '%s' 'admin-secret' | porthook tokens create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --name 'local agent'
+```
+
+List tokens:
+
+```sh
+printf '%s' 'admin-secret' | porthook tokens list \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin
+```
+
+Revoke a token:
+
+```sh
+printf '%s' 'admin-secret' | porthook tokens revoke \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  tok_...
+```
+
+The token plaintext is returned only once at creation time. Storage keeps only a hash.
 
 ## API
 
@@ -38,6 +68,13 @@ curl -sS -X POST http://localhost:8082/api/v1/tokens \
   -H 'Authorization: Bearer admin-secret' \
   -H 'Content-Type: application/json' \
   -d '{"name":"local agent","scopes":["register_tunnel"]}'
+```
+
+List tokens:
+
+```sh
+curl -sS http://localhost:8082/api/v1/tokens \
+  -H 'Authorization: Bearer admin-secret'
 ```
 
 Validate a token:
@@ -56,9 +93,7 @@ curl -i -X DELETE http://localhost:8082/api/v1/tokens/tok_... \
   -H 'Authorization: Bearer admin-secret'
 ```
 
-The token plaintext is returned only once at creation time. Storage keeps only a hash.
-
-Set `PORTHOOK_CONTROL_ADMIN_TOKEN` before creating or revoking tokens. Set `PORTHOOK_CONTROL_VALIDATOR_TOKEN` and configure the same value as `PORTHOOK_CONTROL_PLANE_TOKEN` on the gateway before using control-plane token validation.
+Set `PORTHOOK_CONTROL_ADMIN_TOKEN` before creating, listing, or revoking tokens. Set `PORTHOOK_CONTROL_VALIDATOR_TOKEN` and configure the same value as `PORTHOOK_CONTROL_PLANE_TOKEN` on the gateway before using control-plane token validation.
 
 The local control-plane integration path can be checked with:
 

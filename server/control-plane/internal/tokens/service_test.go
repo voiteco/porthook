@@ -100,6 +100,37 @@ func TestServiceRevokesToken(t *testing.T) {
 	}
 }
 
+func TestServiceListsTokenSummaries(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	created, err := service.CreateToken(ctx, CreateTokenRequest{
+		Name:   "listed",
+		Scopes: []string{ScopeRegisterTunnel},
+	})
+	if err != nil {
+		t.Fatalf("CreateToken returned error: %v", err)
+	}
+	if err := service.RevokeToken(ctx, created.ID); err != nil {
+		t.Fatalf("RevokeToken returned error: %v", err)
+	}
+
+	listed, err := service.ListTokens(ctx)
+	if err != nil {
+		t.Fatalf("ListTokens returned error: %v", err)
+	}
+	if len(listed.Tokens) != 1 {
+		t.Fatalf("listed tokens = %d, want 1", len(listed.Tokens))
+	}
+	summary := listed.Tokens[0]
+	if summary.ID != created.ID || summary.Name != "listed" {
+		t.Fatalf("summary = %+v, want created token summary", summary)
+	}
+	if summary.RevokedAt == nil {
+		t.Fatalf("summary revoked_at = nil, want timestamp")
+	}
+}
+
 func TestMemoryStoreDoesNotExposePlaintextToken(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

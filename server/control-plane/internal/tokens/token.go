@@ -31,6 +31,18 @@ type CreatedToken struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type TokenSummary struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Scopes    []string   `json:"scopes"`
+	CreatedAt time.Time  `json:"created_at"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+}
+
+type ListTokensResponse struct {
+	Tokens []TokenSummary `json:"tokens"`
+}
+
 type ValidationResult struct {
 	Valid   bool     `json:"valid"`
 	TokenID string   `json:"token_id,omitempty"`
@@ -39,6 +51,7 @@ type ValidationResult struct {
 
 type Store interface {
 	Create(context.Context, TokenRecord) error
+	List(context.Context) ([]TokenRecord, error)
 	LookupByHash(context.Context, string) (TokenRecord, bool, error)
 	LookupByID(context.Context, string) (TokenRecord, bool, error)
 	Revoke(context.Context, string, time.Time) error
