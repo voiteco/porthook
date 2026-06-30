@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -29,6 +30,74 @@ func TestHealthEndpoints(t *testing.T) {
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
+		}
+	}
+}
+
+func TestReadyzReportsStoreFailure(t *testing.T) {
+	server := NewServer(Config{}, tokens.NewService(failingReadyStore{MemoryStore: tokens.NewMemoryStore()}))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/readyz")
+	if err != nil {
+		t.Fatalf("GET readyz returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readResponseBody(t, resp)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %q", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "not ready") {
+		t.Fatalf("body = %q, want readiness guidance", body)
+	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	server := NewServer(Config{
+		AdminToken:     "admin-secret",
+		ValidatorToken: "validator-secret",
+	}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	createResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens", "admin-secret", map[string]any{
+		"name": "agent",
+	})
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201", createResp.StatusCode)
+	}
+	var created tokens.CreatedToken
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created token returned error: %v", err)
+	}
+
+	validateResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "validator-secret", map[string]any{
+		"token": created.Token,
+		"scope": tokens.ScopeRegisterTunnel,
+	})
+	validateResp.Body.Close()
+	if validateResp.StatusCode != http.StatusOK {
+		t.Fatalf("validate status = %d, want 200", validateResp.StatusCode)
+	}
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET metrics returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readResponseBody(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200; body = %q", resp.StatusCode, body)
+	}
+	for _, want := range []string{
+		"porthook_control_plane_token_admin_creates_total 1",
+		"porthook_control_plane_token_validations_total 1",
+		"porthook_control_plane_token_validation_valid_total 1",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics = %q, want %q", body, want)
 		}
 	}
 }
@@ -410,4 +479,12 @@ func readResponseBody(t *testing.T, resp *http.Response) string {
 		t.Fatalf("ReadAll returned error: %v", err)
 	}
 	return string(data)
+}
+
+type failingReadyStore struct {
+	*tokens.MemoryStore
+}
+
+func (s failingReadyStore) Ping(context.Context) error {
+	return errors.New("database unavailable")
 }

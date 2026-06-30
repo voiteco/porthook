@@ -1241,6 +1241,47 @@ func TestPublicHandlerHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestPublicHandlerMetricsEndpoint(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	httpServer := httptest.NewServer(server.PublicHandler())
+	defer httpServer.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/missing", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+	resp, err := httpServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+
+	resp, err = httpServer.Client().Get(httpServer.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("GET metrics returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status = %d, want 200; body = %q", resp.StatusCode, string(body))
+	}
+	for _, want := range []string{
+		"porthook_gateway_active_tunnels 0",
+		"porthook_gateway_public_requests_total 1",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("metrics = %q, want %q", string(body), want)
+		}
+	}
+}
+
 func TestPublicRequestLogsMissingTunnel(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))

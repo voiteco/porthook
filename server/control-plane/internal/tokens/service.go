@@ -34,6 +34,13 @@ func NewService(store Store) *Service {
 	}
 }
 
+func (s *Service) Ready(ctx context.Context) error {
+	if s == nil || s.store == nil {
+		return errors.New("token store is required")
+	}
+	return s.store.Ping(ctx)
+}
+
 func (s *Service) CreateToken(ctx context.Context, req CreateTokenRequest) (CreatedToken, error) {
 	if s == nil || s.store == nil {
 		return CreatedToken{}, errors.New("token store is required")

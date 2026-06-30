@@ -65,6 +65,14 @@ printf '%s' 'admin-secret' | porthook tokens revoke \
 
 The token plaintext is returned only once at creation time. Storage keeps only a hash.
 
+## Operational Endpoints
+
+- `GET /healthz`
+- `GET /readyz`
+- `GET /metrics`
+
+`/readyz` checks the token store. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include token admin operations, token validations, authorization failures, and readiness failures.
+
 ## API
 
 Create a token:

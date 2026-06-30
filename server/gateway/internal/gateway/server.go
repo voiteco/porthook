@@ -37,6 +37,7 @@ type Server struct {
 	logger   *slog.Logger
 	registry *registry.Registry
 	tokens   agentTokenValidator
+	metrics  metrics
 
 	sessionsMu sync.RWMutex
 	sessions   map[string]*agentSession
@@ -120,6 +121,7 @@ func (s *Server) PublicHandler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
+	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/", s.handlePublicRequest)
 	return mux
 }
@@ -143,6 +145,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := s.authenticateAgent(ctx, conn); err != nil {
+		s.metrics.authFailuresTotal.Add(1)
 		s.logger.Warn("agent authentication failed", "error", err)
 		_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
 		return
@@ -163,6 +166,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 		"subdomain", session.tunnel.Subdomain,
 		"local_target", session.tunnel.LocalTarget,
 	)
+	s.metrics.tunnelRegistrationsTotal.Add(1)
 
 	stopKeepalive := session.startKeepalive(r.Context(), s.cfg.WebSocketPingInterval, s.cfg.WebSocketPongTimeout, s.logger)
 	defer stopKeepalive()
@@ -183,8 +187,10 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) er
 	if err != nil {
 		return err
 	}
+	s.metrics.tokenValidationsTotal.Add(1)
 	validToken, err := s.tokens.ValidateAgentToken(ctx, payload.Token)
 	if err != nil {
+		s.metrics.tokenValidationErrorsTotal.Add(1)
 		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
 			Code:    "auth_unavailable",
 			Message: "token validation failed",
@@ -421,6 +427,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 			ResponseBytes: responseBytes,
 			Error:         requestErr,
 		})
+		s.metrics.publicRequestsTotal.Add(1)
 	}()
 
 	subdomain, ok := s.subdomainFromHost(r.Host)
