@@ -394,7 +394,9 @@ Agent responsibilities:
 MVP commands:
 
 ```text
+porthook login --server <url>
 porthook login --server <url> --token <token>
+porthook login --server <url> --token-stdin
 porthook logout
 porthook http <port>
 porthook http <port> --server <url>

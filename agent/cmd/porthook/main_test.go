@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,6 +48,70 @@ func TestRunLoginWritesConfig(t *testing.T) {
 	}
 	if loaded.ServerURL != "https://tunnel.example.com" || loaded.Token != "ph_login" {
 		t.Fatalf("loaded config = %+v, want login values", loaded)
+	}
+}
+
+func TestRunLoginReadsTokenFromStdin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("PORTHOOK_CONFIG_PATH", path)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := runWithIO(
+		[]string{"login", "--server", "https://tunnel.example.com", "--token-stdin"},
+		strings.NewReader("ph_stdin\n"),
+		&stdout,
+		&stderr,
+	); err != nil {
+		t.Fatalf("run login returned error: %v", err)
+	}
+
+	loaded, ok, err := agent.LoadConfigFile()
+	if err != nil {
+		t.Fatalf("LoadConfigFile returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("login did not write config file")
+	}
+	if loaded.ServerURL != "https://tunnel.example.com" || loaded.Token != "ph_stdin" {
+		t.Fatalf("loaded config = %+v, want stdin login values", loaded)
+	}
+	if !strings.Contains(stdout.String(), "Login saved") {
+		t.Fatalf("stdout = %q, want login confirmation", stdout.String())
+	}
+}
+
+func TestRunLoginRejectsTokenFlagAndTokenStdin(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runWithIO(
+		[]string{"login", "--server", "https://tunnel.example.com", "--token", "ph_flag", "--token-stdin"},
+		strings.NewReader("ph_stdin"),
+		&stdout,
+		&stderr,
+	)
+	if err == nil {
+		t.Fatal("run login returned nil error")
+	}
+	if !strings.Contains(err.Error(), "--token and --token-stdin are mutually exclusive") {
+		t.Fatalf("error = %q, want mutually exclusive guidance", err.Error())
+	}
+}
+
+func TestRunLoginRequiresTokenWhenNonInteractive(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runWithIO(
+		[]string{"login", "--server", "https://tunnel.example.com"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	)
+	if err == nil {
+		t.Fatal("run login returned nil error")
+	}
+	if !strings.Contains(err.Error(), "--token-stdin") {
+		t.Fatalf("error = %q, want token-stdin guidance", err.Error())
 	}
 }
 

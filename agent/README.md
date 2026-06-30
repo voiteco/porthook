@@ -7,8 +7,9 @@ The agent is the local CLI users run on their machines.
 Current command shape:
 
 ```sh
-porthook login --server http://localhost:8081 --token dev-token
-porthook http 3000 --server http://localhost:8081 --token dev-token --subdomain demo
+PORTHOOK_TOKEN=dev-token
+printf '%s' "$PORTHOOK_TOKEN" | porthook login --server http://localhost:8081 --token-stdin
+porthook http 3000 --subdomain demo
 ```
 
 Responsibilities:
@@ -23,6 +24,8 @@ Responsibilities:
 - Persist self-hosted server and token defaults with `porthook login`.
 
 The initial implementation is written in Go and uses a WebSocket connection to the gateway.
+
+For scripts and shell history safety, prefer `porthook login --token-stdin`. The `--token` flag remains available for local development and one-off runs. If no token flag is provided in an interactive terminal, `porthook login` prompts for the token without echoing it.
 
 ## Runtime Configuration
 

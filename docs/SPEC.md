@@ -116,7 +116,7 @@ The first MVP does not need:
 ### 7.1 Start a Tunnel
 
 ```sh
-porthook login --server https://tunnel.example.com --token ph_...
+printf '%s' "$PORTHOOK_TOKEN" | porthook login --server https://tunnel.example.com --token-stdin
 porthook http 3000
 ```
 
@@ -148,6 +148,8 @@ If the subdomain is unavailable, the agent should show a clear error and suggest
 porthook login --server https://tunnel.example.com
 porthook http 3000 --server https://tunnel.example.com
 ```
+
+In an interactive terminal, `porthook login` prompts for the token without echoing it. Scripts should pass tokens with `--token-stdin`.
 
 The self-hosted path must not require any private hosted service.
 
@@ -504,7 +506,9 @@ This endpoint upgrades to WebSocket.
 Commands:
 
 ```text
+porthook login --server <url>
 porthook login --server <url> --token <token>
+porthook login --server <url> --token-stdin
 porthook logout
 porthook http <port>
 porthook http <port> --subdomain <name>
