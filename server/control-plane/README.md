@@ -10,7 +10,7 @@ Supported token scopes:
 
 - `register_tunnel`
 
-Token APIs reject unknown scopes and malformed JSON. Token admin operations are logged without plaintext token values.
+Token APIs reject unknown scopes and malformed JSON. Token admin, validator, reservation, and authorization operations are logged without plaintext token values.
 
 Run locally:
 
@@ -103,6 +103,8 @@ printf '%s' 'admin-secret' | porthook reserved create \
 `/readyz` checks the token and reservation stores. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include token admin operations, token validations, reserved subdomain operations, authorization failures, and readiness failures.
 
 `/api/v1/status` returns JSON with the control-plane readiness state and binary version for dashboard and automation checks.
+
+Control-plane logs are structured text logs written to stdout. Audit-relevant logs include an `event` field such as `control_plane.auth_failed`, `control_plane.token_created`, `control_plane.token_validated`, `control_plane.token_revoked`, `control_plane.reservation_created`, and `control_plane.reservation_authorized`. Logs include method, path, remote IP, optional `request_id` from `X-Request-ID` or `X-Correlation-ID`, token IDs where available, subdomains, outcomes, and denial reasons. Authorization headers and plaintext token values are not logged.
 
 ## API
 

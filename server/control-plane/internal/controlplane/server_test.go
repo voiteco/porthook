@@ -330,7 +330,16 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Fatal("revoked token validated")
 	}
 	logOutput := logs.String()
-	for _, want := range []string{"control-plane token created", "control-plane tokens listed", "control-plane token revoked"} {
+	for _, want := range []string{
+		"control-plane token created",
+		"control-plane tokens listed",
+		"control-plane token revoked",
+		"event=control_plane.token_created",
+		"event=control_plane.tokens_listed",
+		"event=control_plane.token_validated",
+		"event=control_plane.token_revoked",
+		"token_id=" + created.ID,
+	} {
 		if !strings.Contains(logOutput, want) {
 			t.Fatalf("logs = %q, want %q", logOutput, want)
 		}
@@ -338,20 +347,39 @@ func TestTokenLifecycle(t *testing.T) {
 	if strings.Contains(logOutput, created.Token) {
 		t.Fatalf("logs leaked created plaintext token: %q", logOutput)
 	}
+	for _, secret := range []string{"admin-secret", "validator-secret"} {
+		if strings.Contains(logOutput, secret) {
+			t.Fatalf("logs leaked configured secret %q: %q", secret, logOutput)
+		}
+	}
 }
 
 func TestListTokensRequiresAdminAuthorization(t *testing.T) {
+	var logs bytes.Buffer
 	server := NewServer(Config{AdminToken: "admin-secret"}, tokens.NewService(tokens.NewMemoryStore()))
+	server.logger = slog.New(slog.NewTextHandler(&logs, nil))
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
 
-	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/tokens")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/tokens", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer wrong-admin-secret")
+	resp, err := httpServer.Client().Do(req)
 	if err != nil {
 		t.Fatalf("GET tokens returned error: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	logOutput := logs.String()
+	if !strings.Contains(logOutput, "event=control_plane.auth_failed") || !strings.Contains(logOutput, "surface=admin") {
+		t.Fatalf("logs = %q, want admin auth failure audit event", logOutput)
+	}
+	if strings.Contains(logOutput, "wrong-admin-secret") || strings.Contains(logOutput, "admin-secret") {
+		t.Fatalf("logs leaked admin token material: %q", logOutput)
 	}
 }
 
@@ -631,10 +659,22 @@ func TestReservedSubdomainLifecycle(t *testing.T) {
 	}
 
 	logOutput := logs.String()
-	for _, want := range []string{"control-plane reserved subdomain created", "control-plane reserved subdomains listed", "control-plane reserved subdomain deleted"} {
+	for _, want := range []string{
+		"control-plane reserved subdomain created",
+		"control-plane reserved subdomains listed",
+		"control-plane reserved subdomain deleted",
+		"event=control_plane.reservation_created",
+		"event=control_plane.reservations_listed",
+		"event=control_plane.reservation_authorized",
+		"event=control_plane.reservation_deleted",
+		"token_id=" + token.ID,
+	} {
 		if !strings.Contains(logOutput, want) {
 			t.Fatalf("logs = %q, want %q", logOutput, want)
 		}
+	}
+	if strings.Contains(logOutput, token.Token) {
+		t.Fatalf("logs leaked plaintext token: %q", logOutput)
 	}
 }
 

@@ -55,12 +55,12 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 	cfg = normalizeConfig(cfg)
 	tokenValidator, err := newAgentTokenValidator(cfg)
 	if err != nil {
-		logger.Warn("gateway token validator configuration failed", "error", err)
+		logger.Warn("gateway token validator configuration failed", "event", "gateway.token_validator_config_failed", "error", err)
 		tokenValidator = errorTokenValidator{err: err}
 	}
 	reservedAuthorizer, err := newReservedSubdomainAuthorizer(cfg)
 	if err != nil {
-		logger.Warn("gateway reserved subdomain authorizer configuration failed", "error", err)
+		logger.Warn("gateway reserved subdomain authorizer configuration failed", "event", "gateway.reserved_authorizer_config_failed", "error", err)
 		reservedAuthorizer = errorReservedSubdomainAuthorizer{err: err}
 	}
 
@@ -99,7 +99,7 @@ func (s *Server) Run(ctx context.Context) error {
 	go serveHTTP(errCh, publicServer)
 	go serveHTTP(errCh, agentServer)
 
-	s.logger.Info("gateway started", "public_addr", s.cfg.PublicAddr, "agent_addr", s.cfg.AgentAddr)
+	s.logger.Info("gateway started", "event", "gateway.started", "public_addr", s.cfg.PublicAddr, "agent_addr", s.cfg.AgentAddr)
 
 	select {
 	case <-ctx.Done():
@@ -144,7 +144,9 @@ func (s *Server) AgentHandler() http.Handler {
 func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
-		s.logger.Warn("agent websocket accept failed", "error", err)
+		attrs := requestAuditAttrs(r, "gateway.agent_websocket_accept_failed")
+		attrs = append(attrs, slog.Any("error", err))
+		s.logger.LogAttrs(r.Context(), slog.LevelWarn, "agent websocket accept failed", attrs...)
 		return
 	}
 	conn.SetReadLimit(wswire.ReadLimitForChunkBytes(s.cfg.StreamChunkBytes))
@@ -156,14 +158,18 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	identity, err := s.authenticateAgent(ctx, conn)
 	if err != nil {
 		s.metrics.authFailuresTotal.Add(1)
-		s.logger.Warn("agent authentication failed", "error", err)
+		attrs := requestAuditAttrs(r, "gateway.agent_auth_failed")
+		attrs = append(attrs, slog.Any("error", err))
+		s.logger.LogAttrs(r.Context(), slog.LevelWarn, "agent authentication failed", attrs...)
 		_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
 		return
 	}
 
 	session, err := s.registerTunnel(ctx, conn, identity)
 	if err != nil {
-		s.logger.Warn("tunnel registration failed", "error", err)
+		attrs := requestAuditAttrs(r, "gateway.tunnel_registration_failed")
+		attrs = append(attrs, slog.String("token_id", identity.TokenID), slog.Any("error", err))
+		s.logger.LogAttrs(r.Context(), slog.LevelWarn, "tunnel registration failed", attrs...)
 		_ = conn.Close(websocket.StatusPolicyViolation, "registration failed")
 		return
 	}
@@ -172,8 +178,11 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer s.removeSession(session.tunnel.TunnelID)
 
 	s.logger.Info("tunnel registered",
+		"event", "gateway.tunnel_registered",
 		"tunnel_id", session.tunnel.TunnelID,
 		"subdomain", session.tunnel.Subdomain,
+		"token_id", identity.TokenID,
+		"protocol", session.tunnel.Protocol,
 		"local_target", session.tunnel.LocalTarget,
 	)
 	s.metrics.tunnelRegistrationsTotal.Add(1)
@@ -671,10 +680,11 @@ func (s *Server) logPublicRequest(r *http.Request, entry publicRequestLog) {
 	}
 
 	attrs := []slog.Attr{
+		slog.String("event", "gateway.public_request"),
 		slog.String("method", r.Method),
 		slog.String("host", r.Host),
 		slog.String("path", r.URL.Path),
-		slog.String("query", r.URL.RawQuery),
+		slog.Bool("query_present", r.URL.RawQuery != ""),
 		slog.String("remote_ip", remoteIP(r.RemoteAddr)),
 		slog.String("subdomain", entry.Subdomain),
 		slog.String("tunnel_id", entry.TunnelID),
@@ -687,6 +697,9 @@ func (s *Server) logPublicRequest(r *http.Request, entry publicRequestLog) {
 	}
 	if entry.Error != nil {
 		attrs = append(attrs, slog.Any("error", entry.Error))
+	}
+	if id := requestID(r); id != "" {
+		attrs = append(attrs, slog.String("request_id", id))
 	}
 
 	s.logger.LogAttrs(r.Context(), level, "public request", attrs...)
@@ -739,7 +752,7 @@ func (s *Server) removeSession(tunnelID string) {
 	defer s.sessionsMu.Unlock()
 	delete(s.sessions, tunnelID)
 	s.registry.Unregister(tunnelID)
-	s.logger.Info("tunnel disconnected", "tunnel_id", tunnelID)
+	s.logger.Info("tunnel disconnected", "event", "gateway.tunnel_disconnected", "tunnel_id", tunnelID)
 }
 
 func (s *Server) closeSessions(ctx context.Context, status websocket.StatusCode, reason string) {
@@ -760,7 +773,7 @@ func (s *Server) closeSessions(ctx context.Context, status websocket.StatusCode,
 		go func(session *agentSession) {
 			defer wg.Done()
 			if err := session.close(status, reason); err != nil {
-				s.logger.Warn("close tunnel session failed", "tunnel_id", session.tunnel.TunnelID, "error", err)
+				s.logger.Warn("close tunnel session failed", "event", "gateway.tunnel_close_failed", "tunnel_id", session.tunnel.TunnelID, "error", err)
 			}
 		}(session)
 	}
@@ -776,7 +789,7 @@ func (s *Server) closeSessions(ctx context.Context, status websocket.StatusCode,
 	case <-ctx.Done():
 		for _, session := range sessions {
 			if err := session.closeNow(); err != nil {
-				s.logger.Warn("force close tunnel session failed", "tunnel_id", session.tunnel.TunnelID, "error", err)
+				s.logger.Warn("force close tunnel session failed", "event", "gateway.tunnel_force_close_failed", "tunnel_id", session.tunnel.TunnelID, "error", err)
 			}
 		}
 	}
@@ -826,6 +839,28 @@ func remoteIP(remoteAddr string) string {
 		return host
 	}
 	return remoteAddr
+}
+
+func requestAuditAttrs(r *http.Request, event string) []slog.Attr {
+	attrs := []slog.Attr{
+		slog.String("event", event),
+		slog.String("method", r.Method),
+		slog.String("path", r.URL.Path),
+		slog.String("remote_ip", remoteIP(r.RemoteAddr)),
+	}
+	if id := requestID(r); id != "" {
+		attrs = append(attrs, slog.String("request_id", id))
+	}
+	return attrs
+}
+
+func requestID(r *http.Request) string {
+	for _, header := range []string{"X-Request-ID", "X-Correlation-ID"} {
+		if value := strings.TrimSpace(r.Header.Get(header)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func requestProto(r *http.Request) string {
