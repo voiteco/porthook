@@ -32,6 +32,8 @@ make smoke-local VERSION=v0.3.0
 make smoke-control-plane VERSION=v0.3.0
 make release-build VERSION=v0.3.0
 make release-checksums
+make compose-config
+make docker-build VERSION=v0.3.0
 ```
 
 On Linux `amd64`, verify the release binaries directly:

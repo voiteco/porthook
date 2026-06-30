@@ -48,7 +48,7 @@ jobs:
         run: make release-build VERSION=ci
 
       - name: Validate Docker Compose config
-        run: docker compose -f deploy/compose/docker-compose.yml config
+        run: make compose-config
 
-      - name: Build gateway Docker image
-        run: make docker-build-gateway
+      - name: Build Docker images
+        run: make docker-build VERSION=ci

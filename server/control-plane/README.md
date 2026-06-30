@@ -12,6 +12,14 @@ Run locally:
 go run ./server/control-plane/cmd/porthook-control-plane
 ```
 
+Build the local Docker image:
+
+```sh
+make docker-build-control-plane
+```
+
+For a local Postgres-backed stack with the gateway, see [../../deploy/compose/README.md](../../deploy/compose/README.md).
+
 ## Runtime Configuration
 
 | Environment variable | Default | Description |

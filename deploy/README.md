@@ -12,7 +12,7 @@ This directory will contain self-hosting assets:
 
 The first supported deployment path should be Docker Compose.
 
-The current Docker Compose gateway smoke path is documented in [compose/README.md](./compose/README.md).
+The Docker Compose gateway-only and control-plane stacks are documented in [compose/README.md](./compose/README.md).
 
 ## Self-Hosted Token Flow
 
@@ -34,5 +34,7 @@ The end-to-end control-plane path can be checked locally with:
 ```sh
 make smoke-control-plane
 ```
+
+The compose control-plane stack lives in [compose/docker-compose.control-plane.yml](./compose/docker-compose.control-plane.yml). Copy [compose/.env.control-plane.example](./compose/.env.control-plane.example), replace the placeholder values, and start it with Docker Compose.
 
 Operators still need to configure wildcard DNS and TLS in front of the public gateway listener for real internet traffic.
