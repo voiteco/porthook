@@ -26,6 +26,20 @@ const elements = {
   reservationsBody: document.querySelector("#reservations-body"),
   reservationsEmptyState: document.querySelector("#reservations-empty-state"),
   reservationCount: document.querySelector("#reservation-count"),
+  accessPolicyForm: document.querySelector("#access-policy-form"),
+  accessReservation: document.querySelector("#access-reservation"),
+  accessMode: document.querySelector("#access-mode"),
+  basicUsernameField: document.querySelector("#basic-username-field"),
+  basicUsername: document.querySelector("#basic-username"),
+  policySecretField: document.querySelector("#policy-secret-field"),
+  policySecret: document.querySelector("#policy-secret"),
+  ipAllowlistField: document.querySelector("#ip-allowlist-field"),
+  ipAllowlist: document.querySelector("#ip-allowlist"),
+  accessPolicySubmit: document.querySelector("#access-policy-submit"),
+  accessPolicyCancel: document.querySelector("#access-policy-cancel"),
+  accessPoliciesBody: document.querySelector("#access-policies-body"),
+  accessPoliciesEmptyState: document.querySelector("#access-policies-empty-state"),
+  accessPolicyCount: document.querySelector("#access-policy-count"),
   gatewayForm: document.querySelector("#gateway-form"),
   gatewayURL: document.querySelector("#gateway-url"),
   tunnelsBody: document.querySelector("#tunnels-body"),
@@ -35,6 +49,9 @@ const elements = {
 
 let adminToken = sessionStorage.getItem(storageKey) || "";
 let currentTokens = [];
+let currentReservations = [];
+let currentAccessPolicies = [];
+let editingAccessPolicyID = "";
 
 elements.gatewayURL.value = sessionStorage.getItem(gatewayStorageKey) || defaultGatewayURL();
 
@@ -45,16 +62,24 @@ function setAuthenticated(authenticated) {
   elements.refreshButton.disabled = !authenticated;
   if (!authenticated) {
     currentTokens = [];
+    currentReservations = [];
+    currentAccessPolicies = [];
+    editingAccessPolicyID = "";
     elements.tokensBody.replaceChildren();
     elements.reservationsBody.replaceChildren();
+    elements.accessPoliciesBody.replaceChildren();
     elements.tunnelsBody.replaceChildren();
     elements.emptyState.hidden = true;
     elements.reservationsEmptyState.hidden = true;
+    elements.accessPoliciesEmptyState.hidden = true;
     elements.tunnelsEmptyState.hidden = true;
     elements.tokenCount.textContent = "No tokens loaded";
     elements.reservationCount.textContent = "No reservations loaded";
+    elements.accessPolicyCount.textContent = "No access policies loaded";
     elements.tunnelCount.textContent = "No tunnels loaded";
     renderReservationTokenOptions();
+    renderAccessReservationOptions();
+    resetAccessPolicyForm();
   }
 }
 
@@ -123,7 +148,9 @@ async function refreshStatus() {
 async function refreshApp() {
   showNotice("");
   clearCreatedToken();
-  await Promise.all([loadTokens(), loadReservations(), refreshStatus(), loadTunnels({ silent: true })]);
+  await Promise.all([loadTokens(), refreshStatus(), loadTunnels({ silent: true })]);
+  await loadReservations();
+  await loadAccessPolicies();
 }
 
 async function loadTokens() {
@@ -188,8 +215,9 @@ async function loadReservations() {
   elements.reservationsEmptyState.hidden = true;
 
   const payload = await apiRequest("/api/v1/reserved-subdomains");
-  const reservations = payload.reserved_subdomains || [];
-  renderReservations(reservations);
+  currentReservations = payload.reserved_subdomains || [];
+  renderReservations(currentReservations);
+  renderAccessReservationOptions();
 }
 
 function renderReservations(reservations) {
@@ -208,6 +236,92 @@ function renderReservationRow(reservation) {
     reservationActionCell(reservation),
   );
   return row;
+}
+
+function renderAccessReservationOptions() {
+  elements.accessReservation.replaceChildren();
+  if (currentReservations.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No reserved subdomains";
+    elements.accessReservation.append(option);
+    elements.accessReservation.disabled = true;
+    elements.accessPolicySubmit.disabled = true;
+    return;
+  }
+
+  elements.accessReservation.disabled = Boolean(editingAccessPolicyID);
+  elements.accessPolicySubmit.disabled = false;
+  for (const reservation of currentReservations) {
+    const option = document.createElement("option");
+    option.value = reservation.id;
+    option.textContent = `${reservation.name} (${reservation.id})`;
+    elements.accessReservation.append(option);
+  }
+}
+
+async function loadAccessPolicies() {
+  elements.accessPolicyCount.textContent = "Loading access policies";
+  elements.accessPoliciesBody.replaceChildren();
+  elements.accessPoliciesEmptyState.hidden = true;
+
+  const payload = await apiRequest("/api/v1/access-policies");
+  currentAccessPolicies = payload.access_policies || [];
+  renderAccessPolicies(currentAccessPolicies);
+}
+
+function renderAccessPolicies(policies) {
+  elements.accessPoliciesBody.replaceChildren(...policies.map(renderAccessPolicyRow));
+  elements.accessPoliciesEmptyState.hidden = policies.length !== 0;
+  elements.accessPolicyCount.textContent = `${policies.length} access polic${policies.length === 1 ? "y" : "ies"}`;
+}
+
+function renderAccessPolicyRow(policy) {
+  const row = document.createElement("tr");
+  const reservation = reservationByID(policy.reserved_subdomain_id);
+  row.append(
+    cell(reservation ? reservation.name : policy.reserved_subdomain_id),
+    monoCell(policy.id),
+    cell(policy.mode),
+    cell(accessPolicySettings(policy)),
+    cell(formatTime(policy.updated_at)),
+    accessPolicyActionCell(policy),
+  );
+  return row;
+}
+
+function accessPolicySettings(policy) {
+  switch (policy.mode) {
+    case "basic_auth":
+      return `basic username ${policy.basic_username || "-"}`;
+    case "bearer_token":
+      return policy.secret_configured ? "bearer token configured" : "bearer token missing";
+    case "ip_allowlist":
+      return (policy.ip_allowlist || []).join(", ") || "-";
+    default:
+      return "public";
+  }
+}
+
+function accessPolicyActionCell(policy) {
+  const item = document.createElement("td");
+  item.classList.add("right", "button-cell");
+  const edit = document.createElement("button");
+  edit.className = "secondary";
+  edit.type = "button";
+  edit.textContent = "Edit";
+  edit.addEventListener("click", () => editAccessPolicy(policy));
+  const remove = document.createElement("button");
+  remove.className = "danger";
+  remove.type = "button";
+  remove.textContent = "Delete";
+  remove.addEventListener("click", () => deleteAccessPolicy(policy));
+  item.append(edit, remove);
+  return item;
+}
+
+function reservationByID(id) {
+  return currentReservations.find((reservation) => reservation.id === id);
 }
 
 async function loadTunnels({ silent = false } = {}) {
@@ -411,10 +525,120 @@ async function deleteReservation(reservation) {
   try {
     await apiRequest(`/api/v1/reserved-subdomains/${encodeURIComponent(reservation.id)}`, { method: "DELETE" });
     await loadReservations();
+    await loadAccessPolicies();
     showNotice(`Deleted reserved subdomain ${reservation.name}.`, "success");
   } catch (error) {
     showNotice(error.message, "error");
   }
+}
+
+function updateAccessPolicyFields() {
+  const mode = elements.accessMode.value;
+  elements.basicUsernameField.hidden = mode !== "basic_auth";
+  elements.policySecretField.hidden = mode !== "basic_auth" && mode !== "bearer_token";
+  elements.ipAllowlistField.hidden = mode !== "ip_allowlist";
+}
+
+function resetAccessPolicyForm() {
+  editingAccessPolicyID = "";
+  elements.accessPolicyForm.reset();
+  elements.accessMode.value = "public";
+  elements.accessPolicySubmit.textContent = "Create policy";
+  elements.accessPolicyCancel.hidden = true;
+  elements.accessReservation.disabled = currentReservations.length === 0;
+  updateAccessPolicyFields();
+}
+
+function editAccessPolicy(policy) {
+  editingAccessPolicyID = policy.id;
+  elements.accessReservation.value = policy.reserved_subdomain_id;
+  elements.accessReservation.disabled = true;
+  elements.accessMode.value = policy.mode || "public";
+  elements.basicUsername.value = policy.basic_username || "";
+  elements.policySecret.value = "";
+  elements.ipAllowlist.value = (policy.ip_allowlist || []).join(", ");
+  elements.accessPolicySubmit.textContent = "Update policy";
+  elements.accessPolicyCancel.hidden = false;
+  updateAccessPolicyFields();
+}
+
+async function saveAccessPolicy(event) {
+  event.preventDefault();
+  showNotice("");
+
+  const mode = elements.accessMode.value;
+  const payload = { mode };
+  if (!editingAccessPolicyID) {
+    payload.reserved_subdomain_id = elements.accessReservation.value.trim();
+    if (!payload.reserved_subdomain_id) {
+      showNotice("Reserved subdomain is required.", "error");
+      return;
+    }
+  }
+  if (mode === "basic_auth") {
+    payload.basic_username = elements.basicUsername.value.trim();
+    if (!payload.basic_username) {
+      showNotice("Basic username is required.", "error");
+      return;
+    }
+    const secret = elements.policySecret.value.trim();
+    if (secret) {
+      payload.basic_password = secret;
+    }
+  }
+  if (mode === "bearer_token") {
+    const secret = elements.policySecret.value.trim();
+    if (secret) {
+      payload.bearer_token = secret;
+    }
+  }
+  if (mode === "ip_allowlist") {
+    payload.ip_allowlist = parseListInput(elements.ipAllowlist.value);
+    if (payload.ip_allowlist.length === 0) {
+      showNotice("IP allowlist is required.", "error");
+      return;
+    }
+  }
+
+  try {
+    const updating = Boolean(editingAccessPolicyID);
+    const path = editingAccessPolicyID
+      ? `/api/v1/access-policies/${encodeURIComponent(editingAccessPolicyID)}`
+      : "/api/v1/access-policies";
+    const method = editingAccessPolicyID ? "PUT" : "POST";
+    const saved = await apiRequest(path, {
+      method,
+      body: JSON.stringify(payload),
+    });
+    resetAccessPolicyForm();
+    await loadAccessPolicies();
+    showNotice(`${updating ? "Updated" : "Created"} access policy ${saved.id}.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function deleteAccessPolicy(policy) {
+  if (!window.confirm(`Delete access policy ${policy.id}?`)) {
+    return;
+  }
+  try {
+    await apiRequest(`/api/v1/access-policies/${encodeURIComponent(policy.id)}`, { method: "DELETE" });
+    if (editingAccessPolicyID === policy.id) {
+      resetAccessPolicyForm();
+    }
+    await loadAccessPolicies();
+    showNotice(`Deleted access policy ${policy.id}.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+function parseListInput(value) {
+  return value
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 async function copyCreatedToken() {
@@ -478,6 +702,9 @@ elements.refreshButton.addEventListener("click", async () => {
 elements.createForm.addEventListener("submit", createToken);
 elements.copyCreatedToken.addEventListener("click", copyCreatedToken);
 elements.reservationForm.addEventListener("submit", createReservation);
+elements.accessPolicyForm.addEventListener("submit", saveAccessPolicy);
+elements.accessMode.addEventListener("change", updateAccessPolicyFields);
+elements.accessPolicyCancel.addEventListener("click", resetAccessPolicyForm);
 elements.gatewayForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const gatewayURL = normalizedGatewayURL();
@@ -486,6 +713,7 @@ elements.gatewayForm.addEventListener("submit", async (event) => {
   await loadTunnels();
 });
 
+updateAccessPolicyFields();
 setAuthenticated(Boolean(adminToken));
 if (adminToken) {
   refreshApp().catch((error) => showNotice(error.message, "error"));

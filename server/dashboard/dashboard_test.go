@@ -27,7 +27,7 @@ func TestHandlerServesDashboardIndex(t *testing.T) {
 	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'self' http: https:") {
 		t.Fatalf("Content-Security-Policy = %q, want gateway-capable connect-src", got)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") {
+	if body := rec.Body.String(); !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") || !strings.Contains(body, "Access policies") {
 		t.Fatalf("dashboard index body = %q, want dashboard shell", body)
 	}
 }
@@ -64,6 +64,9 @@ func TestHandlerServesAssets(t *testing.T) {
 	}
 	if !strings.Contains(body, "/api/v1/reserved-subdomains") {
 		t.Fatalf("asset body = %q, want reserved subdomain API client", body)
+	}
+	if !strings.Contains(body, "/api/v1/access-policies") {
+		t.Fatalf("asset body = %q, want access policy API client", body)
 	}
 	if !strings.Contains(body, "/api/v1/tunnels") {
 		t.Fatalf("asset body = %q, want gateway tunnel API client", body)
