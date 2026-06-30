@@ -76,13 +76,14 @@ services:
       PORTHOOK_ROOT_DOMAIN: ${PORTHOOK_ROOT_DOMAIN:?set PORTHOOK_ROOT_DOMAIN}
       PORTHOOK_AGENT_DOMAIN: ${PORTHOOK_AGENT_DOMAIN:?set PORTHOOK_AGENT_DOMAIN}
       PORTHOOK_CONTROL_DOMAIN: ${PORTHOOK_CONTROL_DOMAIN:?set PORTHOOK_CONTROL_DOMAIN}
+      PORTHOOK_CONTROL_ALLOWED_IPS: ${PORTHOOK_CONTROL_ALLOWED_IPS:-}
       PORTHOOK_TLS_CERT_FILE: /certs/fullchain.pem
       PORTHOOK_TLS_KEY_FILE: /certs/privkey.pem
     ports:
       - "${PORTHOOK_HTTP_PORT:-80}:80"
       - "${PORTHOOK_HTTPS_PORT:-443}:443"
     volumes:
-      - ../reverse-proxy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${PORTHOOK_CADDYFILE_PATH:-../reverse-proxy/caddy/Caddyfile}:/etc/caddy/Caddyfile:ro
       - ${PORTHOOK_TLS_CERT_PATH:?set PORTHOOK_TLS_CERT_PATH}:/certs/fullchain.pem:ro
       - ${PORTHOOK_TLS_KEY_PATH:?set PORTHOOK_TLS_KEY_PATH}:/certs/privkey.pem:ro
       - caddy-data:/data

@@ -8,6 +8,7 @@ All notable changes to Porthook are documented here.
 - Added Caddy and Traefik reverse-proxy examples for self-hosted TLS deployments.
 - Added a production Docker Compose stack and example environment for reverse-proxy-backed self-hosted deployments.
 - Added domain, wildcard DNS, and TLS guidance for internet-facing self-hosted deployments.
+- Added control-plane access-boundary guidance and a Caddy IP allowlist example.
 
 ## [0.6.0] - 2026-06-30
 
