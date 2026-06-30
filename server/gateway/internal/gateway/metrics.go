@@ -10,18 +10,20 @@ import (
 )
 
 type metrics struct {
-	publicRequestsTotal               atomic.Uint64
-	publicRequestErrorsTotal          atomic.Uint64
-	publicRequestRateLimitedTotal     atomic.Uint64
-	publicRequestTimeoutsTotal        atomic.Uint64
-	publicRequestBodyTooLargeTotal    atomic.Uint64
-	publicRequestClientCanceledTotal  atomic.Uint64
-	publicRequestNoActiveSessionTotal atomic.Uint64
-	tokenValidationsTotal             atomic.Uint64
-	tokenValidationErrorsTotal        atomic.Uint64
-	authFailuresTotal                 atomic.Uint64
-	tunnelRegistrationsTotal          atomic.Uint64
-	tunnelRegistrationFailuresTotal   atomic.Uint64
+	publicRequestsTotal                  atomic.Uint64
+	publicRequestErrorsTotal             atomic.Uint64
+	publicRequestRateLimitedTotal        atomic.Uint64
+	publicRequestTimeoutsTotal           atomic.Uint64
+	publicRequestBodyTooLargeTotal       atomic.Uint64
+	publicRequestClientCanceledTotal     atomic.Uint64
+	publicRequestNoActiveSessionTotal    atomic.Uint64
+	publicRequestAccessDeniedTotal       atomic.Uint64
+	publicRequestAccessPolicyErrorsTotal atomic.Uint64
+	tokenValidationsTotal                atomic.Uint64
+	tokenValidationErrorsTotal           atomic.Uint64
+	authFailuresTotal                    atomic.Uint64
+	tunnelRegistrationsTotal             atomic.Uint64
+	tunnelRegistrationFailuresTotal      atomic.Uint64
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +42,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetric(w, "porthook_gateway_public_request_body_too_large_total", "Public HTTP requests rejected because the request body was too large.", "counter", s.metrics.publicRequestBodyTooLargeTotal.Load())
 	writeMetric(w, "porthook_gateway_public_request_client_canceled_total", "Public HTTP requests canceled by the client before completion.", "counter", s.metrics.publicRequestClientCanceledTotal.Load())
 	writeMetric(w, "porthook_gateway_public_request_no_active_session_total", "Public HTTP requests for hosts without an active tunnel session.", "counter", s.metrics.publicRequestNoActiveSessionTotal.Load())
+	writeMetric(w, "porthook_gateway_public_request_access_denied_total", "Public HTTP requests rejected by tunnel access policy.", "counter", s.metrics.publicRequestAccessDeniedTotal.Load())
+	writeMetric(w, "porthook_gateway_public_request_access_policy_errors_total", "Public HTTP requests that could not evaluate tunnel access policy.", "counter", s.metrics.publicRequestAccessPolicyErrorsTotal.Load())
 	writeMetric(w, "porthook_gateway_token_validations_total", "Agent token validation attempts.", "counter", s.metrics.tokenValidationsTotal.Load())
 	writeMetric(w, "porthook_gateway_token_validation_errors_total", "Agent token validation attempts that failed before a valid/invalid result.", "counter", s.metrics.tokenValidationErrorsTotal.Load())
 	writeMetric(w, "porthook_gateway_auth_failures_total", "Agent authentication failures.", "counter", s.metrics.authFailuresTotal.Load())
@@ -63,6 +67,10 @@ func (s *Server) recordPublicRequestMetrics(status int, outcome string) {
 		s.metrics.publicRequestClientCanceledTotal.Add(1)
 	case "no_active_session", "no_tunnel_for_host":
 		s.metrics.publicRequestNoActiveSessionTotal.Add(1)
+	case "access_denied":
+		s.metrics.publicRequestAccessDeniedTotal.Add(1)
+	case "access_policy_unavailable":
+		s.metrics.publicRequestAccessPolicyErrorsTotal.Add(1)
 	}
 }
 

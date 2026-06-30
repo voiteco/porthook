@@ -839,6 +839,130 @@ func TestPublicRequestStreamsBodyAcrossChunks(t *testing.T) {
 	}
 }
 
+func TestPublicRequestEnforcesBasicAccessPolicy(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer validator-secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/tokens/validate":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"valid":    true,
+				"token_id": "tok_owner",
+			})
+		case "/api/v1/reserved-subdomains/authorize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": true,
+			})
+		case "/api/v1/access-policies/evaluate":
+			var req evaluateAccessPolicyRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if req.Subdomain != "demo" {
+				http.Error(w, "unexpected subdomain", http.StatusBadRequest)
+				return
+			}
+			allowed := req.BasicUsername == "admin" && req.BasicPassword == "secret"
+			reason := ""
+			if !allowed {
+				reason = "basic_auth_required"
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": allowed,
+				"mode":    "basic_auth",
+				"reason":  reason,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
+	cfg := testConfig()
+	cfg.ControlPlaneURL = controlPlane.URL
+	cfg.ControlPlaneToken = "validator-secret"
+	cfg.StreamTimeout = 200 * time.Millisecond
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	deniedReq, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/private", nil)
+	if err != nil {
+		t.Fatalf("NewRequest denied returned error: %v", err)
+	}
+	deniedReq.Host = "demo.localhost"
+	deniedResp, err := publicServer.Client().Do(deniedReq)
+	if err != nil {
+		t.Fatalf("denied public request returned error: %v", err)
+	}
+	deniedResp.Body.Close()
+	if deniedResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("denied status = %d, want 401", deniedResp.StatusCode)
+	}
+	if got := deniedResp.Header.Get("WWW-Authenticate"); got != `Basic realm="Porthook tunnel"` {
+		t.Fatalf("WWW-Authenticate = %q, want Basic realm", got)
+	}
+
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, payload, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if payload.Path != "/private" {
+			agentErr <- errString("unexpected forwarded path")
+			return
+		}
+		if payload.Header.Get("Authorization") != "" {
+			agentErr <- errString("gateway access Authorization header was forwarded")
+			return
+		}
+		agentErr <- writeStreamedResponse(ctx, conn, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+			Status: http.StatusOK,
+			Body:   []byte("ok"),
+		})
+	}()
+
+	allowedReq, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/private", nil)
+	if err != nil {
+		t.Fatalf("NewRequest allowed returned error: %v", err)
+	}
+	allowedReq.Host = "demo.localhost"
+	allowedReq.SetBasicAuth("admin", "secret")
+	allowedResp, err := publicServer.Client().Do(allowedReq)
+	if err != nil {
+		t.Fatalf("allowed public request returned error: %v", err)
+	}
+	defer allowedResp.Body.Close()
+	body, err := io.ReadAll(allowedResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if allowedResp.StatusCode != http.StatusOK || string(body) != "ok" {
+		t.Fatalf("allowed response = %d %q, want 200 ok", allowedResp.StatusCode, string(body))
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
 func TestPublicRequestRejectsLargeBody(t *testing.T) {
 	cfg := testConfig()
 	cfg.MaxBodyBytes = 3
