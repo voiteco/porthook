@@ -488,12 +488,19 @@ GET  /api/v1/tokens
 POST /api/v1/tokens
 POST /api/v1/tokens/validate
 DELETE /api/v1/tokens/{id}
-GET  /api/v1/tunnels
-GET  /api/v1/tunnels/{id}
+GET  /api/v1/reserved-subdomains
 POST /api/v1/reserved-subdomains
+POST /api/v1/reserved-subdomains/authorize
+DELETE /api/v1/reserved-subdomains/{id}
 GET  /healthz
 GET  /readyz
 GET  /metrics
+```
+
+Initial gateway status endpoint:
+
+```text
+GET /api/v1/tunnels
 ```
 
 The tunnel transport endpoint:

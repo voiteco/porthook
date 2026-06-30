@@ -2,6 +2,27 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.5.x to 0.6.x
+
+Version 0.6.x adds reserved subdomain ownership for requested tunnel names. In control-plane-backed gateway deployments, agents that pass `--subdomain NAME` must use a token that owns a matching reservation. Agents that omit `--subdomain` continue to receive random subdomains without a reservation.
+
+Before upgrading a Postgres-backed control plane:
+
+1. Back up the Postgres volume or database.
+2. Stop the old `porthook-control-plane` and `porthook-gateway` processes or Compose stack.
+3. Deploy the new control-plane, gateway, and CLI binaries or images together.
+4. Start the control plane and check `GET /readyz`.
+5. For each requested subdomain workflow, create a reservation with `porthook reserved create --name NAME --token-id TOKEN_ID`.
+6. Start the gateway and agents.
+7. Open `/dashboard/` and confirm tokens, reservations, and active tunnels are visible.
+
+The 0.6.x migration is additive:
+
+- create `reserved_subdomains` if it does not exist
+- create the reserved-subdomain token owner index if it does not exist
+
+Rollback to 0.5.x should not require removing the `reserved_subdomains` table, but a 0.5.x gateway will not enforce or display reservations.
+
 ## Upgrade from 0.4.x to 0.5.x
 
 Version 0.5.x adds the embedded self-hosted dashboard and versioned Postgres migrations for control-plane token storage.

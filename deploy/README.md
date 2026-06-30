@@ -26,8 +26,9 @@ Minimal production shape:
 1. Run Postgres.
 2. Run `porthook-control-plane` with `PORTHOOK_DATABASE_URL`, `PORTHOOK_CONTROL_ADMIN_TOKEN`, and `PORTHOOK_CONTROL_VALIDATOR_TOKEN`.
 3. Create an agent token with `printf '%s' '<admin-token>' | porthook tokens create --control-plane <control-plane-url> --admin-token-stdin --name '<agent-name>'`.
-4. Run `porthook-gateway` with `PORTHOOK_CONTROL_PLANE_URL` pointing at the control plane and `PORTHOOK_CONTROL_PLANE_TOKEN` matching the control-plane validator token.
-5. Save the local agent login with `printf '%s' '<created-token>' | porthook login --server <gateway-agent-url> --token-stdin`.
+4. Reserve any requested subdomain with `printf '%s' '<admin-token>' | porthook reserved create --control-plane <control-plane-url> --admin-token-stdin --name <subdomain> --token-id <token-id>`.
+5. Run `porthook-gateway` with `PORTHOOK_CONTROL_PLANE_URL` pointing at the control plane and `PORTHOOK_CONTROL_PLANE_TOKEN` matching the control-plane validator token.
+6. Save the local agent login with `printf '%s' '<created-token>' | porthook login --server <gateway-agent-url> --token-stdin`.
 
 The control-plane process also serves the self-hosted dashboard at `/dashboard/` on the control-plane listener. It uses the same admin token as the token admin API.
 
@@ -57,6 +58,7 @@ Before using the Compose control-plane stack beyond local testing:
 - Scrape `/metrics` and alert on readiness failures, auth failures, and unexpected token validation errors.
 - Rotate admin and validator tokens periodically, then update gateway and control-plane configuration together.
 - Revoke unused agent tokens with `porthook tokens revoke`.
+- Review reserved subdomains with `porthook reserved list` and delete unused names with `porthook reserved delete`.
 - Run `make smoke-control-plane` after configuration changes that affect token validation or tunnel routing.
 
 Compose is still the first supported deployment path for this pre-1.0 repository. More complete reverse proxy, TLS, and wildcard DNS examples should be added before recommending internet-facing production use.

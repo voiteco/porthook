@@ -194,6 +194,14 @@ if [[ "${dashboard_js}" != *"/api/v1/status"* ]]; then
 	echo "Dashboard JavaScript did not include status API client" >&2
 	exit 1
 fi
+if [[ "${dashboard_js}" != *"/api/v1/reserved-subdomains"* ]]; then
+	echo "Dashboard JavaScript did not include reserved subdomain API client" >&2
+	exit 1
+fi
+if [[ "${dashboard_js}" != *"/api/v1/tunnels"* ]]; then
+	echo "Dashboard JavaScript did not include gateway tunnel API client" >&2
+	exit 1
+fi
 
 status_json="$(curl -fsS "http://127.0.0.1:${CONTROL_PORT}/api/v1/status")"
 printf '%s' "${status_json}" | python3 -c '
@@ -296,6 +304,18 @@ PORTHOOK_TOKEN="" \
 	>"${LOG_DIR}/agent.log" 2>"${LOG_DIR}/agent.err" &
 pids+=("$!")
 wait_for_log "${LOG_DIR}/agent.log" "Tunnel established" "agent registration"
+
+tunnels_json="$(curl -fsS "http://127.0.0.1:${PUBLIC_PORT}/api/v1/tunnels")"
+printf '%s' "${tunnels_json}" | python3 -c '
+import json
+import sys
+
+want_subdomain = sys.argv[1]
+payload = json.load(sys.stdin)
+tunnels = payload.get("tunnels", [])
+if not any(tunnel.get("subdomain") == want_subdomain for tunnel in tunnels):
+    raise SystemExit(f"active tunnel {want_subdomain!r} was not listed: {payload}")
+' "${SUBDOMAIN}"
 
 response="$(curl -fsS -H "Host: ${SUBDOMAIN}.localhost" "http://127.0.0.1:${PUBLIC_PORT}/smoke.txt")"
 if [[ "${response}" != "${MARKER}" ]]; then
