@@ -4,6 +4,9 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+### Added
+- Added Caddy and Traefik reverse-proxy examples for self-hosted TLS deployments.
+
 ## [0.6.0] - 2026-06-30
 
 ### Added

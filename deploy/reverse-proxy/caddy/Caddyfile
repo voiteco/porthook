@@ -1,0 +1,23 @@
+# Public tunnel traffic. Configure wildcard DNS for *.{$PORTHOOK_ROOT_DOMAIN}
+# so every requested or random subdomain reaches the gateway public listener.
+*.{$PORTHOOK_ROOT_DOMAIN} {
+	tls {$PORTHOOK_TLS_CERT_FILE} {$PORTHOOK_TLS_KEY_FILE}
+	encode zstd gzip
+	reverse_proxy porthook-gateway:8080
+}
+
+# Agent WebSocket traffic. Agents connect here with:
+# porthook login --server https://{$PORTHOOK_AGENT_DOMAIN} --token-stdin
+{$PORTHOOK_AGENT_DOMAIN} {
+	tls {$PORTHOOK_TLS_CERT_FILE} {$PORTHOOK_TLS_KEY_FILE}
+	encode zstd gzip
+	reverse_proxy porthook-gateway:8081
+}
+
+# Control-plane API and dashboard. Keep this hostname private or add an
+# external access boundary before using it beyond local testing.
+{$PORTHOOK_CONTROL_DOMAIN} {
+	tls {$PORTHOOK_TLS_CERT_FILE} {$PORTHOOK_TLS_KEY_FILE}
+	encode zstd gzip
+	reverse_proxy porthook-control-plane:8082
+}

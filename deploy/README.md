@@ -14,6 +14,8 @@ The first supported deployment path should be Docker Compose.
 
 The Docker Compose gateway-only and control-plane stacks are documented in [compose/README.md](./compose/README.md).
 
+Reverse proxy examples for internet-facing gateway traffic live in [reverse-proxy/README.md](./reverse-proxy/README.md).
+
 ## Self-Hosted Token Flow
 
 The gateway can run in two authentication modes:
@@ -40,7 +42,7 @@ make smoke-control-plane
 
 The compose control-plane stack lives in [compose/docker-compose.control-plane.yml](./compose/docker-compose.control-plane.yml). Copy [compose/.env.control-plane.example](./compose/.env.control-plane.example), replace the placeholder values, and start it with Docker Compose.
 
-Operators still need to configure wildcard DNS and TLS in front of the public gateway listener for real internet traffic.
+Operators still need to configure wildcard DNS and TLS in front of the public gateway listener for real internet traffic. Start with the Caddy or Traefik examples in [reverse-proxy/](./reverse-proxy/).
 
 ## Production Checklist
 
