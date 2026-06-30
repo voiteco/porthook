@@ -210,12 +210,13 @@ PORTHOOK_CONTROL_PLANE_TOKEN="${VALIDATOR_TOKEN}" \
 pids+=("$!")
 wait_for_url "http://127.0.0.1:${PUBLIC_PORT}/healthz" "gateway"
 
+printf '%s' "${AGENT_TOKEN}" | \
 PORTHOOK_CONFIG_PATH="${CONFIG_FILE}" \
 PORTHOOK_SERVER_URL="" \
 PORTHOOK_TOKEN="" \
 	"${BIN_DIR}/porthook" login \
 	--server "http://127.0.0.1:${AGENT_PORT}" \
-	--token "${AGENT_TOKEN}" \
+	--token-stdin \
 	>"${LOG_DIR}/login.log" 2>"${LOG_DIR}/login.err"
 
 if [[ ! -f "${CONFIG_FILE}" ]]; then

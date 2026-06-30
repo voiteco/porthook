@@ -71,7 +71,7 @@ curl -sS -X POST http://localhost:8082/api/v1/tokens \
 The response includes the plaintext token once. Use it with the agent:
 
 ```sh
-porthook login --server http://localhost:8081 --token ph_...
+printf '%s' 'ph_...' | porthook login --server http://localhost:8081 --token-stdin
 porthook http 3000 --subdomain demo
 ```
 

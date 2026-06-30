@@ -7,6 +7,7 @@ All notable changes to Porthook are documented here.
 ### Added
 - Added a control-plane integration smoke test for token creation, CLI login, gateway validation, and HTTP round-trip.
 - Added a Docker Compose control-plane stack with Postgres, control-plane, and gateway services.
+- Added `porthook login --token-stdin` and hidden interactive token prompts for safer login input.
 
 ## [0.3.0] - 2026-06-29
 

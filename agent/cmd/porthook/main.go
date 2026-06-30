@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,18 +16,23 @@ import (
 
 	"github.com/voiteco/porthook/agent/internal/agent"
 	"github.com/voiteco/porthook/protocol/names"
+	"golang.org/x/term"
 )
 
 var version = "dev"
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	if err := runWithIO(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
+	return runWithIO(args, os.Stdin, os.Stdout, os.Stderr)
+}
+
+func runWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError()
 	}
@@ -37,22 +43,22 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-		runner := agent.NewRunner(cfg, logger, os.Stdout)
+		logger := slog.New(slog.NewTextHandler(stderr, nil))
+		runner := agent.NewRunner(cfg, logger, stdout)
 
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
 		return runner.Run(ctx)
 	case "login":
-		cfg, err := parseLoginConfig(args[1:])
+		cfg, err := parseLoginConfig(args[1:], stdin, stderr)
 		if err != nil {
 			return err
 		}
 		if err := agent.SaveConfigFile(cfg); err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stdout, "Login saved")
+		fmt.Fprintln(stdout, "Login saved")
 		return nil
 	case "logout":
 		if len(args) > 1 {
@@ -61,10 +67,10 @@ func run(args []string) error {
 		if err := agent.RemoveConfigFile(); err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stdout, "Login removed")
+		fmt.Fprintln(stdout, "Login removed")
 		return nil
 	case "version", "--version", "-version":
-		fmt.Fprintln(os.Stdout, version)
+		fmt.Fprintln(stdout, version)
 		return nil
 	default:
 		return usageError()
@@ -121,26 +127,30 @@ func parseHTTPConfig(args []string) (agent.Config, error) {
 	return cfg, nil
 }
 
-func parseLoginConfig(args []string) (agent.ConfigFile, error) {
+func parseLoginConfig(args []string, stdin io.Reader, stderr io.Writer) (agent.ConfigFile, error) {
 	defaults := agent.ConfigFromEnv()
 	serverURL := defaults.ServerURL
 	var token string
+	var tokenStdin bool
 
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stderr)
 	fs.StringVar(&serverURL, "server", serverURL, "gateway agent URL")
 	fs.StringVar(&token, "token", token, "agent authentication token")
+	fs.BoolVar(&tokenStdin, "token-stdin", tokenStdin, "read agent authentication token from stdin")
 	if err := fs.Parse(args); err != nil {
 		return agent.ConfigFile{}, err
 	}
 	if fs.NArg() > 0 {
-		return agent.ConfigFile{}, fmt.Errorf("usage: porthook login --server URL --token TOKEN")
+		return agent.ConfigFile{}, fmt.Errorf("usage: porthook login --server URL [--token TOKEN | --token-stdin]")
 	}
-	if strings.TrimSpace(serverURL) == "" {
+	serverURL = strings.TrimSpace(serverURL)
+	if serverURL == "" {
 		return agent.ConfigFile{}, fmt.Errorf("server URL is required")
 	}
-	if strings.TrimSpace(token) == "" {
-		return agent.ConfigFile{}, fmt.Errorf("token is required")
+	token, err := readLoginToken(token, tokenStdin, stdin, stderr)
+	if err != nil {
+		return agent.ConfigFile{}, err
 	}
 	return agent.ConfigFile{
 		ServerURL: serverURL,
@@ -148,6 +158,41 @@ func parseLoginConfig(args []string) (agent.ConfigFile, error) {
 	}, nil
 }
 
+func readLoginToken(token string, tokenStdin bool, stdin io.Reader, stderr io.Writer) (string, error) {
+	token = strings.TrimSpace(token)
+	if token != "" && tokenStdin {
+		return "", fmt.Errorf("--token and --token-stdin are mutually exclusive")
+	}
+	if token != "" {
+		return token, nil
+	}
+	if tokenStdin {
+		data, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", fmt.Errorf("read token from stdin: %w", err)
+		}
+		token = strings.TrimSpace(string(data))
+		if token == "" {
+			return "", fmt.Errorf("token from stdin is empty")
+		}
+		return token, nil
+	}
+	if file, ok := stdin.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+		fmt.Fprint(stderr, "Token: ")
+		data, err := term.ReadPassword(int(file.Fd()))
+		fmt.Fprintln(stderr)
+		if err != nil {
+			return "", fmt.Errorf("read token from terminal: %w", err)
+		}
+		token = strings.TrimSpace(string(data))
+		if token == "" {
+			return "", fmt.Errorf("token is required")
+		}
+		return token, nil
+	}
+	return "", fmt.Errorf("token is required; pass --token or pipe it with --token-stdin")
+}
+
 func usageError() error {
-	return fmt.Errorf("usage: porthook login --server URL --token TOKEN\n       porthook logout\n       porthook http <port> [--server URL] [--token TOKEN] [--subdomain NAME]\n       porthook version")
+	return fmt.Errorf("usage: porthook login --server URL [--token TOKEN | --token-stdin]\n       porthook logout\n       porthook http <port> [--server URL] [--token TOKEN] [--subdomain NAME]\n       porthook version")
 }

@@ -28,7 +28,7 @@ To verify the self-hosted control-plane authentication path:
 make smoke-control-plane
 ```
 
-The control-plane smoke test starts `porthook-control-plane`, creates an agent token through `POST /api/v1/tokens`, saves it with `porthook login`, starts the gateway in control-plane validation mode, starts the agent from the saved login config, and verifies GET and POST round-trips through the tunnel.
+The control-plane smoke test starts `porthook-control-plane`, creates an agent token through `POST /api/v1/tokens`, saves it with `porthook login --token-stdin`, starts the gateway in control-plane validation mode, starts the agent from the saved login config, and verifies GET and POST round-trips through the tunnel.
 
 Default automated ports can be overridden with:
 
