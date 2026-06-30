@@ -1,4 +1,5 @@
 const storageKey = "porthook.dashboard.adminToken";
+const gatewayStorageKey = "porthook.dashboard.gatewayURL";
 
 const elements = {
   loginPanel: document.querySelector("#login-panel"),
@@ -19,9 +20,23 @@ const elements = {
   copyCreatedToken: document.querySelector("#copy-created-token"),
   readyStatus: document.querySelector("#ready-status"),
   versionStatus: document.querySelector("#version-status"),
+  reservationForm: document.querySelector("#reservation-form"),
+  reservationName: document.querySelector("#reservation-name"),
+  reservationToken: document.querySelector("#reservation-token"),
+  reservationsBody: document.querySelector("#reservations-body"),
+  reservationsEmptyState: document.querySelector("#reservations-empty-state"),
+  reservationCount: document.querySelector("#reservation-count"),
+  gatewayForm: document.querySelector("#gateway-form"),
+  gatewayURL: document.querySelector("#gateway-url"),
+  tunnelsBody: document.querySelector("#tunnels-body"),
+  tunnelsEmptyState: document.querySelector("#tunnels-empty-state"),
+  tunnelCount: document.querySelector("#tunnel-count"),
 };
 
 let adminToken = sessionStorage.getItem(storageKey) || "";
+let currentTokens = [];
+
+elements.gatewayURL.value = sessionStorage.getItem(gatewayStorageKey) || defaultGatewayURL();
 
 function setAuthenticated(authenticated) {
   elements.loginPanel.hidden = authenticated;
@@ -29,9 +44,17 @@ function setAuthenticated(authenticated) {
   elements.logoutButton.hidden = !authenticated;
   elements.refreshButton.disabled = !authenticated;
   if (!authenticated) {
+    currentTokens = [];
     elements.tokensBody.replaceChildren();
+    elements.reservationsBody.replaceChildren();
+    elements.tunnelsBody.replaceChildren();
     elements.emptyState.hidden = true;
+    elements.reservationsEmptyState.hidden = true;
+    elements.tunnelsEmptyState.hidden = true;
     elements.tokenCount.textContent = "No tokens loaded";
+    elements.reservationCount.textContent = "No reservations loaded";
+    elements.tunnelCount.textContent = "No tunnels loaded";
+    renderReservationTokenOptions();
   }
 }
 
@@ -58,16 +81,7 @@ async function apiRequest(path, options = {}) {
     return null;
   }
 
-  const text = await response.text();
-  let payload = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text.trim();
-    }
-  }
-
+  const payload = await readPayload(response);
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
       throw new Error("Admin token was rejected.");
@@ -76,6 +90,18 @@ async function apiRequest(path, options = {}) {
   }
 
   return payload;
+}
+
+async function readPayload(response) {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text.trim();
+  }
 }
 
 async function refreshStatus() {
@@ -94,16 +120,21 @@ async function refreshStatus() {
   }
 }
 
-async function loadTokens() {
+async function refreshApp() {
   showNotice("");
   clearCreatedToken();
+  await Promise.all([loadTokens(), loadReservations(), refreshStatus(), loadTunnels({ silent: true })]);
+}
+
+async function loadTokens() {
   elements.tokenCount.textContent = "Loading tokens";
   elements.tokensBody.replaceChildren();
   elements.emptyState.hidden = true;
 
   const payload = await apiRequest("/api/v1/tokens");
-  const tokens = payload.tokens || [];
-  renderTokens(tokens);
+  currentTokens = payload.tokens || [];
+  renderTokens(currentTokens);
+  renderReservationTokenOptions();
 }
 
 function renderTokens(tokens) {
@@ -125,7 +156,104 @@ function renderTokenRow(token) {
     cell(formatTime(token.created_at)),
     cell(token.last_used_at ? formatTime(token.last_used_at) : "Never"),
     statusCell(token),
-    actionCell(token),
+    tokenActionCell(token),
+  );
+  return row;
+}
+
+function renderReservationTokenOptions() {
+  const activeTokens = currentTokens.filter((token) => !token.revoked_at);
+  elements.reservationToken.replaceChildren();
+  if (activeTokens.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No active tokens";
+    elements.reservationToken.append(option);
+    elements.reservationToken.disabled = true;
+    return;
+  }
+
+  elements.reservationToken.disabled = false;
+  for (const token of activeTokens) {
+    const option = document.createElement("option");
+    option.value = token.id;
+    option.textContent = `${token.name} (${token.id})`;
+    elements.reservationToken.append(option);
+  }
+}
+
+async function loadReservations() {
+  elements.reservationCount.textContent = "Loading reservations";
+  elements.reservationsBody.replaceChildren();
+  elements.reservationsEmptyState.hidden = true;
+
+  const payload = await apiRequest("/api/v1/reserved-subdomains");
+  const reservations = payload.reserved_subdomains || [];
+  renderReservations(reservations);
+}
+
+function renderReservations(reservations) {
+  elements.reservationsBody.replaceChildren(...reservations.map(renderReservationRow));
+  elements.reservationsEmptyState.hidden = reservations.length !== 0;
+  elements.reservationCount.textContent = `${reservations.length} reservation${reservations.length === 1 ? "" : "s"}`;
+}
+
+function renderReservationRow(reservation) {
+  const row = document.createElement("tr");
+  row.append(
+    cell(reservation.name),
+    monoCell(reservation.id),
+    monoCell(reservation.token_id),
+    cell(formatTime(reservation.created_at)),
+    reservationActionCell(reservation),
+  );
+  return row;
+}
+
+async function loadTunnels({ silent = false } = {}) {
+  const baseURL = normalizedGatewayURL();
+  if (!baseURL) {
+    elements.tunnelCount.textContent = "Gateway URL required";
+    elements.tunnelsBody.replaceChildren();
+    elements.tunnelsEmptyState.hidden = false;
+    return;
+  }
+
+  elements.tunnelCount.textContent = "Loading tunnels";
+  elements.tunnelsBody.replaceChildren();
+  elements.tunnelsEmptyState.hidden = true;
+
+  try {
+    const response = await fetch(`${baseURL}/api/v1/tunnels`, { cache: "no-store" });
+    const payload = await readPayload(response);
+    if (!response.ok) {
+      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
+    }
+    renderTunnels(payload.tunnels || []);
+  } catch (error) {
+    elements.tunnelCount.textContent = "Gateway unavailable";
+    elements.tunnelsBody.replaceChildren();
+    elements.tunnelsEmptyState.hidden = false;
+    if (!silent) {
+      showNotice(error.message, "error");
+    }
+  }
+}
+
+function renderTunnels(tunnels) {
+  elements.tunnelsBody.replaceChildren(...tunnels.map(renderTunnelRow));
+  elements.tunnelsEmptyState.hidden = tunnels.length !== 0;
+  elements.tunnelCount.textContent = `${tunnels.length} active tunnel${tunnels.length === 1 ? "" : "s"}`;
+}
+
+function renderTunnelRow(tunnel) {
+  const row = document.createElement("tr");
+  row.append(
+    cell(tunnel.subdomain),
+    monoCell(tunnel.tunnel_id),
+    linkCell(tunnel.public_url),
+    cell(tunnel.protocol || "http"),
+    cell(formatTime(tunnel.connected_at)),
   );
   return row;
 }
@@ -142,6 +270,20 @@ function monoCell(text) {
   return item;
 }
 
+function linkCell(href) {
+  const item = document.createElement("td");
+  if (!href) {
+    item.textContent = "";
+    return item;
+  }
+  const link = document.createElement("a");
+  link.href = href;
+  link.textContent = href;
+  link.rel = "noreferrer";
+  item.append(link);
+  return item;
+}
+
 function statusCell(token) {
   const item = document.createElement("td");
   const badge = document.createElement("span");
@@ -151,7 +293,7 @@ function statusCell(token) {
   return item;
 }
 
-function actionCell(token) {
+function tokenActionCell(token) {
   const item = document.createElement("td");
   item.classList.add("right");
   const button = document.createElement("button");
@@ -160,6 +302,18 @@ function actionCell(token) {
   button.textContent = "Revoke";
   button.disabled = Boolean(token.revoked_at);
   button.addEventListener("click", () => revokeToken(token));
+  item.append(button);
+  return item;
+}
+
+function reservationActionCell(reservation) {
+  const item = document.createElement("td");
+  item.classList.add("right");
+  const button = document.createElement("button");
+  button.className = "danger";
+  button.type = "button";
+  button.textContent = "Delete";
+  button.addEventListener("click", () => deleteReservation(reservation));
   item.append(button);
   return item;
 }
@@ -215,8 +369,49 @@ async function revokeToken(token) {
   }
   try {
     await apiRequest(`/api/v1/tokens/${encodeURIComponent(token.id)}`, { method: "DELETE" });
-    await loadTokens();
+    await Promise.all([loadTokens(), loadReservations()]);
     showNotice(`Revoked token ${token.id}.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function createReservation(event) {
+  event.preventDefault();
+  showNotice("");
+
+  const name = elements.reservationName.value.trim();
+  const tokenID = elements.reservationToken.value.trim();
+  if (!name) {
+    showNotice("Reserved subdomain name is required.", "error");
+    return;
+  }
+  if (!tokenID) {
+    showNotice("Owner token is required.", "error");
+    return;
+  }
+
+  try {
+    const created = await apiRequest("/api/v1/reserved-subdomains", {
+      method: "POST",
+      body: JSON.stringify({ name, token_id: tokenID }),
+    });
+    elements.reservationName.value = "";
+    await loadReservations();
+    showNotice(`Reserved subdomain ${created.name}.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function deleteReservation(reservation) {
+  if (!window.confirm(`Delete reserved subdomain ${reservation.name}?`)) {
+    return;
+  }
+  try {
+    await apiRequest(`/api/v1/reserved-subdomains/${encodeURIComponent(reservation.id)}`, { method: "DELETE" });
+    await loadReservations();
+    showNotice(`Deleted reserved subdomain ${reservation.name}.`, "success");
   } catch (error) {
     showNotice(error.message, "error");
   }
@@ -235,6 +430,18 @@ async function copyCreatedToken() {
   }
 }
 
+function normalizedGatewayURL() {
+  return elements.gatewayURL.value.trim().replace(/\/+$/, "");
+}
+
+function defaultGatewayURL() {
+  const { protocol, hostname } = window.location;
+  if (!protocol || !hostname) {
+    return "http://127.0.0.1:8080";
+  }
+  return `${protocol}//${hostname}:8080`;
+}
+
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   adminToken = elements.adminToken.value.trim();
@@ -245,7 +452,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
   sessionStorage.setItem(storageKey, adminToken);
   setAuthenticated(true);
   try {
-    await Promise.all([loadTokens(), refreshStatus()]);
+    await refreshApp();
   } catch (error) {
     showNotice(error.message, "error");
   }
@@ -262,7 +469,7 @@ elements.logoutButton.addEventListener("click", () => {
 
 elements.refreshButton.addEventListener("click", async () => {
   try {
-    await Promise.all([loadTokens(), refreshStatus()]);
+    await refreshApp();
   } catch (error) {
     showNotice(error.message, "error");
   }
@@ -270,8 +477,16 @@ elements.refreshButton.addEventListener("click", async () => {
 
 elements.createForm.addEventListener("submit", createToken);
 elements.copyCreatedToken.addEventListener("click", copyCreatedToken);
+elements.reservationForm.addEventListener("submit", createReservation);
+elements.gatewayForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const gatewayURL = normalizedGatewayURL();
+  sessionStorage.setItem(gatewayStorageKey, gatewayURL);
+  elements.gatewayURL.value = gatewayURL;
+  await loadTunnels();
+});
 
 setAuthenticated(Boolean(adminToken));
 if (adminToken) {
-  Promise.all([loadTokens(), refreshStatus()]).catch((error) => showNotice(error.message, "error"));
+  refreshApp().catch((error) => showNotice(error.message, "error"));
 }
