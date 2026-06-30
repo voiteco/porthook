@@ -85,6 +85,50 @@ func TestReadyzReportsStoreFailure(t *testing.T) {
 	}
 }
 
+func TestStatusEndpoint(t *testing.T) {
+	server := NewServer(Config{Version: "test-version"}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/status")
+	if err != nil {
+		t.Fatalf("GET status returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var status statusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode status returned error: %v", err)
+	}
+	if !status.Ready || status.Status != "ready" || status.Version != "test-version" {
+		t.Fatalf("status response = %+v, want ready test-version", status)
+	}
+}
+
+func TestStatusEndpointReportsStoreFailure(t *testing.T) {
+	server := NewServer(Config{Version: "test-version"}, tokens.NewService(failingReadyStore{MemoryStore: tokens.NewMemoryStore()}))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/status")
+	if err != nil {
+		t.Fatalf("GET status returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	}
+	var status statusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode status returned error: %v", err)
+	}
+	if status.Ready || status.Status != "not_ready" || status.Error == "" {
+		t.Fatalf("status response = %+v, want not_ready error", status)
+	}
+}
+
 func TestMetricsEndpoint(t *testing.T) {
 	server := NewServer(Config{
 		AdminToken:     "admin-secret",

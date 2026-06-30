@@ -52,7 +52,11 @@ func TestHandlerServesAssets(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "/api/v1/tokens") {
+	body := rec.Body.String()
+	if !strings.Contains(body, "/api/v1/tokens") {
 		t.Fatalf("asset body = %q, want token API client", body)
+	}
+	if !strings.Contains(body, "/api/v1/status") {
+		t.Fatalf("asset body = %q, want status API client", body)
 	}
 }

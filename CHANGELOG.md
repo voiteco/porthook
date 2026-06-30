@@ -9,6 +9,7 @@ All notable changes to Porthook are documented here.
 - Added `last_used_at` token metadata updates on successful control-plane token validation and exposed it in token list API, CLI output, and dashboard tables.
 - Added versioned Postgres migrations and startup schema verification for control-plane token storage with `schema_migrations` tracking.
 - Added upgrade notes and self-hosted deployment guidance for the dashboard and control-plane migrations.
+- Added `GET /api/v1/status` for control-plane readiness and version status, and extended the control-plane smoke test to verify dashboard assets.
 
 ## [0.4.0] - 2026-06-30
 

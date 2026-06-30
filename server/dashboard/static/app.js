@@ -18,6 +18,7 @@ const elements = {
   createdTokenValue: document.querySelector("#created-token-value"),
   copyCreatedToken: document.querySelector("#copy-created-token"),
   readyStatus: document.querySelector("#ready-status"),
+  versionStatus: document.querySelector("#version-status"),
 };
 
 let adminToken = sessionStorage.getItem(storageKey) || "";
@@ -77,11 +78,13 @@ async function apiRequest(path, options = {}) {
   return payload;
 }
 
-async function refreshReadiness() {
+async function refreshStatus() {
   try {
-    const response = await fetch("/readyz", { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error("not ready");
+    const response = await fetch("/api/v1/status", { cache: "no-store" });
+    const payload = await response.json();
+    elements.versionStatus.textContent = `Version ${payload.version || "unknown"}`;
+    if (!response.ok || !payload.ready) {
+      throw new Error(payload.error || "not ready");
     }
     elements.readyStatus.textContent = "Ready";
     elements.readyStatus.className = "status-pill good";
@@ -242,7 +245,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
   sessionStorage.setItem(storageKey, adminToken);
   setAuthenticated(true);
   try {
-    await Promise.all([loadTokens(), refreshReadiness()]);
+    await Promise.all([loadTokens(), refreshStatus()]);
   } catch (error) {
     showNotice(error.message, "error");
   }
@@ -259,7 +262,7 @@ elements.logoutButton.addEventListener("click", () => {
 
 elements.refreshButton.addEventListener("click", async () => {
   try {
-    await Promise.all([loadTokens(), refreshReadiness()]);
+    await Promise.all([loadTokens(), refreshStatus()]);
   } catch (error) {
     showNotice(error.message, "error");
   }
@@ -270,5 +273,5 @@ elements.copyCreatedToken.addEventListener("click", copyCreatedToken);
 
 setAuthenticated(Boolean(adminToken));
 if (adminToken) {
-  Promise.all([loadTokens(), refreshReadiness()]).catch((error) => showNotice(error.message, "error"));
+  Promise.all([loadTokens(), refreshStatus()]).catch((error) => showNotice(error.message, "error"));
 }

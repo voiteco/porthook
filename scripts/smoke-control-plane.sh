@@ -183,6 +183,32 @@ PORTHOOK_DATABASE_URL="" \
 pids+=("$!")
 wait_for_url "http://127.0.0.1:${CONTROL_PORT}/readyz" "control plane"
 
+dashboard_html="$(curl -fsS "http://127.0.0.1:${CONTROL_PORT}/dashboard/")"
+if [[ "${dashboard_html}" != *"Token management"* ]]; then
+	echo "Dashboard index did not include token management UI" >&2
+	exit 1
+fi
+
+dashboard_js="$(curl -fsS "http://127.0.0.1:${CONTROL_PORT}/dashboard/app.js")"
+if [[ "${dashboard_js}" != *"/api/v1/status"* ]]; then
+	echo "Dashboard JavaScript did not include status API client" >&2
+	exit 1
+fi
+
+status_json="$(curl -fsS "http://127.0.0.1:${CONTROL_PORT}/api/v1/status")"
+printf '%s' "${status_json}" | python3 -c '
+import json
+import sys
+
+want_version = sys.argv[1]
+payload = json.load(sys.stdin)
+if payload.get("status") != "ready" or payload.get("ready") is not True:
+    raise SystemExit(f"unexpected control-plane status: {payload}")
+got_version = payload.get("version")
+if got_version != want_version:
+    raise SystemExit(f"unexpected control-plane version: {got_version!r}, want {want_version!r}")
+' "${VERSION}"
+
 unauthorized_status="$(curl -sS -o /dev/null -w "%{http_code}" \
 	-X POST "http://127.0.0.1:${CONTROL_PORT}/api/v1/tokens/validate" \
 	-H "Content-Type: application/json" \
