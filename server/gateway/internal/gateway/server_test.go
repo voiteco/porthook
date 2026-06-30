@@ -262,6 +262,164 @@ func TestAgentWebSocketValidatesTokenThroughControlPlane(t *testing.T) {
 	}
 }
 
+func TestAgentWebSocketAuthorizesRequestedSubdomainThroughControlPlane(t *testing.T) {
+	authorizeCalled := false
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer validator-secret" {
+			t.Errorf("authorization = %q, want validator bearer", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/api/v1/tokens/validate":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"valid":    true,
+				"token_id": "tok_owner",
+				"scopes":   []string{"register_tunnel"},
+			})
+		case "/api/v1/reserved-subdomains/authorize":
+			authorizeCalled = true
+			var req struct {
+				TokenID   string `json:"token_id"`
+				Subdomain string `json:"subdomain"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("Decode returned error: %v", err)
+				return
+			}
+			if req.TokenID != "tok_owner" || req.Subdomain != "demo" {
+				t.Errorf("authorization request = %+v, want tok_owner/demo", req)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"allowed": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
+	cfg := testConfig()
+	cfg.StaticToken = "static-token"
+	cfg.ControlPlaneURL = controlPlane.URL
+	cfg.ControlPlaneToken = "validator-secret"
+	server := NewServer(cfg, slog.Default())
+	httpServer := httptest.NewServer(server.AgentHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "control-token",
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
+	if err != nil {
+		t.Fatalf("New auth returned error: %v", err)
+	}
+	if err := wsjson.Write(ctx, conn, auth); err != nil {
+		t.Fatalf("write auth returned error: %v", err)
+	}
+	var authResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &authResp); err != nil {
+		t.Fatalf("read auth response returned error: %v", err)
+	}
+	if authResp.Type != messages.TypeAuthOK {
+		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthOK)
+	}
+
+	writeRegistrationForTest(t, ctx, conn, "demo")
+	var regResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &regResp); err != nil {
+		t.Fatalf("read registration response returned error: %v", err)
+	}
+	if regResp.Type != messages.TypeTunnelRegistered {
+		t.Fatalf("registration response type = %s, want %s", regResp.Type, messages.TypeTunnelRegistered)
+	}
+	if !authorizeCalled {
+		t.Fatal("control-plane reserved subdomain authorization was not called")
+	}
+}
+
+func TestAgentWebSocketRejectsUnreservedRequestedSubdomain(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/tokens/validate":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"valid":    true,
+				"token_id": "tok_owner",
+				"scopes":   []string{"register_tunnel"},
+			})
+		case "/api/v1/reserved-subdomains/authorize":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"allowed": false,
+				"reason":  "not_reserved",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
+	cfg := testConfig()
+	cfg.StaticToken = "static-token"
+	cfg.ControlPlaneURL = controlPlane.URL
+	cfg.ControlPlaneToken = "validator-secret"
+	server := NewServer(cfg, slog.Default())
+	httpServer := httptest.NewServer(server.AgentHandler())
+	defer httpServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(httpServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	auth, err := messages.New(messages.TypeAuthRequest, messages.AuthRequest{
+		Token:           "control-token",
+		ProtocolVersion: messages.ProtocolVersion,
+		Capabilities:    messages.DefaultProtocolCapabilities(),
+	})
+	if err != nil {
+		t.Fatalf("New auth returned error: %v", err)
+	}
+	if err := wsjson.Write(ctx, conn, auth); err != nil {
+		t.Fatalf("write auth returned error: %v", err)
+	}
+	var authResp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &authResp); err != nil {
+		t.Fatalf("read auth response returned error: %v", err)
+	}
+	if authResp.Type != messages.TypeAuthOK {
+		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthOK)
+	}
+
+	writeRegistrationForTest(t, ctx, conn, "demo")
+	var resp messages.Envelope
+	if err := wsjson.Read(ctx, conn, &resp); err != nil {
+		t.Fatalf("read registration error returned error: %v", err)
+	}
+	if resp.Type != messages.TypeTunnelError {
+		t.Fatalf("registration response type = %s, want %s", resp.Type, messages.TypeTunnelError)
+	}
+	payload, err := messages.DecodePayload[messages.ErrorPayload](resp)
+	if err != nil {
+		t.Fatalf("DecodePayload returned error: %v", err)
+	}
+	if payload.Code != "subdomain_not_reserved" {
+		t.Fatalf("error code = %q, want subdomain_not_reserved", payload.Code)
+	}
+	if !strings.Contains(payload.Message, `subdomain "demo" is not reserved`) {
+		t.Fatalf("error message = %q, want reservation guidance", payload.Message)
+	}
+}
+
 func TestAgentWebSocketRejectsInvalidControlPlaneToken(t *testing.T) {
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"valid": false})

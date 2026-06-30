@@ -7,6 +7,7 @@ All notable changes to Porthook are documented here.
 ### Added
 - Added control-plane reserved subdomain storage, Postgres migration, admin APIs, and validator authorization API.
 - Added `porthook reserved create`, `porthook reserved list`, and `porthook reserved delete` for reserved subdomain administration.
+- Added gateway authorization for requested subdomains through the control plane.
 
 ## [0.5.0] - 2026-06-30
 
