@@ -85,6 +85,18 @@ The stack listens on:
 
 Postgres is available only inside the Compose network as `postgres:5432`.
 
+## Dashboard
+
+Open the dashboard after the control-plane stack starts:
+
+```text
+http://localhost:8082/dashboard/
+```
+
+Use the configured `PORTHOOK_CONTROL_ADMIN_TOKEN` to log in. The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token.
+
+The dashboard can create, list, and revoke agent tokens. The plaintext agent token is displayed only from the create response. Token tables include creation time, last successful validation time, and revocation status.
+
 Create an agent token through the control plane:
 
 ```sh
@@ -107,6 +119,12 @@ The full binary integration path can also be checked without Docker Compose:
 make smoke-control-plane
 ```
 
+## Upgrades
+
+Back up the `postgres-data` volume before upgrading a Postgres-backed control-plane stack. The control plane applies pending embedded migrations at startup and records them in `schema_migrations`.
+
+For the 0.5.x line, the migrations are additive for token storage and add `last_used_at` metadata for token list views. See [../../docs/UPGRADING.md](../../docs/UPGRADING.md).
+
 ## Operational Endpoints
 
 The Compose stack exposes:
@@ -119,6 +137,7 @@ The Compose stack exposes:
 | Control-plane health | `http://localhost:8082/healthz` |
 | Control-plane readiness | `http://localhost:8082/readyz` |
 | Control-plane metrics | `http://localhost:8082/metrics` |
+| Dashboard | `http://localhost:8082/dashboard/` |
 
 Gateway metrics include active tunnels, public request counts, token validation attempts, auth failures, and successful tunnel registrations. Control-plane metrics include token admin operations, token validation results, auth failures, and readiness failures.
 
@@ -126,7 +145,7 @@ The control-plane `/readyz` endpoint checks the token store. In this Compose sta
 
 ## Internet-Facing Notes
 
-For real internet traffic, update `PORTHOOK_ROOT_DOMAIN` and `PORTHOOK_PUBLIC_URL`, point wildcard DNS at the public gateway, and terminate TLS in front of the public listener. Keep the control-plane API private or protected by an additional access boundary.
+For real internet traffic, update `PORTHOOK_ROOT_DOMAIN` and `PORTHOOK_PUBLIC_URL`, point wildcard DNS at the public gateway, and terminate TLS in front of the public listener. Keep the control-plane API and dashboard private or protected by an additional access boundary.
 
 ## Smoke Test
 
