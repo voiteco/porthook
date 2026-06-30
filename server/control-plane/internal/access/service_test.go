@@ -162,3 +162,67 @@ func TestServiceUpdatesAndDeletesPolicy(t *testing.T) {
 		t.Fatalf("GetPolicy after delete = ok %v err %v, want not found", ok, err)
 	}
 }
+
+func TestServiceChecksAccessPolicies(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	publicResult, err := service.CheckPolicy(ctx, CheckPolicyRequest{ReservedSubdomainID: "rs_missing"})
+	if err != nil {
+		t.Fatalf("CheckPolicy missing returned error: %v", err)
+	}
+	if !publicResult.Allowed || publicResult.Mode != ModePublic || publicResult.Reason != "no_policy" {
+		t.Fatalf("publicResult = %+v, want public no_policy allow", publicResult)
+	}
+
+	basic, err := service.CreatePolicy(ctx, CreatePolicyRequest{
+		ReservedSubdomainID: "rs_basic",
+		Mode:                "basic_auth",
+		BasicUsername:       "admin",
+		BasicPassword:       "secret",
+	})
+	if err != nil {
+		t.Fatalf("CreatePolicy basic returned error: %v", err)
+	}
+	denied, err := service.CheckPolicy(ctx, CheckPolicyRequest{
+		ReservedSubdomainID: basic.ReservedSubdomainID,
+		BasicUsername:       "admin",
+		BasicPassword:       "wrong",
+	})
+	if err != nil {
+		t.Fatalf("CheckPolicy denied returned error: %v", err)
+	}
+	if denied.Allowed || denied.Reason != "basic_auth_required" {
+		t.Fatalf("denied = %+v, want basic_auth_required", denied)
+	}
+	allowed, err := service.CheckPolicy(ctx, CheckPolicyRequest{
+		ReservedSubdomainID: basic.ReservedSubdomainID,
+		BasicUsername:       "admin",
+		BasicPassword:       "secret",
+	})
+	if err != nil {
+		t.Fatalf("CheckPolicy allowed returned error: %v", err)
+	}
+	if !allowed.Allowed || allowed.Mode != ModeBasicAuth {
+		t.Fatalf("allowed = %+v, want basic auth allow", allowed)
+	}
+
+	ipPolicy, err := service.CreatePolicy(ctx, CreatePolicyRequest{
+		ReservedSubdomainID: "rs_ip",
+		Mode:                "ip_allowlist",
+		IPAllowlist:         []string{"192.0.2.0/24"},
+	})
+	if err != nil {
+		t.Fatalf("CreatePolicy ip returned error: %v", err)
+	}
+	allowed, err = service.CheckPolicy(ctx, CheckPolicyRequest{
+		ReservedSubdomainID: ipPolicy.ReservedSubdomainID,
+		RemoteIP:            "192.0.2.5",
+	})
+	if err != nil {
+		t.Fatalf("CheckPolicy ip allowed returned error: %v", err)
+	}
+	if !allowed.Allowed {
+		t.Fatalf("allowed = %+v, want IP allow", allowed)
+	}
+}

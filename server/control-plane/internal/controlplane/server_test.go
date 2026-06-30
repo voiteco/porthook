@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/voiteco/porthook/server/control-plane/internal/access"
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 )
@@ -726,6 +727,179 @@ func TestReservedSubdomainsRequireAuthorization(t *testing.T) {
 	defer authorizeResp.Body.Close()
 	if authorizeResp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("authorize status = %d, want 401", authorizeResp.StatusCode)
+	}
+}
+
+func TestAccessPolicyLifecycleAndEvaluation(t *testing.T) {
+	ctx := context.Background()
+	tokenService := tokens.NewService(tokens.NewMemoryStore())
+	reservationService := reserved.NewService(reserved.NewMemoryStore())
+	accessPolicyService := access.NewService(access.NewMemoryStore())
+	token, err := tokenService.CreateToken(ctx, tokens.CreateTokenRequest{Name: "agent"})
+	if err != nil {
+		t.Fatalf("CreateToken returned error: %v", err)
+	}
+	reservation, err := reservationService.CreateReservation(ctx, reserved.CreateReservationRequest{
+		Name:    "demo",
+		TokenID: token.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned error: %v", err)
+	}
+
+	var logs bytes.Buffer
+	server := NewServerWithAccessPolicies(Config{
+		AdminToken:     "admin-secret",
+		ValidatorToken: "validator-secret",
+	}, tokenService, reservationService, accessPolicyService)
+	server.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	createResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/access-policies", "admin-secret", map[string]any{
+		"reserved_subdomain_id": reservation.ID,
+		"mode":                  "basic_auth",
+		"basic_username":        "admin",
+		"basic_password":        "secret",
+	})
+	defer createResp.Body.Close()
+	createBody := readResponseBody(t, createResp)
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body = %q", createResp.StatusCode, createBody)
+	}
+	if strings.Contains(createBody, "basic_password") || strings.Contains(createBody, `"secret"`) {
+		t.Fatalf("create response leaked secret: %q", createBody)
+	}
+	var created access.PolicySummary
+	if err := json.Unmarshal([]byte(createBody), &created); err != nil {
+		t.Fatalf("decode created policy returned error: %v", err)
+	}
+	if created.ID == "" || created.Mode != access.ModeBasicAuth || !created.SecretConfigured {
+		t.Fatalf("created policy = %+v, want basic_auth with configured secret", created)
+	}
+
+	listReq, err := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/api/v1/access-policies", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	listReq.Header.Set("Authorization", "Bearer admin-secret")
+	listResp, err := httpServer.Client().Do(listReq)
+	if err != nil {
+		t.Fatalf("list returned error: %v", err)
+	}
+	defer listResp.Body.Close()
+	listBody := readResponseBody(t, listResp)
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d, want 200; body = %q", listResp.StatusCode, listBody)
+	}
+	if strings.Contains(listBody, "basic_password") || strings.Contains(listBody, `"secret"`) {
+		t.Fatalf("list response leaked secret: %q", listBody)
+	}
+
+	deniedResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/access-policies/evaluate", "validator-secret", map[string]any{
+		"subdomain":      "demo",
+		"basic_username": "admin",
+		"basic_password": "wrong",
+	})
+	defer deniedResp.Body.Close()
+	if deniedResp.StatusCode != http.StatusOK {
+		t.Fatalf("denied status = %d, want 200", deniedResp.StatusCode)
+	}
+	var denied evaluateAccessPolicyResponse
+	if err := json.NewDecoder(deniedResp.Body).Decode(&denied); err != nil {
+		t.Fatalf("decode denied returned error: %v", err)
+	}
+	if denied.Allowed || denied.Mode != access.ModeBasicAuth || denied.Reason != "basic_auth_required" {
+		t.Fatalf("denied = %+v, want basic_auth_required", denied)
+	}
+
+	allowedResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/access-policies/evaluate", "validator-secret", map[string]any{
+		"subdomain":      "demo",
+		"basic_username": "admin",
+		"basic_password": "secret",
+	})
+	defer allowedResp.Body.Close()
+	if allowedResp.StatusCode != http.StatusOK {
+		t.Fatalf("allowed status = %d, want 200", allowedResp.StatusCode)
+	}
+	var allowed evaluateAccessPolicyResponse
+	if err := json.NewDecoder(allowedResp.Body).Decode(&allowed); err != nil {
+		t.Fatalf("decode allowed returned error: %v", err)
+	}
+	if !allowed.Allowed || allowed.Mode != access.ModeBasicAuth {
+		t.Fatalf("allowed = %+v, want basic_auth allow", allowed)
+	}
+
+	updatePayload := strings.NewReader(`{"mode":"public"}`)
+	updateReq, err := http.NewRequestWithContext(ctx, http.MethodPut, httpServer.URL+"/api/v1/access-policies/"+created.ID, updatePayload)
+	if err != nil {
+		t.Fatalf("NewRequest update returned error: %v", err)
+	}
+	updateReq.Header.Set("Authorization", "Bearer admin-secret")
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateResp, err := httpServer.Client().Do(updateReq)
+	if err != nil {
+		t.Fatalf("update returned error: %v", err)
+	}
+	defer updateResp.Body.Close()
+	if updateResp.StatusCode != http.StatusOK {
+		t.Fatalf("update status = %d, want 200; body = %q", updateResp.StatusCode, readResponseBody(t, updateResp))
+	}
+
+	deleteReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, httpServer.URL+"/api/v1/access-policies/"+created.ID, nil)
+	if err != nil {
+		t.Fatalf("NewRequest delete returned error: %v", err)
+	}
+	deleteReq.Header.Set("Authorization", "Bearer admin-secret")
+	deleteResp, err := httpServer.Client().Do(deleteReq)
+	if err != nil {
+		t.Fatalf("delete returned error: %v", err)
+	}
+	deleteResp.Body.Close()
+	if deleteResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204", deleteResp.StatusCode)
+	}
+
+	logOutput := logs.String()
+	for _, want := range []string{
+		"event=control_plane.access_policy_created",
+		"event=control_plane.access_policies_listed",
+		"event=control_plane.access_policy_evaluated",
+		"event=control_plane.access_policy_updated",
+		"event=control_plane.access_policy_deleted",
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("logs = %q, want %q", logOutput, want)
+		}
+	}
+	if strings.Contains(logOutput, "basic_password") || strings.Contains(logOutput, `"secret"`) {
+		t.Fatalf("logs leaked secret: %q", logOutput)
+	}
+}
+
+func TestAccessPolicyEndpointsRequireAuthorization(t *testing.T) {
+	server := NewServer(Config{
+		AdminToken:     "admin-secret",
+		ValidatorToken: "validator-secret",
+	}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/access-policies")
+	if err != nil {
+		t.Fatalf("GET access policies returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("list status = %d, want 401", resp.StatusCode)
+	}
+
+	evaluateResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/access-policies/evaluate", "", map[string]any{
+		"subdomain": "demo",
+	})
+	defer evaluateResp.Body.Close()
+	if evaluateResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("evaluate status = %d, want 401", evaluateResp.StatusCode)
 	}
 }
 

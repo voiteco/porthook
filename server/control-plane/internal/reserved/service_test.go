@@ -125,6 +125,35 @@ func TestServiceAuthorizesReservationOwner(t *testing.T) {
 	}
 }
 
+func TestServiceGetsReservationByIDAndName(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	created, err := service.CreateReservation(ctx, CreateReservationRequest{
+		Name:    "demo",
+		TokenID: "tok_owner",
+	})
+	if err != nil {
+		t.Fatalf("CreateReservation returned error: %v", err)
+	}
+
+	byID, ok, err := service.GetReservation(ctx, created.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetReservation = ok %v err %v, want ok", ok, err)
+	}
+	if byID.Name != "demo" || byID.TokenID != "tok_owner" {
+		t.Fatalf("byID = %+v, want demo tok_owner", byID)
+	}
+
+	byName, ok, err := service.GetReservationByName(ctx, " Demo ")
+	if err != nil || !ok {
+		t.Fatalf("GetReservationByName = ok %v err %v, want ok", ok, err)
+	}
+	if byName.ID != created.ID {
+		t.Fatalf("byName.ID = %q, want %q", byName.ID, created.ID)
+	}
+}
+
 func TestServiceDeletesReservation(t *testing.T) {
 	ctx := context.Background()
 	service := NewService(NewMemoryStore())

@@ -59,6 +59,20 @@ type ListPoliciesResponse struct {
 	AccessPolicies []PolicySummary `json:"access_policies"`
 }
 
+type CheckPolicyRequest struct {
+	ReservedSubdomainID string
+	RemoteIP            string
+	BasicUsername       string
+	BasicPassword       string
+	BearerToken         string
+}
+
+type CheckPolicyResult struct {
+	Allowed bool       `json:"allowed"`
+	Mode    PolicyMode `json:"mode"`
+	Reason  string     `json:"reason,omitempty"`
+}
+
 type Store interface {
 	Ping(context.Context) error
 	Create(context.Context, PolicyRecord) error

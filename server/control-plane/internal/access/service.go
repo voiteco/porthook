@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -173,6 +174,46 @@ func (s *Service) DeletePolicy(ctx context.Context, id string) error {
 	return s.store.Delete(ctx, id)
 }
 
+func (s *Service) CheckPolicy(ctx context.Context, req CheckPolicyRequest) (CheckPolicyResult, error) {
+	if s == nil || s.store == nil {
+		return CheckPolicyResult{}, errors.New("access policy store is required")
+	}
+	reservedSubdomainID := strings.TrimSpace(req.ReservedSubdomainID)
+	if reservedSubdomainID == "" {
+		return CheckPolicyResult{}, ErrPolicyReservedSubdomainIDRequired
+	}
+
+	record, ok, err := s.store.LookupByReservedSubdomainID(ctx, reservedSubdomainID)
+	if err != nil {
+		return CheckPolicyResult{}, err
+	}
+	if !ok {
+		return CheckPolicyResult{Allowed: true, Mode: ModePublic, Reason: "no_policy"}, nil
+	}
+
+	switch record.Mode {
+	case ModePublic:
+		return CheckPolicyResult{Allowed: true, Mode: record.Mode, Reason: "public"}, nil
+	case ModeBasicAuth:
+		if !basicAuthMatches(record, req.BasicUsername, req.BasicPassword) {
+			return CheckPolicyResult{Allowed: false, Mode: record.Mode, Reason: "basic_auth_required"}, nil
+		}
+		return CheckPolicyResult{Allowed: true, Mode: record.Mode}, nil
+	case ModeBearerToken:
+		if !secretHashEqual(HashSecret(strings.TrimSpace(req.BearerToken)), record.SecretHash) {
+			return CheckPolicyResult{Allowed: false, Mode: record.Mode, Reason: "bearer_token_required"}, nil
+		}
+		return CheckPolicyResult{Allowed: true, Mode: record.Mode}, nil
+	case ModeIPAllowlist:
+		if !ipAllowed(req.RemoteIP, record.IPAllowlist) {
+			return CheckPolicyResult{Allowed: false, Mode: record.Mode, Reason: "ip_not_allowed"}, nil
+		}
+		return CheckPolicyResult{Allowed: true, Mode: record.Mode}, nil
+	default:
+		return CheckPolicyResult{Allowed: false, Mode: record.Mode, Reason: "unsupported_policy_mode"}, nil
+	}
+}
+
 func newPolicyRecord(req CreatePolicyRequest, now time.Time) (PolicyRecord, error) {
 	reservedSubdomainID := strings.TrimSpace(req.ReservedSubdomainID)
 	if reservedSubdomainID == "" {
@@ -334,6 +375,55 @@ func normalizeIPAllowlistValue(value string) (string, error) {
 func HashSecret(secret string) string {
 	sum := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(sum[:])
+}
+
+func basicAuthMatches(record PolicyRecord, username, password string) bool {
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+	if username == "" || password == "" || record.BasicUsername == "" || record.SecretHash == "" {
+		return false
+	}
+	return secretEqual(username, record.BasicUsername) && secretHashEqual(HashSecret(password), record.SecretHash)
+}
+
+func secretEqual(got, want string) bool {
+	if got == "" || want == "" {
+		return false
+	}
+	gotHash := sha256.Sum256([]byte(got))
+	wantHash := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) == 1
+}
+
+func secretHashEqual(gotHash, wantHash string) bool {
+	if gotHash == "" || wantHash == "" || len(gotHash) != len(wantHash) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(gotHash), []byte(wantHash)) == 1
+}
+
+func ipAllowed(remoteIP string, allowlist []string) bool {
+	remoteIP = strings.TrimSpace(remoteIP)
+	if remoteIP == "" {
+		return false
+	}
+	addr, err := netip.ParseAddr(remoteIP)
+	if err != nil {
+		return false
+	}
+	for _, value := range allowlist {
+		if prefix, err := netip.ParsePrefix(value); err == nil {
+			if prefix.Contains(addr) {
+				return true
+			}
+			continue
+		}
+		allowedAddr, err := netip.ParseAddr(value)
+		if err == nil && allowedAddr == addr {
+			return true
+		}
+	}
+	return false
 }
 
 func summarize(record PolicyRecord) PolicySummary {
