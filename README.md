@@ -4,7 +4,7 @@ Porthook is an open-source reverse tunnel service for exposing local development
 
 This repository is the public self-hosted product. Private commercial, hosted-cloud, pricing, and operating plans should live in separate private repositories.
 
-Project status: pre-alpha. The local MVP HTTP tunnel prototype is implemented and covered by `make smoke-local`; control-plane token management is in early implementation.
+Project status: pre-alpha. The local HTTP tunnel path, self-hosted control-plane token management, gateway token validation, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs and operational defaults can still change before 1.0.
 
 ## What It Does
 
@@ -42,6 +42,7 @@ The first product shape is intentionally narrow:
 - Wildcard subdomain routing.
 - Token-based tunnel authentication.
 - Optional control-plane token validation for self-hosted deployments.
+- Health, readiness, and Prometheus text metrics endpoints.
 - Basic request logs for local debugging.
 - Agent reconnects for transient gateway disconnects.
 - A simple dashboard after the tunnel core is stable.
@@ -80,7 +81,7 @@ See [docs/REPOSITORY_BOUNDARY.md](./docs/REPOSITORY_BOUNDARY.md) for what belong
 
 ## MVP Scope
 
-The current prototype proves the local full tunnel path:
+The current prototype proves the local and self-hosted control-plane tunnel paths:
 
 1. A user starts a local HTTP service.
 2. The user runs `porthook http 3000`.
@@ -93,6 +94,12 @@ Run the local smoke test from the repository root:
 
 ```sh
 make smoke-local
+```
+
+Run the control-plane-backed smoke test:
+
+```sh
+make smoke-control-plane
 ```
 
 Out of scope for the first MVP:
@@ -124,13 +131,69 @@ A web UI for active tunnels, request history, tokens, and domains.
 
 ## Development Roadmap
 
-1. Product and protocol spec.
+Completed foundations:
+
+1. Product and protocol specs.
 2. Minimal Go agent and gateway over WebSocket.
 3. HTTP tunnel request forwarding.
 4. Token authentication and tunnel registration.
 5. Docker Compose self-hosting.
-6. Request logging and CLI polish.
-7. Control-plane API and dashboard.
+6. Request logging, reconnects, keepalives, timeouts, and CLI polish.
+7. Self-hosted control-plane token API and CLI token helpers.
+
+Next major public work:
+
+1. Self-hosted dashboard.
+2. More complete operational guides.
+3. Custom domains and TLS documentation.
+
+## Self-Hosted Quick Start
+
+The quickest control-plane-backed local stack uses Docker Compose:
+
+```sh
+cp deploy/compose/.env.control-plane.example deploy/compose/.env.control-plane
+```
+
+Replace every `change-me` value in `deploy/compose/.env.control-plane`. Generate separate local secrets for the Postgres password, control-plane admin token, and gateway validator token:
+
+```sh
+openssl rand -base64 32
+```
+
+Start Postgres, the control plane, and the gateway:
+
+```sh
+docker compose \
+  --env-file deploy/compose/.env.control-plane \
+  -f deploy/compose/docker-compose.control-plane.yml \
+  up --build
+```
+
+Create an agent token:
+
+```sh
+printf '%s' '<admin-token>' | porthook tokens create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --name 'local agent'
+```
+
+Start a local service and tunnel it:
+
+```sh
+python3 -m http.server 3000 --bind 127.0.0.1
+printf '%s' '<agent-token-from-create-output>' | porthook login --server http://localhost:8081 --token-stdin
+porthook http 3000 --subdomain demo
+```
+
+Then request the public gateway:
+
+```sh
+curl -i -H 'Host: demo.localhost' http://localhost:8080/
+```
+
+The gateway public listener and control plane both expose `GET /healthz`, `GET /readyz`, and `GET /metrics` for local operations checks. See [deploy/compose/README.md](./deploy/compose/README.md) for the full Compose guide.
 
 ## Specification
 

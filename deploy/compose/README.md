@@ -40,7 +40,32 @@ Copy the example environment file and replace every `change-me` value before usi
 cp deploy/compose/.env.control-plane.example deploy/compose/.env.control-plane
 ```
 
+Generate separate values for the Postgres password, control-plane admin token, and gateway validator token:
+
+```sh
+openssl rand -base64 32
+```
+
+If OpenSSL is not available, use:
+
+```sh
+python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+```
+
 If ports `8080`, `8081`, or `8082` are already in use, change `PORTHOOK_PUBLIC_PORT`, `PORTHOOK_AGENT_PORT`, and `PORTHOOK_CONTROL_PORT` in that env file.
+
+Required local environment values:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `PORTHOOK_POSTGRES_PASSWORD` | Password for the Compose Postgres user and database URL. |
+| `PORTHOOK_CONTROL_ADMIN_TOKEN` | Admin bearer token for token creation, listing, and revocation. |
+| `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | Shared bearer token used by the gateway when validating agent tokens through the control plane. |
+| `PORTHOOK_ROOT_DOMAIN` | Root domain used for tunnel subdomains. Use `localhost` for local smoke testing. |
+| `PORTHOOK_PUBLIC_URL` | Public base URL printed by the gateway when a tunnel is registered. |
+| `PORTHOOK_PUBLIC_PORT` | Host port mapped to the gateway public HTTP listener. |
+| `PORTHOOK_AGENT_PORT` | Host port mapped to the gateway agent WebSocket listener. |
+| `PORTHOOK_CONTROL_PORT` | Host port mapped to the control-plane API listener. |
 
 Start Postgres, the control plane, and the gateway:
 
@@ -62,7 +87,7 @@ Postgres is available only inside the Compose network as `postgres:5432`.
 Create an agent token through the control plane:
 
 ```sh
-printf '%s' 'change-me-admin-token' | porthook tokens create \
+printf '%s' '<admin-token>' | porthook tokens create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --name 'local agent'
@@ -80,6 +105,27 @@ The full binary integration path can also be checked without Docker Compose:
 ```sh
 make smoke-control-plane
 ```
+
+## Operational Endpoints
+
+The Compose stack exposes:
+
+| Service | URL |
+| --- | --- |
+| Gateway health | `http://localhost:8080/healthz` |
+| Gateway readiness | `http://localhost:8080/readyz` |
+| Gateway metrics | `http://localhost:8080/metrics` |
+| Control-plane health | `http://localhost:8082/healthz` |
+| Control-plane readiness | `http://localhost:8082/readyz` |
+| Control-plane metrics | `http://localhost:8082/metrics` |
+
+Gateway metrics include active tunnels, public request counts, token validation attempts, auth failures, and successful tunnel registrations. Control-plane metrics include token admin operations, token validation results, auth failures, and readiness failures.
+
+The control-plane `/readyz` endpoint checks the token store. In this Compose stack, that means it pings Postgres.
+
+## Internet-Facing Notes
+
+For real internet traffic, update `PORTHOOK_ROOT_DOMAIN` and `PORTHOOK_PUBLIC_URL`, point wildcard DNS at the public gateway, and terminate TLS in front of the public listener. Keep the control-plane API private or protected by an additional access boundary.
 
 ## Smoke Test
 
