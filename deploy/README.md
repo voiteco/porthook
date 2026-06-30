@@ -12,7 +12,7 @@ This directory will contain self-hosting assets:
 
 The first supported deployment path should be Docker Compose.
 
-The Docker Compose gateway-only and control-plane stacks are documented in [compose/README.md](./compose/README.md).
+The Docker Compose gateway-only, control-plane, and production stacks are documented in [compose/README.md](./compose/README.md).
 
 Reverse proxy examples for internet-facing gateway traffic live in [reverse-proxy/README.md](./reverse-proxy/README.md).
 
@@ -42,6 +42,8 @@ make smoke-control-plane
 
 The compose control-plane stack lives in [compose/docker-compose.control-plane.yml](./compose/docker-compose.control-plane.yml). Copy [compose/.env.control-plane.example](./compose/.env.control-plane.example), replace the placeholder values, and start it with Docker Compose.
 
+For reverse-proxy-backed deployments, use [compose/docker-compose.production.yml](./compose/docker-compose.production.yml) with [compose/.env.production.example](./compose/.env.production.example). That stack exposes only the reverse proxy on the host and keeps the gateway, control plane, and Postgres on the Compose network.
+
 Operators still need to configure wildcard DNS and TLS in front of the public gateway listener for real internet traffic. Start with the Caddy or Traefik examples in [reverse-proxy/](./reverse-proxy/).
 
 ## Production Checklist
@@ -63,6 +65,6 @@ Before using the Compose control-plane stack beyond local testing:
 - Review reserved subdomains with `porthook reserved list` and delete unused names with `porthook reserved delete`.
 - Run `make smoke-control-plane` after configuration changes that affect token validation or tunnel routing.
 
-Compose is still the first supported deployment path for this pre-1.0 repository. More complete reverse proxy, TLS, and wildcard DNS examples should be added before recommending internet-facing production use.
+Compose is still the first supported deployment path for this pre-1.0 repository. Review the reverse proxy, TLS, wildcard DNS, and access-boundary notes before using it for internet-facing traffic.
 
 Upgrade notes live in [../docs/UPGRADING.md](../docs/UPGRADING.md).

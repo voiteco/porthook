@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: porthook
+      POSTGRES_USER: porthook
+      POSTGRES_PASSWORD: ${PORTHOOK_POSTGRES_PASSWORD:?set PORTHOOK_POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U porthook -d porthook"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  porthook-control-plane:
+    build:
+      context: ../..
+      dockerfile: server/control-plane/Dockerfile
+    image: ${PORTHOOK_CONTROL_PLANE_IMAGE:-porthook-control-plane:dev}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORTHOOK_CONTROL_ADDR: ":8082"
+      PORTHOOK_CONTROL_ADMIN_TOKEN: ${PORTHOOK_CONTROL_ADMIN_TOKEN:?set PORTHOOK_CONTROL_ADMIN_TOKEN}
+      PORTHOOK_CONTROL_VALIDATOR_TOKEN: ${PORTHOOK_CONTROL_VALIDATOR_TOKEN:?set PORTHOOK_CONTROL_VALIDATOR_TOKEN}
+      PORTHOOK_DATABASE_URL: postgres://porthook:${PORTHOOK_POSTGRES_PASSWORD:?set PORTHOOK_POSTGRES_PASSWORD}@postgres:5432/porthook?sslmode=disable
+    expose:
+      - "8082"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  porthook-gateway:
+    build:
+      context: ../..
+      dockerfile: server/gateway/Dockerfile
+    image: ${PORTHOOK_GATEWAY_IMAGE:-porthook-gateway:dev}
+    restart: unless-stopped
+    depends_on:
+      porthook-control-plane:
+        condition: service_started
+    environment:
+      PORTHOOK_ADDR: ":8080"
+      PORTHOOK_AGENT_ADDR: ":8081"
+      PORTHOOK_ROOT_DOMAIN: ${PORTHOOK_ROOT_DOMAIN:?set PORTHOOK_ROOT_DOMAIN}
+      PORTHOOK_PUBLIC_URL: ${PORTHOOK_PUBLIC_URL:?set PORTHOOK_PUBLIC_URL}
+      PORTHOOK_STATIC_TOKEN: unused-static-token
+      PORTHOOK_CONTROL_PLANE_URL: http://porthook-control-plane:8082
+      PORTHOOK_CONTROL_PLANE_TOKEN: ${PORTHOOK_CONTROL_VALIDATOR_TOKEN:?set PORTHOOK_CONTROL_VALIDATOR_TOKEN}
+      PORTHOOK_RATE_LIMIT_RPS: ${PORTHOOK_RATE_LIMIT_RPS:-60}
+      PORTHOOK_RATE_LIMIT_BURST: ${PORTHOOK_RATE_LIMIT_BURST:-120}
+    expose:
+      - "8080"
+      - "8081"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  reverse-proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      porthook-gateway:
+        condition: service_started
+      porthook-control-plane:
+        condition: service_started
+    environment:
+      PORTHOOK_ROOT_DOMAIN: ${PORTHOOK_ROOT_DOMAIN:?set PORTHOOK_ROOT_DOMAIN}
+      PORTHOOK_AGENT_DOMAIN: ${PORTHOOK_AGENT_DOMAIN:?set PORTHOOK_AGENT_DOMAIN}
+      PORTHOOK_CONTROL_DOMAIN: ${PORTHOOK_CONTROL_DOMAIN:?set PORTHOOK_CONTROL_DOMAIN}
+      PORTHOOK_TLS_CERT_FILE: /certs/fullchain.pem
+      PORTHOOK_TLS_KEY_FILE: /certs/privkey.pem
+    ports:
+      - "${PORTHOOK_HTTP_PORT:-80}:80"
+      - "${PORTHOOK_HTTPS_PORT:-443}:443"
+    volumes:
+      - ../reverse-proxy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${PORTHOOK_TLS_CERT_PATH:?set PORTHOOK_TLS_CERT_PATH}:/certs/fullchain.pem:ro
+      - ${PORTHOOK_TLS_KEY_PATH:?set PORTHOOK_TLS_KEY_PATH}:/certs/privkey.pem:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caddy-config:
+  caddy-data:
+  postgres-data:

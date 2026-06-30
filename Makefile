@@ -27,6 +27,7 @@ docker-build: docker-build-gateway docker-build-control-plane
 compose-config:
 	docker compose -f deploy/compose/docker-compose.yml config
 	docker compose --env-file deploy/compose/.env.control-plane.example -f deploy/compose/docker-compose.control-plane.yml config
+	docker compose --env-file deploy/compose/.env.production.example -f deploy/compose/docker-compose.production.yml config
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -path './.git/*')
