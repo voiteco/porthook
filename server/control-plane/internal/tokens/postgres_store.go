@@ -58,6 +58,27 @@ func (s *PostgresStore) LookupByHash(ctx context.Context, tokenHash string) (Tok
 	return s.lookup(ctx, `SELECT id, name, token_hash, scopes_json, created_at, revoked_at FROM api_tokens WHERE token_hash = $1`, tokenHash)
 }
 
+func (s *PostgresStore) List(ctx context.Context) ([]TokenRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, token_hash, scopes_json, created_at, revoked_at FROM api_tokens ORDER BY created_at DESC, id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list tokens: %w", err)
+	}
+	defer rows.Close()
+
+	var records []TokenRecord
+	for rows.Next() {
+		record, err := scanTokenRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tokens: %w", err)
+	}
+	return records, nil
+}
+
 func (s *PostgresStore) LookupByID(ctx context.Context, id string) (TokenRecord, bool, error) {
 	return s.lookup(ctx, `SELECT id, name, token_hash, scopes_json, created_at, revoked_at FROM api_tokens WHERE id = $1`, id)
 }
@@ -71,10 +92,25 @@ func (s *PostgresStore) Revoke(ctx context.Context, id string, revokedAt time.Ti
 }
 
 func (s *PostgresStore) lookup(ctx context.Context, query, value string) (TokenRecord, bool, error) {
+	record, err := scanTokenRecord(s.db.QueryRowContext(ctx, query, value))
+	if errors.Is(err, sql.ErrNoRows) {
+		return TokenRecord{}, false, nil
+	}
+	if err != nil {
+		return TokenRecord{}, false, fmt.Errorf("lookup token: %w", err)
+	}
+	return record, true, nil
+}
+
+type tokenRecordScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanTokenRecord(scanner tokenRecordScanner) (TokenRecord, error) {
 	var record TokenRecord
 	var scopesJSON string
 	var revokedAt sql.NullTime
-	err := s.db.QueryRowContext(ctx, query, value).Scan(
+	err := scanner.Scan(
 		&record.ID,
 		&record.Name,
 		&record.TokenHash,
@@ -82,20 +118,17 @@ func (s *PostgresStore) lookup(ctx context.Context, query, value string) (TokenR
 		&record.CreatedAt,
 		&revokedAt,
 	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return TokenRecord{}, false, nil
-	}
 	if err != nil {
-		return TokenRecord{}, false, fmt.Errorf("lookup token: %w", err)
+		return TokenRecord{}, err
 	}
 	record.Scopes, err = decodeScopes(scopesJSON)
 	if err != nil {
-		return TokenRecord{}, false, err
+		return TokenRecord{}, err
 	}
 	if revokedAt.Valid {
 		record.RevokedAt = &revokedAt.Time
 	}
-	return record, true, nil
+	return record, nil
 }
 
 func encodeScopes(scopes []string) (string, error) {

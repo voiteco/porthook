@@ -402,6 +402,9 @@ porthook http <port>
 porthook http <port> --server <url>
 porthook http <port> --token <token>
 porthook http <port> --subdomain <name>
+porthook tokens create --control-plane <url> --name <name>
+porthook tokens list --control-plane <url>
+porthook tokens revoke --control-plane <url> <token-id>
 porthook version
 ```
 

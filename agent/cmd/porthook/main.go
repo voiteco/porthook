@@ -72,6 +72,8 @@ func runWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Write
 	case "version", "--version", "-version":
 		fmt.Fprintln(stdout, version)
 		return nil
+	case "tokens":
+		return runTokensCommand(args[1:], stdin, stdout, stderr)
 	default:
 		return usageError()
 	}
@@ -148,7 +150,16 @@ func parseLoginConfig(args []string, stdin io.Reader, stderr io.Writer) (agent.C
 	if serverURL == "" {
 		return agent.ConfigFile{}, fmt.Errorf("server URL is required")
 	}
-	token, err := readLoginToken(token, tokenStdin, stdin, stderr)
+	token, err := readTokenInput(tokenInputConfig{
+		token:         token,
+		tokenStdin:    tokenStdin,
+		stdin:         stdin,
+		stderr:        stderr,
+		prompt:        "Token: ",
+		name:          "token",
+		flagName:      "--token",
+		stdinFlagName: "--token-stdin",
+	})
 	if err != nil {
 		return agent.ConfigFile{}, err
 	}
@@ -158,41 +169,52 @@ func parseLoginConfig(args []string, stdin io.Reader, stderr io.Writer) (agent.C
 	}, nil
 }
 
-func readLoginToken(token string, tokenStdin bool, stdin io.Reader, stderr io.Writer) (string, error) {
-	token = strings.TrimSpace(token)
-	if token != "" && tokenStdin {
-		return "", fmt.Errorf("--token and --token-stdin are mutually exclusive")
+type tokenInputConfig struct {
+	token         string
+	tokenStdin    bool
+	stdin         io.Reader
+	stderr        io.Writer
+	prompt        string
+	name          string
+	flagName      string
+	stdinFlagName string
+}
+
+func readTokenInput(cfg tokenInputConfig) (string, error) {
+	token := strings.TrimSpace(cfg.token)
+	if token != "" && cfg.tokenStdin {
+		return "", fmt.Errorf("%s and %s are mutually exclusive", cfg.flagName, cfg.stdinFlagName)
 	}
 	if token != "" {
 		return token, nil
 	}
-	if tokenStdin {
-		data, err := io.ReadAll(stdin)
+	if cfg.tokenStdin {
+		data, err := io.ReadAll(cfg.stdin)
 		if err != nil {
-			return "", fmt.Errorf("read token from stdin: %w", err)
+			return "", fmt.Errorf("read %s from stdin: %w", cfg.name, err)
 		}
 		token = strings.TrimSpace(string(data))
 		if token == "" {
-			return "", fmt.Errorf("token from stdin is empty")
+			return "", fmt.Errorf("%s from stdin is empty", cfg.name)
 		}
 		return token, nil
 	}
-	if file, ok := stdin.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-		fmt.Fprint(stderr, "Token: ")
+	if file, ok := cfg.stdin.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+		fmt.Fprint(cfg.stderr, cfg.prompt)
 		data, err := term.ReadPassword(int(file.Fd()))
-		fmt.Fprintln(stderr)
+		fmt.Fprintln(cfg.stderr)
 		if err != nil {
-			return "", fmt.Errorf("read token from terminal: %w", err)
+			return "", fmt.Errorf("read %s from terminal: %w", cfg.name, err)
 		}
 		token = strings.TrimSpace(string(data))
 		if token == "" {
-			return "", fmt.Errorf("token is required")
+			return "", fmt.Errorf("%s is required", cfg.name)
 		}
 		return token, nil
 	}
-	return "", fmt.Errorf("token is required; pass --token or pipe it with --token-stdin")
+	return "", fmt.Errorf("%s is required; pass %s or pipe it with %s", cfg.name, cfg.flagName, cfg.stdinFlagName)
 }
 
 func usageError() error {
-	return fmt.Errorf("usage: porthook login --server URL [--token TOKEN | --token-stdin]\n       porthook logout\n       porthook http <port> [--server URL] [--token TOKEN] [--subdomain NAME]\n       porthook version")
+	return fmt.Errorf("usage: porthook login --server URL [--token TOKEN | --token-stdin]\n       porthook logout\n       porthook http <port> [--server URL] [--token TOKEN] [--subdomain NAME]\n       porthook tokens <create|list|revoke> [options]\n       porthook version")
 }

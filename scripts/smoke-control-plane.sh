@@ -192,12 +192,26 @@ if [[ "${unauthorized_status}" != "401" ]]; then
 	exit 1
 fi
 
-created_token_json="$(curl -fsS \
-	-X POST "http://127.0.0.1:${CONTROL_PORT}/api/v1/tokens" \
-	-H "Authorization: Bearer ${ADMIN_TOKEN}" \
-	-H "Content-Type: application/json" \
-	-d '{"name":"smoke agent","scopes":["register_tunnel"]}')"
+created_token_json="$(printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" tokens create \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--name "smoke agent" \
+	--scope "register_tunnel" \
+	--json)"
+AGENT_TOKEN_ID="$(printf '%s' "${created_token_json}" | extract_json_field id)"
 AGENT_TOKEN="$(printf '%s' "${created_token_json}" | extract_json_field token)"
+
+printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" tokens list \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--json \
+	>"${LOG_DIR}/tokens-list.json" 2>"${LOG_DIR}/tokens-list.err"
+if ! grep -q "${AGENT_TOKEN_ID}" "${LOG_DIR}/tokens-list.json"; then
+	echo "Created token was not listed: ${AGENT_TOKEN_ID}" >&2
+	exit 1
+fi
 
 PORTHOOK_ADDR="127.0.0.1:${PUBLIC_PORT}" \
 PORTHOOK_AGENT_ADDR="127.0.0.1:${AGENT_PORT}" \
@@ -254,5 +268,12 @@ if ! cmp -s "${UPLOAD_FILE}" "${UPLOAD_RESPONSE_FILE}"; then
 fi
 
 wait_for_log "${LOG_DIR}/agent.log" "POST /echo -> 200" "agent upload request log"
+
+printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" tokens revoke \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	"${AGENT_TOKEN_ID}" \
+	>"${LOG_DIR}/tokens-revoke.log" 2>"${LOG_DIR}/tokens-revoke.err"
 
 echo "Control-plane smoke test passed: http://${SUBDOMAIN}.localhost:${PUBLIC_PORT}/smoke.txt"

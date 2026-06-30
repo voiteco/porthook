@@ -81,12 +81,21 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 	if !s.authorized(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method == http.MethodGet {
+		listed, err := s.service.ListTokens(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, listed)
 		return
 	}
 

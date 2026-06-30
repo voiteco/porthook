@@ -25,7 +25,7 @@ Minimal production shape:
 
 1. Run Postgres.
 2. Run `porthook-control-plane` with `PORTHOOK_DATABASE_URL`, `PORTHOOK_CONTROL_ADMIN_TOKEN`, and `PORTHOOK_CONTROL_VALIDATOR_TOKEN`.
-3. Create an agent token through `POST /api/v1/tokens`.
+3. Create an agent token with `printf '%s' '<admin-token>' | porthook tokens create --control-plane <control-plane-url> --admin-token-stdin --name '<agent-name>'`.
 4. Run `porthook-gateway` with `PORTHOOK_CONTROL_PLANE_URL` pointing at the control plane and `PORTHOOK_CONTROL_PLANE_TOKEN` matching the control-plane validator token.
 5. Save the local agent login with `printf '%s' '<created-token>' | porthook login --server <gateway-agent-url> --token-stdin`.
 

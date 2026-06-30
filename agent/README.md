@@ -27,6 +27,14 @@ The initial implementation is written in Go and uses a WebSocket connection to t
 
 For scripts and shell history safety, prefer `porthook login --token-stdin`. The `--token` flag remains available for local development and one-off runs. If no token flag is provided in an interactive terminal, `porthook login` prompts for the token without echoing it.
 
+The CLI also includes self-hosted control-plane token helpers:
+
+```sh
+printf '%s' "$PORTHOOK_CONTROL_ADMIN_TOKEN" | porthook tokens create --control-plane http://localhost:8082 --admin-token-stdin --name "local agent"
+printf '%s' "$PORTHOOK_CONTROL_ADMIN_TOKEN" | porthook tokens list --control-plane http://localhost:8082 --admin-token-stdin
+printf '%s' "$PORTHOOK_CONTROL_ADMIN_TOKEN" | porthook tokens revoke --control-plane http://localhost:8082 --admin-token-stdin tok_...
+```
+
 ## Runtime Configuration
 
 CLI flags take precedence for the command they configure. Environment variables provide defaults for local development and scripted runs.
@@ -36,6 +44,8 @@ CLI flags take precedence for the command they configure. Environment variables 
 | `PORTHOOK_SERVER_URL` | `http://localhost:8081` | Gateway agent listener URL. |
 | `PORTHOOK_TOKEN` | `dev-token` | Static agent authentication token. |
 | `PORTHOOK_CONFIG_PATH` | OS config dir | Optional path for the JSON login config file. |
+| `PORTHOOK_CONTROL_PLANE_URL` | empty | Default control-plane API URL for `porthook tokens` commands. |
+| `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Default admin token for `porthook tokens` commands. Prefer `--admin-token-stdin` for shell history safety. |
 | `PORTHOOK_HANDSHAKE_TIMEOUT` | `10s` | WebSocket dial, authentication, and tunnel registration timeout. |
 | `PORTHOOK_REQUEST_TIMEOUT` | `30s` | Local service request timeout. |
 | `PORTHOOK_MAX_RESPONSE_BODY_BYTES` | `1048576` | Maximum local response body sent through the tunnel. |

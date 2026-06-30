@@ -483,6 +483,7 @@ For the very first self-hosted MVP, this may start with static tokens in configu
 Initial control-plane endpoints:
 
 ```text
+GET  /api/v1/tokens
 POST /api/v1/tokens
 POST /api/v1/tokens/validate
 DELETE /api/v1/tokens/{id}
@@ -513,6 +514,9 @@ porthook logout
 porthook http <port>
 porthook http <port> --subdomain <name>
 porthook http <port> --server <url>
+porthook tokens create --control-plane <url> --name <name>
+porthook tokens list --control-plane <url>
+porthook tokens revoke --control-plane <url> <token-id>
 porthook tunnels
 porthook version
 ```
@@ -523,6 +527,10 @@ Useful flags:
 --server
 --token
 --subdomain
+--control-plane
+--admin-token
+--admin-token-stdin
+--json
 --host-header
 --basic-auth
 --log-format
