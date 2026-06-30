@@ -58,7 +58,34 @@ jobs:
       - name: Build Docker images
         run: make docker-build VERSION="$VERSION"
 
+      - name: Extract release notes
+        run: |
+          awk -v version="${VERSION#v}" '
+            BEGIN {
+              found = 0
+              target = "## [" version "]"
+            }
+            /^## \[/ {
+              if (found) {
+                exit 0
+              }
+              if (index($0, target) == 1) {
+                found = 1
+                next
+              }
+            }
+            found {
+              print
+            }
+            END {
+              if (!found) {
+                exit 1
+              }
+            }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$VERSION" dist/* --title "$VERSION" --generate-notes --prerelease
+        run: gh release create "$VERSION" dist/* --title "$VERSION" --notes-file release-notes.md

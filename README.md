@@ -4,7 +4,7 @@ Porthook is an open-source reverse tunnel service for exposing local development
 
 This repository is the public self-hosted product. Private commercial, hosted-cloud, pricing, and operating plans should live in separate private repositories.
 
-Project status: pre-alpha. The local HTTP tunnel path, self-hosted control-plane token management, gateway token validation, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs and operational defaults can still change before 1.0.
+Project status: pre-1.0. The local HTTP tunnel path, self-hosted control-plane token management, gateway token validation, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs and operational defaults can still change before 1.0.
 
 ## What It Does
 
@@ -203,6 +203,6 @@ The implementation-focused technical specification lives in [docs/TECHNICAL_SPEC
 
 The first Go MVP smoke test lives in [docs/MVP_SMOKE_TEST.md](./docs/MVP_SMOKE_TEST.md).
 
-The pre-alpha release process lives in [docs/RELEASE.md](./docs/RELEASE.md).
+The release process lives in [docs/RELEASE.md](./docs/RELEASE.md).
 
 Release notes are maintained in [CHANGELOG.md](./CHANGELOG.md).
