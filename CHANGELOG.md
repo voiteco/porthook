@@ -10,6 +10,10 @@ All notable changes to Porthook are documented here.
 - Added `porthook login --token-stdin` and hidden interactive token prompts for safer login input.
 - Added `porthook tokens create`, `porthook tokens list`, and `porthook tokens revoke` for self-hosted control-plane token management.
 - Added `GET /api/v1/tokens` for admin token listing without plaintext token exposure.
+- Added control-plane token admin operation logs without plaintext token values.
+
+### Changed
+- Hardened control-plane token APIs with strict JSON decoding, request body limits, method `Allow` headers, and explicit unknown-scope errors.
 
 ## [0.3.0] - 2026-06-29
 

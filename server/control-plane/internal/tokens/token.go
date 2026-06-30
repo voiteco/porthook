@@ -19,8 +19,8 @@ type TokenRecord struct {
 }
 
 type CreateTokenRequest struct {
-	Name   string
-	Scopes []string
+	Name   string   `json:"name"`
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 type CreatedToken struct {
