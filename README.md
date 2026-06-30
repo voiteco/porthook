@@ -220,6 +220,8 @@ The gateway public listener and control plane both expose `GET /healthz`, `GET /
 
 For internet-facing self-hosted deployments, see [docs/DOMAINS_TLS.md](./docs/DOMAINS_TLS.md) for wildcard DNS, custom root domain, and TLS guidance. See [docs/ACCESS_BOUNDARY.md](./docs/ACCESS_BOUNDARY.md) before exposing the control-plane API or dashboard.
 
+Operational runbooks for deployment, backups, token rotation, upgrades, rollback, and incident response live in [docs/OPERATIONS.md](./docs/OPERATIONS.md).
+
 ## Specification
 
 The public product specification lives in [docs/SPEC.md](./docs/SPEC.md).

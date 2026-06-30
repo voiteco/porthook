@@ -14,7 +14,7 @@ The first supported deployment path should be Docker Compose.
 
 The Docker Compose gateway-only, control-plane, and production stacks are documented in [compose/README.md](./compose/README.md).
 
-Reverse proxy examples for internet-facing gateway traffic live in [reverse-proxy/README.md](./reverse-proxy/README.md). Domain, wildcard DNS, and TLS guidance lives in [../docs/DOMAINS_TLS.md](../docs/DOMAINS_TLS.md). Control-plane and dashboard access-boundary guidance lives in [../docs/ACCESS_BOUNDARY.md](../docs/ACCESS_BOUNDARY.md).
+Reverse proxy examples for internet-facing gateway traffic live in [reverse-proxy/README.md](./reverse-proxy/README.md). Domain, wildcard DNS, and TLS guidance lives in [../docs/DOMAINS_TLS.md](../docs/DOMAINS_TLS.md). Control-plane and dashboard access-boundary guidance lives in [../docs/ACCESS_BOUNDARY.md](../docs/ACCESS_BOUNDARY.md). Operational runbooks live in [../docs/OPERATIONS.md](../docs/OPERATIONS.md).
 
 ## Self-Hosted Token Flow
 
@@ -65,6 +65,7 @@ Before using the Compose control-plane stack beyond local testing:
 - Revoke unused agent tokens with `porthook tokens revoke`.
 - Review reserved subdomains with `porthook reserved list` and delete unused names with `porthook reserved delete`.
 - Run `make smoke-control-plane` after configuration changes that affect token validation or tunnel routing.
+- Review [../docs/OPERATIONS.md](../docs/OPERATIONS.md) before upgrades, restores, and token rotation.
 
 Compose is still the first supported deployment path for this pre-1.0 repository. Review the reverse proxy, TLS, wildcard DNS, and access-boundary notes before using it for internet-facing traffic.
 
