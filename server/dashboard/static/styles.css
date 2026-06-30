@@ -197,6 +197,14 @@ h3 {
   grid-template-columns: minmax(260px, 1fr) auto;
 }
 
+.access-form {
+  grid-template-columns: minmax(210px, 1fr) minmax(150px, 0.5fr) minmax(170px, 0.7fr) minmax(190px, 0.8fr) minmax(170px, 0.7fr) auto auto;
+}
+
+.policy-field[hidden] {
+  display: none;
+}
+
 .subsection {
   border-top: 1px solid var(--line);
   margin-top: 26px;
@@ -305,6 +313,12 @@ tr.revoked {
   text-align: right;
 }
 
+.button-cell {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .badge,
 .status-pill,
 .version-pill {
@@ -375,5 +389,9 @@ tr.revoked {
   .login-panel,
   .create-form {
     grid-template-columns: 1fr;
+  }
+
+  .button-cell {
+    justify-content: flex-start;
   }
 }
