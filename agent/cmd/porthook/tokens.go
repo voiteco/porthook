@@ -20,6 +20,11 @@ import (
 
 const defaultTokenAdminTimeout = 10 * time.Second
 
+const tokensUsageText = `usage: porthook tokens create --control-plane URL --name NAME [--scope SCOPE] [--admin-token TOKEN | --admin-token-stdin] [--json]
+       porthook tokens list --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--json]
+       porthook tokens revoke --control-plane URL [--admin-token TOKEN | --admin-token-stdin] TOKEN_ID [--json]
+       porthook tokens help`
+
 type tokenAdminConfig struct {
 	controlPlaneURL  string
 	adminToken       string
@@ -61,11 +66,26 @@ func runTokensCommand(args []string, stdin io.Reader, stdout io.Writer, stderr i
 
 	switch args[0] {
 	case "create":
+		if wantsHelp(args[1:]) {
+			printTokenCreateHelp(stdout)
+			return nil
+		}
 		return runTokensCreate(args[1:], stdin, stdout, stderr)
 	case "list":
+		if wantsHelp(args[1:]) {
+			printTokenListHelp(stdout)
+			return nil
+		}
 		return runTokensList(args[1:], stdin, stdout, stderr)
 	case "revoke":
+		if wantsHelp(args[1:]) {
+			printTokenRevokeHelp(stdout)
+			return nil
+		}
 		return runTokensRevoke(args[1:], stdin, stdout, stderr)
+	case "help", "--help", "-h":
+		printTokensUsage(stdout)
+		return nil
 	default:
 		return tokensUsageError()
 	}
@@ -337,7 +357,7 @@ func (c tokenAdminClient) do(ctx context.Context, method, path string, payload a
 		if message == "" {
 			message = http.StatusText(resp.StatusCode)
 		}
-		return fmt.Errorf("control plane returned %d: %s", resp.StatusCode, message)
+		return controlPlaneStatusError(resp.StatusCode, message)
 	}
 	if out == nil {
 		return nil
@@ -388,5 +408,70 @@ func printTokenList(w io.Writer, tokens []tokenSummary) {
 }
 
 func tokensUsageError() error {
-	return fmt.Errorf("usage: porthook tokens create --control-plane URL --name NAME [--scope SCOPE] [--admin-token TOKEN | --admin-token-stdin]\n       porthook tokens list --control-plane URL [--admin-token TOKEN | --admin-token-stdin]\n       porthook tokens revoke --control-plane URL [--admin-token TOKEN | --admin-token-stdin] TOKEN_ID")
+	return fmt.Errorf("%s", tokensUsageText)
+}
+
+func wantsHelp(args []string) bool {
+	return len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h")
+}
+
+func printTokensUsage(w io.Writer) {
+	fmt.Fprintln(w, tokensUsageText)
+}
+
+func printTokenCreateHelp(w io.Writer) {
+	fmt.Fprintln(w, `usage: porthook tokens create --control-plane URL --name NAME [--scope SCOPE] [--admin-token TOKEN | --admin-token-stdin] [--json]
+
+Create an agent token. If no --scope is set, the control plane defaults to register_tunnel.
+
+Options:
+  --control-plane URL       Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.
+  --name NAME               Token display name.
+  --scope SCOPE             Token scope; may be repeated. Supported: register_tunnel.
+  --admin-token TOKEN       Control-plane admin token. Prefer --admin-token-stdin outside local development.
+  --admin-token-stdin       Read the control-plane admin token from stdin.
+  --json                    Write JSON output.`)
+}
+
+func printTokenListHelp(w io.Writer) {
+	fmt.Fprintln(w, `usage: porthook tokens list --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--json]
+
+List control-plane token summaries without plaintext token values.
+
+Options:
+  --control-plane URL       Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.
+  --admin-token TOKEN       Control-plane admin token. Prefer --admin-token-stdin outside local development.
+  --admin-token-stdin       Read the control-plane admin token from stdin.
+  --json                    Write JSON output.`)
+}
+
+func printTokenRevokeHelp(w io.Writer) {
+	fmt.Fprintln(w, `usage: porthook tokens revoke --control-plane URL [--admin-token TOKEN | --admin-token-stdin] TOKEN_ID [--json]
+
+Revoke a control-plane token by ID.
+
+Options:
+  --control-plane URL       Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.
+  --admin-token TOKEN       Control-plane admin token. Prefer --admin-token-stdin outside local development.
+  --admin-token-stdin       Read the control-plane admin token from stdin.
+  --json                    Write JSON output.`)
+}
+
+func controlPlaneStatusError(status int, message string) error {
+	message = strings.TrimSpace(message)
+	switch status {
+	case http.StatusBadRequest:
+		if message == "" {
+			message = "bad request"
+		}
+		return fmt.Errorf("control plane rejected request: %s", message)
+	case http.StatusUnauthorized:
+		return fmt.Errorf("control plane rejected admin token (401 Unauthorized); check --admin-token or --admin-token-stdin")
+	case http.StatusForbidden:
+		return fmt.Errorf("control plane rejected admin token (403 Forbidden); check --admin-token or --admin-token-stdin")
+	case http.StatusNotFound:
+		return fmt.Errorf("control-plane endpoint not found (404); check --control-plane URL")
+	default:
+		return fmt.Errorf("control plane returned %d: %s", status, message)
+	}
 }

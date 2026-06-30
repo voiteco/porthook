@@ -31,6 +31,20 @@ func TestParseHTTPConfigAcceptsValidSubdomain(t *testing.T) {
 	}
 }
 
+func TestRunHelpPrintsUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := runWithIO([]string{"help"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("run help returned error: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{"porthook login", "porthook tokens", "porthook help"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
 func TestRunLoginWritesConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("PORTHOOK_CONFIG_PATH", path)
