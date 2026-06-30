@@ -145,6 +145,31 @@ func (s *Service) ListTokens(ctx context.Context) (ListTokensResponse, error) {
 	return ListTokensResponse{Tokens: out}, nil
 }
 
+func (s *Service) GetToken(ctx context.Context, id string) (TokenSummary, bool, error) {
+	if s == nil || s.store == nil {
+		return TokenSummary{}, false, errors.New("token store is required")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return TokenSummary{}, false, nil
+	}
+	record, ok, err := s.store.LookupByID(ctx, id)
+	if err != nil {
+		return TokenSummary{}, false, err
+	}
+	if !ok {
+		return TokenSummary{}, false, nil
+	}
+	return TokenSummary{
+		ID:         record.ID,
+		Name:       record.Name,
+		Scopes:     cloneScopes(record.Scopes),
+		CreatedAt:  record.CreatedAt,
+		LastUsedAt: cloneTimePtr(record.LastUsedAt),
+		RevokedAt:  cloneTimePtr(record.RevokedAt),
+	}, true, nil
+}
+
 func (s *Service) RevokeToken(ctx context.Context, id string) error {
 	if s == nil || s.store == nil {
 		return errors.New("token store is required")

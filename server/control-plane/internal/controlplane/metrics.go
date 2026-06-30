@@ -9,15 +9,21 @@ import (
 )
 
 type metrics struct {
-	tokenAdminCreatesTotal      atomic.Uint64
-	tokenAdminListsTotal        atomic.Uint64
-	tokenAdminRevokesTotal      atomic.Uint64
-	tokenValidationsTotal       atomic.Uint64
-	tokenValidationValidTotal   atomic.Uint64
-	tokenValidationInvalidTotal atomic.Uint64
-	tokenValidationErrorsTotal  atomic.Uint64
-	authFailuresTotal           atomic.Uint64
-	readinessFailuresTotal      atomic.Uint64
+	tokenAdminCreatesTotal               atomic.Uint64
+	tokenAdminListsTotal                 atomic.Uint64
+	tokenAdminRevokesTotal               atomic.Uint64
+	tokenValidationsTotal                atomic.Uint64
+	tokenValidationValidTotal            atomic.Uint64
+	tokenValidationInvalidTotal          atomic.Uint64
+	tokenValidationErrorsTotal           atomic.Uint64
+	reservationAdminCreatesTotal         atomic.Uint64
+	reservationAdminListsTotal           atomic.Uint64
+	reservationAdminDeletesTotal         atomic.Uint64
+	reservationAuthorizationsTotal       atomic.Uint64
+	reservationAuthorizationAllowedTotal atomic.Uint64
+	reservationAuthorizationDeniedTotal  atomic.Uint64
+	authFailuresTotal                    atomic.Uint64
+	readinessFailuresTotal               atomic.Uint64
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +40,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetric(w, "porthook_control_plane_token_validation_valid_total", "Token validation requests that returned valid=true.", "counter", s.metrics.tokenValidationValidTotal.Load())
 	writeMetric(w, "porthook_control_plane_token_validation_invalid_total", "Token validation requests that returned valid=false.", "counter", s.metrics.tokenValidationInvalidTotal.Load())
 	writeMetric(w, "porthook_control_plane_token_validation_errors_total", "Token validation requests that failed before producing a result.", "counter", s.metrics.tokenValidationErrorsTotal.Load())
+	writeMetric(w, "porthook_control_plane_reservation_admin_creates_total", "Successful reserved subdomain create operations.", "counter", s.metrics.reservationAdminCreatesTotal.Load())
+	writeMetric(w, "porthook_control_plane_reservation_admin_lists_total", "Successful reserved subdomain list operations.", "counter", s.metrics.reservationAdminListsTotal.Load())
+	writeMetric(w, "porthook_control_plane_reservation_admin_deletes_total", "Successful reserved subdomain delete operations.", "counter", s.metrics.reservationAdminDeletesTotal.Load())
+	writeMetric(w, "porthook_control_plane_reservation_authorizations_total", "Reserved subdomain authorization requests handled by the control plane.", "counter", s.metrics.reservationAuthorizationsTotal.Load())
+	writeMetric(w, "porthook_control_plane_reservation_authorization_allowed_total", "Reserved subdomain authorization requests that returned allowed=true.", "counter", s.metrics.reservationAuthorizationAllowedTotal.Load())
+	writeMetric(w, "porthook_control_plane_reservation_authorization_denied_total", "Reserved subdomain authorization requests that returned allowed=false.", "counter", s.metrics.reservationAuthorizationDeniedTotal.Load())
 	writeMetric(w, "porthook_control_plane_auth_failures_total", "Bearer authorization failures on control-plane endpoints.", "counter", s.metrics.authFailuresTotal.Load())
 	writeMetric(w, "porthook_control_plane_readiness_failures_total", "Readiness checks that failed.", "counter", s.metrics.readinessFailuresTotal.Load())
 }
