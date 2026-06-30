@@ -15,20 +15,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 	"github.com/voiteco/porthook/server/dashboard"
 )
 
 type Server struct {
-	cfg     Config
-	service *tokens.Service
-	logger  *slog.Logger
-	metrics metrics
+	cfg          Config
+	service      *tokens.Service
+	reservations *reserved.Service
+	logger       *slog.Logger
+	metrics      metrics
 }
 
 type validateTokenRequest struct {
 	Token string `json:"token"`
 	Scope string `json:"scope,omitempty"`
+}
+
+type authorizeReservedSubdomainRequest struct {
+	TokenID   string `json:"token_id"`
+	Subdomain string `json:"subdomain"`
 }
 
 type statusResponse struct {
@@ -42,17 +49,25 @@ const maxJSONBodyBytes = 1 << 20
 
 const readinessTimeout = 2 * time.Second
 
-func NewServer(cfg Config, service *tokens.Service) *Server {
+func NewServer(cfg Config, service *tokens.Service, reservationServices ...*reserved.Service) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
 	}
 	if cfg.Version == "" {
 		cfg.Version = "dev"
 	}
+	if service == nil {
+		service = tokens.NewService(tokens.NewMemoryStore())
+	}
+	reservationService := reserved.NewService(reserved.NewMemoryStore())
+	if len(reservationServices) > 0 && reservationServices[0] != nil {
+		reservationService = reservationServices[0]
+	}
 	return &Server{
-		cfg:     cfg,
-		service: service,
-		logger:  slog.Default(),
+		cfg:          cfg,
+		service:      service,
+		reservations: reservationService,
+		logger:       slog.Default(),
 	}
 }
 
@@ -96,6 +111,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/tokens", s.handleTokens)
 	mux.HandleFunc("/api/v1/tokens/", s.handleTokenByID)
 	mux.HandleFunc("/api/v1/tokens/validate", s.handleValidateToken)
+	mux.HandleFunc("/api/v1/reserved-subdomains", s.handleReservedSubdomains)
+	mux.HandleFunc("/api/v1/reserved-subdomains/", s.handleReservedSubdomainByID)
+	mux.HandleFunc("/api/v1/reserved-subdomains/authorize", s.handleAuthorizeReservedSubdomain)
 	return mux
 }
 
@@ -106,7 +124,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
 	defer cancel()
-	if err := s.service.Ready(ctx); err != nil {
+	if err := s.ready(ctx); err != nil {
 		s.metrics.readinessFailuresTotal.Add(1)
 		http.Error(w, "not ready: "+err.Error(), http.StatusServiceUnavailable)
 		return
@@ -127,7 +145,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Ready:   true,
 		Version: s.cfg.Version,
 	}
-	if err := s.service.Ready(ctx); err != nil {
+	if err := s.ready(ctx); err != nil {
 		resp.Status = "not_ready"
 		resp.Ready = false
 		resp.Error = err.Error()
@@ -217,6 +235,131 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleReservedSubdomains(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/v1/reserved-subdomains" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		methodNotAllowed(w, "GET, POST")
+		return
+	}
+	if !s.authorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method == http.MethodGet {
+		listed, err := s.reservations.ListReservations(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.metrics.reservationAdminListsTotal.Add(1)
+		s.logger.Info("control-plane reserved subdomains listed", "count", len(listed.ReservedSubdomains))
+		writeJSON(w, http.StatusOK, listed)
+		return
+	}
+
+	var req reserved.CreateReservationRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	token, ok, err := s.service.GetToken(r.Context(), req.TokenID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "token_id was not found", http.StatusBadRequest)
+		return
+	}
+	if token.RevokedAt != nil {
+		http.Error(w, "token_id belongs to a revoked token", http.StatusBadRequest)
+		return
+	}
+
+	created, err := s.reservations.CreateReservation(r.Context(), req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, reserved.ErrReservationAlreadyExists):
+			status = http.StatusConflict
+		case isReservationRequestError(err):
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	s.metrics.reservationAdminCreatesTotal.Add(1)
+	s.logger.Info("control-plane reserved subdomain created", "reservation_id", created.ID, "subdomain", created.Name, "token_id", created.TokenID)
+	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleAuthorizeReservedSubdomain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, "POST")
+		return
+	}
+	if !s.validatorAuthorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req authorizeReservedSubdomainRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.metrics.reservationAuthorizationsTotal.Add(1)
+	result, err := s.reservations.Authorize(r.Context(), req.TokenID, req.Subdomain)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if isReservationRequestError(err) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	if result.Allowed {
+		s.metrics.reservationAuthorizationAllowedTotal.Add(1)
+	} else {
+		s.metrics.reservationAuthorizationDeniedTotal.Add(1)
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleReservedSubdomainByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		methodNotAllowed(w, "DELETE")
+		return
+	}
+	if !s.authorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/reserved-subdomains/")
+	if id == "" || id == "authorize" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	if err := s.reservations.DeleteReservation(r.Context(), id); err != nil {
+		if errors.Is(err, reserved.ErrReservationNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.metrics.reservationAdminDeletesTotal.Add(1)
+	s.logger.Info("control-plane reserved subdomain deleted", "reservation_id", id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		methodNotAllowed(w, "DELETE")
@@ -256,6 +399,13 @@ func authorizedBearer(r *http.Request, configuredToken string) bool {
 	}
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	return ok && secretEqual(token, configuredToken)
+}
+
+func (s *Server) ready(ctx context.Context) error {
+	if err := s.service.Ready(ctx); err != nil {
+		return err
+	}
+	return s.reservations.Ready(ctx)
 }
 
 func secretEqual(got, want string) bool {
@@ -306,4 +456,10 @@ func methodNotAllowed(w http.ResponseWriter, allow string) {
 
 func isTokenRequestError(err error) bool {
 	return errors.Is(err, tokens.ErrTokenNameRequired) || errors.Is(err, tokens.ErrUnsupportedScope)
+}
+
+func isReservationRequestError(err error) bool {
+	return errors.Is(err, reserved.ErrReservationNameRequired) ||
+		errors.Is(err, reserved.ErrReservationTokenIDRequired) ||
+		strings.Contains(err.Error(), "invalid reserved subdomain")
 }

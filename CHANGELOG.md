@@ -4,6 +4,9 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+### Added
+- Added control-plane reserved subdomain storage, Postgres migration, admin APIs, and validator authorization API.
+
 ## [0.5.0] - 2026-06-30
 
 ### Added

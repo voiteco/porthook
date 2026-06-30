@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 )
 
@@ -505,6 +506,175 @@ func TestValidateTokenRejectsUnknownScope(t *testing.T) {
 	}
 	if !strings.Contains(body, `unsupported token scope "typo_scope"`) {
 		t.Fatalf("body = %q, want unsupported scope guidance", body)
+	}
+}
+
+func TestReservedSubdomainLifecycle(t *testing.T) {
+	var logs bytes.Buffer
+	server := NewServer(Config{
+		AdminToken:     "admin-secret",
+		ValidatorToken: "validator-secret",
+	}, tokens.NewService(tokens.NewMemoryStore()), reserved.NewService(reserved.NewMemoryStore()))
+	server.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	createTokenResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens", "admin-secret", map[string]any{
+		"name": "agent",
+	})
+	defer createTokenResp.Body.Close()
+	if createTokenResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create token status = %d, want 201", createTokenResp.StatusCode)
+	}
+	var token tokens.CreatedToken
+	if err := json.NewDecoder(createTokenResp.Body).Decode(&token); err != nil {
+		t.Fatalf("decode created token returned error: %v", err)
+	}
+
+	createResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/reserved-subdomains", "admin-secret", map[string]any{
+		"name":     " Demo ",
+		"token_id": token.ID,
+	})
+	defer createResp.Body.Close()
+	body := readResponseBody(t, createResp)
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create reservation status = %d, want 201; body = %q", createResp.StatusCode, body)
+	}
+	var created reserved.CreatedReservation
+	if err := json.Unmarshal([]byte(body), &created); err != nil {
+		t.Fatalf("decode reservation returned error: %v", err)
+	}
+	if created.ID == "" || created.Name != "demo" || created.TokenID != token.ID {
+		t.Fatalf("created reservation = %+v, want demo owned by token", created)
+	}
+
+	duplicateResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/reserved-subdomains", "admin-secret", map[string]any{
+		"name":     "demo",
+		"token_id": token.ID,
+	})
+	defer duplicateResp.Body.Close()
+	if duplicateResp.StatusCode != http.StatusConflict {
+		t.Fatalf("duplicate status = %d, want 409", duplicateResp.StatusCode)
+	}
+
+	listReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/reserved-subdomains", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	listReq.Header.Set("Authorization", "Bearer admin-secret")
+	listResp, err := httpServer.Client().Do(listReq)
+	if err != nil {
+		t.Fatalf("list returned error: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listResp.StatusCode)
+	}
+	var listed reserved.ListReservationsResponse
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode reservation list returned error: %v", err)
+	}
+	if len(listed.ReservedSubdomains) != 1 || listed.ReservedSubdomains[0].Name != "demo" {
+		t.Fatalf("listed reservations = %+v, want demo", listed.ReservedSubdomains)
+	}
+
+	authorizeResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/reserved-subdomains/authorize", "validator-secret", map[string]any{
+		"token_id":  token.ID,
+		"subdomain": "demo",
+	})
+	defer authorizeResp.Body.Close()
+	if authorizeResp.StatusCode != http.StatusOK {
+		t.Fatalf("authorize status = %d, want 200", authorizeResp.StatusCode)
+	}
+	var authorized reserved.AuthorizationResult
+	if err := json.NewDecoder(authorizeResp.Body).Decode(&authorized); err != nil {
+		t.Fatalf("decode authorization returned error: %v", err)
+	}
+	if !authorized.Allowed {
+		t.Fatalf("authorization = %+v, want allowed", authorized)
+	}
+
+	denyResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/reserved-subdomains/authorize", "validator-secret", map[string]any{
+		"token_id":  "tok_other",
+		"subdomain": "demo",
+	})
+	defer denyResp.Body.Close()
+	if denyResp.StatusCode != http.StatusOK {
+		t.Fatalf("deny status = %d, want 200", denyResp.StatusCode)
+	}
+	var denied reserved.AuthorizationResult
+	if err := json.NewDecoder(denyResp.Body).Decode(&denied); err != nil {
+		t.Fatalf("decode denied authorization returned error: %v", err)
+	}
+	if denied.Allowed || denied.Reason != "reserved_for_another_token" {
+		t.Fatalf("authorization = %+v, want reserved_for_another_token", denied)
+	}
+
+	deleteReq, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, httpServer.URL+"/api/v1/reserved-subdomains/"+created.ID, nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	deleteReq.Header.Set("Authorization", "Bearer admin-secret")
+	deleteResp, err := httpServer.Client().Do(deleteReq)
+	if err != nil {
+		t.Fatalf("delete returned error: %v", err)
+	}
+	deleteResp.Body.Close()
+	if deleteResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204", deleteResp.StatusCode)
+	}
+
+	logOutput := logs.String()
+	for _, want := range []string{"control-plane reserved subdomain created", "control-plane reserved subdomains listed", "control-plane reserved subdomain deleted"} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("logs = %q, want %q", logOutput, want)
+		}
+	}
+}
+
+func TestReservedSubdomainCreateValidatesTokenID(t *testing.T) {
+	server := NewServer(Config{AdminToken: "admin-secret"}, tokens.NewService(tokens.NewMemoryStore()), reserved.NewService(reserved.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/reserved-subdomains", "admin-secret", map[string]any{
+		"name":     "demo",
+		"token_id": "tok_missing",
+	})
+	defer resp.Body.Close()
+	body := readResponseBody(t, resp)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %q", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "token_id was not found") {
+		t.Fatalf("body = %q, want token_id guidance", body)
+	}
+}
+
+func TestReservedSubdomainsRequireAuthorization(t *testing.T) {
+	server := NewServer(Config{
+		AdminToken:     "admin-secret",
+		ValidatorToken: "validator-secret",
+	}, tokens.NewService(tokens.NewMemoryStore()), reserved.NewService(reserved.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/reserved-subdomains")
+	if err != nil {
+		t.Fatalf("GET reservations returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("list status = %d, want 401", resp.StatusCode)
+	}
+
+	authorizeResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/reserved-subdomains/authorize", "", map[string]any{
+		"token_id":  "tok_owner",
+		"subdomain": "demo",
+	})
+	defer authorizeResp.Body.Close()
+	if authorizeResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("authorize status = %d, want 401", authorizeResp.StatusCode)
 	}
 }
 

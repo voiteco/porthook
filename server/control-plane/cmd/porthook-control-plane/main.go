@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/voiteco/porthook/server/control-plane/internal/controlplane"
+	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 )
 
@@ -38,12 +39,13 @@ func run(args []string, stdout io.Writer) error {
 
 	cfg := controlplane.ConfigFromEnv()
 	cfg.Version = version
-	store, err := tokenStore(context.Background(), cfg)
+	tokenStore, reservationStore, err := stores(context.Background(), cfg)
 	if err != nil {
 		return err
 	}
-	service := tokens.NewService(store)
-	server := controlplane.NewServer(cfg, service)
+	tokenService := tokens.NewService(tokenStore)
+	reservationService := reserved.NewService(reservationStore)
+	server := controlplane.NewServer(cfg, tokenService, reservationService)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -51,23 +53,32 @@ func run(args []string, stdout io.Writer) error {
 	return server.Run(ctx)
 }
 
-func tokenStore(ctx context.Context, cfg controlplane.Config) (tokens.Store, error) {
+func stores(ctx context.Context, cfg controlplane.Config) (tokens.Store, reserved.Store, error) {
 	if cfg.DatabaseURL == "" {
-		return tokens.NewMemoryStore(), nil
+		return tokens.NewMemoryStore(), reserved.NewMemoryStore(), nil
 	}
 
 	db, err := sql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
+		return nil, nil, fmt.Errorf("open database: %w", err)
 	}
-	store, err := tokens.NewPostgresStore(db)
+	tokenStore, err := tokens.NewPostgresStore(db)
 	if err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, nil, err
 	}
-	if err := store.Migrate(ctx); err != nil {
+	if err := tokenStore.Migrate(ctx); err != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, nil, err
 	}
-	return store, nil
+	reservationStore, err := reserved.NewPostgresStore(db)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, err
+	}
+	if err := reservationStore.Migrate(ctx); err != nil {
+		_ = db.Close()
+		return nil, nil, err
+	}
+	return tokenStore, reservationStore, nil
 }
