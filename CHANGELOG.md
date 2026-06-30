@@ -4,6 +4,8 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-30
+
 ### Added
 - Added a self-hosted dashboard MVP at `/dashboard/` for admin token login, token listing, token creation, token revocation, and control-plane readiness status.
 - Added `last_used_at` token metadata updates on successful control-plane token validation and exposed it in token list API, CLI output, and dashboard tables.
