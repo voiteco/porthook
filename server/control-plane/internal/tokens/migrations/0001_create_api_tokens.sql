@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS api_tokens (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	token_hash TEXT NOT NULL UNIQUE,
+	scopes_json TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL,
+	revoked_at TIMESTAMPTZ
+);

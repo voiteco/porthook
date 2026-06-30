@@ -410,6 +410,8 @@ porthook version
 
 `porthook tokens list` prints token summaries only. Summaries include creation time, last successful validation time when available, and revocation time when revoked.
 
+Postgres-backed control-plane token storage uses embedded versioned SQL migrations. The control plane applies pending migrations at startup and records applied versions in `schema_migrations`.
+
 Future commands:
 
 ```text

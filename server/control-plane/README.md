@@ -47,6 +47,8 @@ The dashboard can list, create, and revoke agent tokens. Plaintext agent tokens 
 | `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | empty | Bearer token required for token validation requests from the gateway. If empty, validation returns `401 Unauthorized`. |
 | `PORTHOOK_DATABASE_URL` | empty | Postgres connection URL. If empty, the process uses in-memory storage for development. |
 
+When Postgres is configured, `porthook-control-plane` applies embedded versioned migrations at startup and records applied versions in `schema_migrations`.
+
 ## CLI
 
 Create an agent token:
