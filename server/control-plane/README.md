@@ -4,7 +4,7 @@ License: AGPL-3.0-only
 
 The control plane owns users, tokens, tunnel metadata, reserved names, and limits.
 
-Current scope is token management for self-hosted gateway authentication.
+Current scope is token management and reserved subdomain ownership for self-hosted gateway authentication.
 
 Supported token scopes:
 
@@ -36,7 +36,7 @@ http://localhost:8082/dashboard/
 
 Use the configured `PORTHOOK_CONTROL_ADMIN_TOKEN` to log in. The dashboard stores that admin token in browser session storage for the current tab and sends it as a bearer token to the control-plane token APIs. Use logout to clear the browser session value.
 
-The dashboard can list, create, and revoke agent tokens. Plaintext agent tokens are displayed only from the create response; the control plane stores token hashes and later list responses contain token summaries only. Successful token validation updates `last_used_at` metadata for token list views.
+The dashboard can list, create, and revoke agent tokens, reserve subdomains for active tokens, and show active gateway tunnels. Plaintext agent tokens are displayed only from the create response; the control plane stores token hashes and later list responses contain token summaries only. Successful token validation updates `last_used_at` metadata for token list views.
 
 ## Runtime Configuration
 
@@ -79,6 +79,16 @@ printf '%s' 'admin-secret' | porthook tokens revoke \
 
 The token plaintext is returned only once at creation time. Storage keeps only a hash.
 
+Reserve a requested subdomain for a token:
+
+```sh
+printf '%s' 'admin-secret' | porthook reserved create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --name demo \
+  --token-id tok_...
+```
+
 ## Operational Endpoints
 
 - `GET /healthz`
@@ -86,8 +96,11 @@ The token plaintext is returned only once at creation time. Storage keeps only a
 - `GET /metrics`
 - `GET /dashboard/`
 - `GET /api/v1/status`
+- `GET /api/v1/reserved-subdomains`
+- `POST /api/v1/reserved-subdomains`
+- `DELETE /api/v1/reserved-subdomains/{id}`
 
-`/readyz` checks the token store. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include token admin operations, token validations, authorization failures, and readiness failures.
+`/readyz` checks the token and reservation stores. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include token admin operations, token validations, reserved subdomain operations, authorization failures, and readiness failures.
 
 `/api/v1/status` returns JSON with the control-plane readiness state and binary version for dashboard and automation checks.
 
@@ -128,6 +141,24 @@ curl -i -X DELETE http://localhost:8082/api/v1/tokens/tok_... \
 ```
 
 Set `PORTHOOK_CONTROL_ADMIN_TOKEN` before creating, listing, or revoking tokens. Set `PORTHOOK_CONTROL_VALIDATOR_TOKEN` and configure the same value as `PORTHOOK_CONTROL_PLANE_TOKEN` on the gateway before using control-plane token validation.
+
+Create a reserved subdomain:
+
+```sh
+curl -sS -X POST http://localhost:8082/api/v1/reserved-subdomains \
+  -H 'Authorization: Bearer admin-secret' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"demo","token_id":"tok_..."}'
+```
+
+List reserved subdomains:
+
+```sh
+curl -sS http://localhost:8082/api/v1/reserved-subdomains \
+  -H 'Authorization: Bearer admin-secret'
+```
+
+The gateway uses `POST /api/v1/reserved-subdomains/authorize` with the validator bearer token to authorize requested subdomains during tunnel registration.
 
 The local control-plane integration path can be checked with:
 

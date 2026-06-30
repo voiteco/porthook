@@ -10,6 +10,9 @@ All notable changes to Porthook are documented here.
 - Added gateway authorization for requested subdomains through the control plane.
 - Added dashboard reserved subdomain administration and active gateway tunnel visibility.
 
+### Changed
+- Extended the control-plane smoke test and self-hosted documentation for reserved subdomain workflows.
+
 ## [0.5.0] - 2026-06-30
 
 ### Added

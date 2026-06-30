@@ -405,6 +405,9 @@ porthook http <port> --subdomain <name>
 porthook tokens create --control-plane <url> --name <name>
 porthook tokens list --control-plane <url>
 porthook tokens revoke --control-plane <url> <token-id>
+porthook reserved create --control-plane <url> --name <name> --token-id <token-id>
+porthook reserved list --control-plane <url>
+porthook reserved delete --control-plane <url> <id-or-name>
 porthook version
 ```
 
@@ -413,6 +416,10 @@ porthook version
 Postgres-backed control-plane token storage uses embedded versioned SQL migrations. The control plane applies pending migrations at startup and records applied versions in `schema_migrations`.
 
 The control plane exposes `GET /api/v1/status` for dashboard and automation checks. It returns JSON with readiness state and the binary version.
+
+The gateway exposes `GET /api/v1/tunnels` for dashboard active-tunnel visibility. The endpoint returns active tunnel summaries and omits local target URLs.
+
+When the gateway is configured with `PORTHOOK_CONTROL_PLANE_URL`, requested subdomains are authorized through `POST /api/v1/reserved-subdomains/authorize`. Random subdomains do not require reservations.
 
 Future commands:
 

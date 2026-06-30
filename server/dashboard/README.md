@@ -4,9 +4,11 @@ License: AGPL-3.0-only
 
 The dashboard provides a self-hosted web interface for control-plane administration.
 
-The first dashboard scope is token management:
+The current dashboard scope is self-hosted administration:
 
 - Token management.
+- Reserved subdomain management.
+- Active gateway tunnel visibility.
 - Control-plane readiness status.
 
 The dashboard is embedded in the control-plane binary and served at:
@@ -21,9 +23,9 @@ The dashboard displays plaintext agent tokens only from the token create respons
 
 Token tables include `last_used_at` metadata, updated when the gateway successfully validates an agent token through the control plane.
 
+The active tunnels view reads `GET /api/v1/tunnels` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack.
+
 Future dashboard scope:
 
-- Active tunnels.
 - Request logs.
-- Reserved subdomains.
 - Self-hosted instance settings.

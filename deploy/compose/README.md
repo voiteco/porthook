@@ -95,21 +95,34 @@ http://localhost:8082/dashboard/
 
 Use the configured `PORTHOOK_CONTROL_ADMIN_TOKEN` to log in. The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token.
 
-The dashboard can create, list, and revoke agent tokens. The plaintext agent token is displayed only from the create response. Token tables include creation time, last successful validation time, and revocation status.
+The dashboard can create, list, and revoke agent tokens, reserve requested subdomains for tokens, and show active gateway tunnels from the gateway public API. The plaintext agent token is displayed only from the create response. Token tables include creation time, last successful validation time, and revocation status.
 
 Create an agent token through the control plane:
 
 ```sh
-printf '%s' '<admin-token>' | porthook tokens create \
+created_token_json="$(printf '%s' '<admin-token>' | porthook tokens create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
-  --name 'local agent'
+  --name 'local agent' \
+  --json)"
+agent_token_id="$(printf '%s' "${created_token_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+agent_token="$(printf '%s' "${created_token_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
 ```
 
-The output includes the plaintext token once. Use it with the agent:
+Reserve a requested subdomain for the token:
 
 ```sh
-printf '%s' 'ph_...' | porthook login --server http://localhost:8081 --token-stdin
+printf '%s' '<admin-token>' | porthook reserved create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --name demo \
+  --token-id "${agent_token_id}"
+```
+
+Use the plaintext token with the agent:
+
+```sh
+printf '%s' "${agent_token}" | porthook login --server http://localhost:8081 --token-stdin
 porthook http 3000 --subdomain demo
 ```
 
@@ -123,7 +136,7 @@ make smoke-control-plane
 
 Back up the `postgres-data` volume before upgrading a Postgres-backed control-plane stack. The control plane applies pending embedded migrations at startup and records them in `schema_migrations`.
 
-For the 0.5.x line, the migrations are additive for token storage and add `last_used_at` metadata for token list views. See [../../docs/UPGRADING.md](../../docs/UPGRADING.md).
+For the 0.6.x line, the migrations are additive and create `reserved_subdomains` for requested tunnel names. See [../../docs/UPGRADING.md](../../docs/UPGRADING.md).
 
 ## Operational Endpoints
 
@@ -134,13 +147,14 @@ The Compose stack exposes:
 | Gateway health | `http://localhost:8080/healthz` |
 | Gateway readiness | `http://localhost:8080/readyz` |
 | Gateway metrics | `http://localhost:8080/metrics` |
+| Gateway active tunnels | `http://localhost:8080/api/v1/tunnels` |
 | Control-plane health | `http://localhost:8082/healthz` |
 | Control-plane readiness | `http://localhost:8082/readyz` |
 | Control-plane metrics | `http://localhost:8082/metrics` |
 | Control-plane status | `http://localhost:8082/api/v1/status` |
 | Dashboard | `http://localhost:8082/dashboard/` |
 
-Gateway metrics include active tunnels, public request counts, token validation attempts, auth failures, and successful tunnel registrations. Control-plane metrics include token admin operations, token validation results, auth failures, and readiness failures.
+Gateway metrics include active tunnels, public request counts, token validation attempts, auth failures, and successful tunnel registrations. The gateway active-tunnels JSON endpoint is read-only and omits local target URLs. Control-plane metrics include token admin operations, token validation results, reserved subdomain operations, auth failures, and readiness failures.
 
 The control-plane `/readyz` endpoint checks the token store. In this Compose stack, that means it pings Postgres.
 

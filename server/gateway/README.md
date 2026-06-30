@@ -34,8 +34,8 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_PUBLIC_URL` | `http://localhost:8080` | Base public URL printed by the agent. |
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` | Static agent authentication token. |
 | `PORTHOOK_CONTROL_PLANE_URL` | empty | Optional control-plane base URL for token validation. Static token auth is used when empty. |
-| `PORTHOOK_CONTROL_PLANE_TOKEN` | empty | Bearer token used when calling the control-plane validation endpoint. Required when `PORTHOOK_CONTROL_PLANE_URL` is set. |
-| `PORTHOOK_CONTROL_PLANE_TIMEOUT` | `5s` | Timeout for control-plane token validation requests. |
+| `PORTHOOK_CONTROL_PLANE_TOKEN` | empty | Bearer token used when calling control-plane validation and reserved-subdomain authorization endpoints. Required when `PORTHOOK_CONTROL_PLANE_URL` is set. |
+| `PORTHOOK_CONTROL_PLANE_TIMEOUT` | `5s` | Timeout for control-plane token validation and reserved-subdomain authorization requests. |
 | `PORTHOOK_MAX_BODY_BYTES` | `1048576` | Maximum public request body forwarded through a tunnel. |
 | `PORTHOOK_MAX_CONCURRENT_STREAMS` | `64` | Maximum concurrent public requests per tunnel. |
 | `PORTHOOK_RATE_LIMIT_RPS` | `60` | Maximum public requests per second per tunnel. |
@@ -61,7 +61,10 @@ The public listener exposes:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`
+- `GET /api/v1/tunnels`
 
-Metrics use Prometheus text format and include active tunnels, public requests, token validation attempts, authentication failures, and tunnel registrations.
+Metrics use Prometheus text format and include active tunnels, public requests, token validation attempts, authentication failures, and tunnel registrations. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs.
 
 Gateway logs are structured text logs written to stdout. Public request logs include route outcome, status, tunnel ID, stream ID, byte counts, and duration. Token values are not logged.
+
+When `PORTHOOK_CONTROL_PLANE_URL` is configured, requested subdomains require an existing control-plane reservation owned by the validated token. Agents that omit `--subdomain` still receive random subdomains without a reservation.

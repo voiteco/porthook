@@ -123,11 +123,11 @@ The public edge service that terminates HTTP or HTTPS, routes hostnames to activ
 
 ### Control Plane
 
-The API layer for users, tokens, tunnel sessions, reserved names, and limits. The current implementation includes `porthook-control-plane` for self-hosted token creation, validation, and revocation.
+The API layer for users, tokens, tunnel sessions, reserved names, and limits. The current implementation includes `porthook-control-plane` for self-hosted token creation, validation, revocation, and reserved subdomain ownership.
 
 ### Dashboard
 
-A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login plus token listing, creation, and revocation.
+A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login, token administration, reserved subdomain administration, and active gateway tunnel visibility.
 
 ## Development Roadmap
 
@@ -141,12 +141,13 @@ Completed foundations:
 6. Request logging, reconnects, keepalives, timeouts, and CLI polish.
 7. Self-hosted control-plane token API and CLI token helpers.
 8. Self-hosted dashboard for token administration.
+9. Reserved subdomains for requested tunnel names.
 
 Next major public work:
 
-1. Reserved subdomains.
-2. More complete operational guides.
-3. Custom domains and TLS documentation.
+1. More complete operational guides.
+2. Custom domains and TLS documentation.
+3. Access control and audit-friendly operational logs.
 
 ## Self-Hosted Quick Start
 
@@ -177,22 +178,35 @@ Open the self-hosted dashboard:
 http://localhost:8082/dashboard/
 ```
 
-Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens.
+Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, and show active gateway tunnels.
 
 Create an agent token:
 
 ```sh
-printf '%s' '<admin-token>' | porthook tokens create \
+created_token_json="$(printf '%s' '<admin-token>' | porthook tokens create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
-  --name 'local agent'
+  --name 'local agent' \
+  --json)"
+agent_token_id="$(printf '%s' "${created_token_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+agent_token="$(printf '%s' "${created_token_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+```
+
+Reserve the requested subdomain for that token:
+
+```sh
+printf '%s' '<admin-token>' | porthook reserved create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --name demo \
+  --token-id "${agent_token_id}"
 ```
 
 Start a local service and tunnel it:
 
 ```sh
 python3 -m http.server 3000 --bind 127.0.0.1
-printf '%s' '<agent-token-from-create-output>' | porthook login --server http://localhost:8081 --token-stdin
+printf '%s' "${agent_token}" | porthook login --server http://localhost:8081 --token-stdin
 porthook http 3000 --subdomain demo
 ```
 
