@@ -476,7 +476,15 @@ func controlPlaneStatusError(status int, message string) error {
 	case http.StatusForbidden:
 		return fmt.Errorf("control plane rejected admin token (403 Forbidden); check --admin-token or --admin-token-stdin")
 	case http.StatusNotFound:
+		if message != "" {
+			return fmt.Errorf("control plane returned 404: %s", message)
+		}
 		return fmt.Errorf("control-plane endpoint not found (404); check --control-plane URL")
+	case http.StatusConflict:
+		if message == "" {
+			message = "conflict"
+		}
+		return fmt.Errorf("control plane conflict: %s", message)
 	default:
 		return fmt.Errorf("control plane returned %d: %s", status, message)
 	}
