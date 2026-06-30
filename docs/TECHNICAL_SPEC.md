@@ -412,6 +412,8 @@ porthook version
 
 Postgres-backed control-plane token storage uses embedded versioned SQL migrations. The control plane applies pending migrations at startup and records applied versions in `schema_migrations`.
 
+The control plane exposes `GET /api/v1/status` for dashboard and automation checks. It returns JSON with readiness state and the binary version.
+
 Future commands:
 
 ```text

@@ -137,6 +137,7 @@ The Compose stack exposes:
 | Control-plane health | `http://localhost:8082/healthz` |
 | Control-plane readiness | `http://localhost:8082/readyz` |
 | Control-plane metrics | `http://localhost:8082/metrics` |
+| Control-plane status | `http://localhost:8082/api/v1/status` |
 | Dashboard | `http://localhost:8082/dashboard/` |
 
 Gateway metrics include active tunnels, public request counts, token validation attempts, auth failures, and successful tunnel registrations. Control-plane metrics include token admin operations, token validation results, auth failures, and readiness failures.

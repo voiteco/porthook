@@ -31,6 +31,13 @@ type validateTokenRequest struct {
 	Scope string `json:"scope,omitempty"`
 }
 
+type statusResponse struct {
+	Status  string `json:"status"`
+	Ready   bool   `json:"ready"`
+	Version string `json:"version"`
+	Error   string `json:"error,omitempty"`
+}
+
 const maxJSONBodyBytes = 1 << 20
 
 const readinessTimeout = 2 * time.Second
@@ -38,6 +45,9 @@ const readinessTimeout = 2 * time.Second
 func NewServer(cfg Config, service *tokens.Service) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
+	}
+	if cfg.Version == "" {
+		cfg.Version = "dev"
 	}
 	return &Server{
 		cfg:     cfg,
@@ -82,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.Handle("/dashboard", dashboardHandler)
 	mux.Handle("/dashboard/", dashboardHandler)
+	mux.HandleFunc("/api/v1/status", s.handleStatus)
 	mux.HandleFunc("/api/v1/tokens", s.handleTokens)
 	mux.HandleFunc("/api/v1/tokens/", s.handleTokenByID)
 	mux.HandleFunc("/api/v1/tokens/validate", s.handleValidateToken)
@@ -102,6 +113,28 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ready\n"))
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, "GET")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
+	defer cancel()
+	resp := statusResponse{
+		Status:  "ready",
+		Ready:   true,
+		Version: s.cfg.Version,
+	}
+	if err := s.service.Ready(ctx); err != nil {
+		resp.Status = "not_ready"
+		resp.Ready = false
+		resp.Error = err.Error()
+		writeJSON(w, http.StatusServiceUnavailable, resp)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {

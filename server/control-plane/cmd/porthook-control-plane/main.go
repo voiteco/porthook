@@ -37,6 +37,7 @@ func run(args []string, stdout io.Writer) error {
 	}
 
 	cfg := controlplane.ConfigFromEnv()
+	cfg.Version = version
 	store, err := tokenStore(context.Background(), cfg)
 	if err != nil {
 		return err

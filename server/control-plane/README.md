@@ -85,8 +85,11 @@ The token plaintext is returned only once at creation time. Storage keeps only a
 - `GET /readyz`
 - `GET /metrics`
 - `GET /dashboard/`
+- `GET /api/v1/status`
 
 `/readyz` checks the token store. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include token admin operations, token validations, authorization failures, and readiness failures.
+
+`/api/v1/status` returns JSON with the control-plane readiness state and binary version for dashboard and automation checks.
 
 ## API
 

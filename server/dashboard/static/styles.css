@@ -289,7 +289,8 @@ tr.revoked {
 }
 
 .badge,
-.status-pill {
+.status-pill,
+.version-pill {
   border-radius: 999px;
   display: inline-flex;
   font-size: 12px;
@@ -311,6 +312,11 @@ tr.revoked {
 }
 
 .status-pill {
+  background: #eef2f6;
+  color: var(--muted);
+}
+
+.version-pill {
   background: #eef2f6;
   color: var(--muted);
 }

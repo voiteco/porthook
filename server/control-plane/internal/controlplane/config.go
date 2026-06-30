@@ -13,6 +13,7 @@ type Config struct {
 	AdminToken     string
 	ValidatorToken string
 	DatabaseURL    string
+	Version        string
 }
 
 func ConfigFromEnv() Config {
