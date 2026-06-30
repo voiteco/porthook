@@ -4,6 +4,8 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-30
+
 ### Added
 - Added a control-plane integration smoke test for token creation, CLI login, gateway validation, and HTTP round-trip.
 - Added a Docker Compose control-plane stack with Postgres, control-plane, and gateway services.
@@ -14,6 +16,7 @@ All notable changes to Porthook are documented here.
 - Added Prometheus text `/metrics` endpoints for gateway and control-plane operational counters.
 
 ### Changed
+- Updated the release workflow, release documentation, and security policy for the supported `0.4.x` release line.
 - Improved self-hosted Docker Compose quickstart, deployment checklist, secret guidance, and operational endpoint documentation.
 - Hardened control-plane token APIs with strict JSON decoding, request body limits, method `Allow` headers, and explicit unknown-scope errors.
 - Control-plane `/readyz` now checks token store readiness, including Postgres ping when configured.

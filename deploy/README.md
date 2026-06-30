@@ -55,4 +55,4 @@ Before using the Compose control-plane stack beyond local testing:
 - Revoke unused agent tokens with `porthook tokens revoke`.
 - Run `make smoke-control-plane` after configuration changes that affect token validation or tunnel routing.
 
-Compose is still the first supported deployment path for this pre-alpha repository. More complete reverse proxy, TLS, and wildcard DNS examples should be added before recommending internet-facing production use.
+Compose is still the first supported deployment path for this pre-1.0 repository. More complete reverse proxy, TLS, and wildcard DNS examples should be added before recommending internet-facing production use.

@@ -2,14 +2,14 @@
 
 Porthook releases are created from Git tags that start with `v`.
 
-The release workflow is intentionally conservative for the pre-alpha stage: it runs the same Go checks as CI, runs the local tunnel smoke test, builds release binaries, verifies embedded versions, generates checksums, validates Docker Compose configuration, builds the gateway Docker image, and publishes a GitHub prerelease.
+The release workflow is intentionally conservative for the pre-1.0 stage: it runs the same Go checks as CI, runs the local tunnel smoke test, builds release binaries, verifies embedded versions, generates checksums, validates Docker Compose configuration, builds Docker images, and publishes a GitHub Release with notes extracted from `CHANGELOG.md`.
 
 ## Version Format
 
 Use semantic version tags:
 
 ```sh
-v0.3.0
+v0.4.0
 ```
 
 The tag name is injected into the CLI, gateway, and control-plane binaries. After download, users can verify the embedded version:
@@ -28,12 +28,12 @@ Before pushing a tag, run:
 make fmt-check
 make test
 make vet
-make smoke-local VERSION=v0.3.0
-make smoke-control-plane VERSION=v0.3.0
-make release-build VERSION=v0.3.0
+make smoke-local VERSION=v0.4.0
+make smoke-control-plane VERSION=v0.4.0
+make release-build VERSION=v0.4.0
 make release-checksums
 make compose-config
-make docker-build VERSION=v0.3.0
+make docker-build VERSION=v0.4.0
 ```
 
 On Linux `amd64`, verify the release binaries directly:
@@ -57,11 +57,17 @@ On macOS, run the binary that matches the local architecture:
 Create and push an annotated tag:
 
 ```sh
-git tag -a v0.3.0 -m "v0.3.0"
-git push origin v0.3.0
+git tag -a v0.4.0 -m "v0.4.0"
+git push origin v0.4.0
 ```
 
-GitHub Actions will create a prerelease and upload:
+Before tagging, move the relevant `CHANGELOG.md` entries from `Unreleased` into a dated version section such as:
+
+```md
+## [0.4.0] - 2026-06-30
+```
+
+GitHub Actions will create a release and upload:
 
 - `porthook_linux_amd64`
 - `porthook_linux_arm64`

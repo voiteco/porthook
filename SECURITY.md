@@ -2,12 +2,13 @@
 
 ## Supported Versions
 
-Porthook has no stable release yet. Until versioned releases exist, security fixes target the latest `main` branch on a best-effort basis.
+Porthook is pre-1.0. Security fixes target the latest minor release line and the latest `main` branch on a best-effort basis.
 
 | Version | Supported |
 | --- | --- |
-| `main` / pre-alpha | Best effort |
-| Released versions | Not available yet |
+| `0.4.x` | Best effort |
+| `main` | Best effort |
+| `0.3.x` and older | No |
 
 ## Reporting a Vulnerability
 
