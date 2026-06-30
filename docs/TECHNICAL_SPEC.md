@@ -408,6 +408,8 @@ porthook tokens revoke --control-plane <url> <token-id>
 porthook version
 ```
 
+`porthook tokens list` prints token summaries only. Summaries include creation time, last successful validation time when available, and revocation time when revoked.
+
 Future commands:
 
 ```text

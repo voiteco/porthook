@@ -36,7 +36,7 @@ http://localhost:8082/dashboard/
 
 Use the configured `PORTHOOK_CONTROL_ADMIN_TOKEN` to log in. The dashboard stores that admin token in browser session storage for the current tab and sends it as a bearer token to the control-plane token APIs. Use logout to clear the browser session value.
 
-The dashboard can list, create, and revoke agent tokens. Plaintext agent tokens are displayed only from the create response; the control plane stores token hashes and later list responses contain token summaries only.
+The dashboard can list, create, and revoke agent tokens. Plaintext agent tokens are displayed only from the create response; the control plane stores token hashes and later list responses contain token summaries only. Successful token validation updates `last_used_at` metadata for token list views.
 
 ## Runtime Configuration
 
@@ -103,6 +103,8 @@ List tokens:
 curl -sS http://localhost:8082/api/v1/tokens \
   -H 'Authorization: Bearer admin-secret'
 ```
+
+Token summaries include `id`, `name`, `scopes`, `created_at`, optional `last_used_at`, and optional `revoked_at`. Plaintext token values are not returned by list responses.
 
 Validate a token:
 

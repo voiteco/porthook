@@ -187,6 +187,9 @@ func TestTokenLifecycle(t *testing.T) {
 	if listed.Tokens[0].RevokedAt != nil {
 		t.Fatalf("listed token revoked_at = %v, want nil", listed.Tokens[0].RevokedAt)
 	}
+	if listed.Tokens[0].LastUsedAt != nil {
+		t.Fatalf("listed token last_used_at = %v, want nil before validation", listed.Tokens[0].LastUsedAt)
+	}
 
 	validateResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens/validate", "validator-secret", map[string]any{
 		"token": created.Token,
@@ -202,6 +205,27 @@ func TestTokenLifecycle(t *testing.T) {
 	}
 	if !validation.Valid || validation.TokenID != created.ID {
 		t.Fatalf("validation = %+v, want valid token %q", validation, created.ID)
+	}
+
+	listReq, err = http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/tokens", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	listReq.Header.Set("Authorization", "Bearer admin-secret")
+	listResp, err = httpServer.Client().Do(listReq)
+	if err != nil {
+		t.Fatalf("list used returned error: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list used status = %d, want 200", listResp.StatusCode)
+	}
+	listed = tokens.ListTokensResponse{}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode used token list returned error: %v", err)
+	}
+	if len(listed.Tokens) != 1 || listed.Tokens[0].LastUsedAt == nil {
+		t.Fatalf("listed used tokens = %+v, want last_used_at", listed.Tokens)
 	}
 
 	revokeReq, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, httpServer.URL+"/api/v1/tokens/"+created.ID, nil)

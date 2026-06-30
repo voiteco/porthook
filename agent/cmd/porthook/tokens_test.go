@@ -99,6 +99,7 @@ func TestRunTokensCreateHelpPrintsScopeDefault(t *testing.T) {
 
 func TestRunTokensListPrintsTable(t *testing.T) {
 	createdAt := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	lastUsedAt := createdAt.Add(30 * time.Minute)
 	revokedAt := createdAt.Add(time.Minute)
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,11 +109,12 @@ func TestRunTokensListPrintsTable(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(listTokensResponse{Tokens: []tokenSummary{{
-			ID:        "tok_listed",
-			Name:      "listed agent",
-			Scopes:    []string{"register_tunnel"},
-			CreatedAt: createdAt,
-			RevokedAt: &revokedAt,
+			ID:         "tok_listed",
+			Name:       "listed agent",
+			Scopes:     []string{"register_tunnel"},
+			CreatedAt:  createdAt,
+			LastUsedAt: &lastUsedAt,
+			RevokedAt:  &revokedAt,
 		}}})
 	}))
 	defer server.Close()
@@ -132,7 +134,7 @@ func TestRunTokensListPrintsTable(t *testing.T) {
 		t.Fatalf("Authorization = %q, want bearer admin token", gotAuth)
 	}
 	output := stdout.String()
-	for _, want := range []string{"ID", "tok_listed", "listed agent", "register_tunnel", revokedAt.Format(time.RFC3339)} {
+	for _, want := range []string{"ID", "LAST USED", "tok_listed", "listed agent", "register_tunnel", lastUsedAt.Format(time.RFC3339), revokedAt.Format(time.RFC3339)} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stdout = %q, want %q", output, want)
 		}

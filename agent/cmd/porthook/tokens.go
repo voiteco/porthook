@@ -295,11 +295,12 @@ type createdToken struct {
 }
 
 type tokenSummary struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Scopes    []string   `json:"scopes"`
-	CreatedAt time.Time  `json:"created_at"`
-	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Scopes     []string   `json:"scopes"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
 type listTokensResponse struct {
@@ -388,19 +389,24 @@ func printCreatedToken(w io.Writer, token createdToken) {
 
 func printTokenList(w io.Writer, tokens []tokenSummary) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tSCOPES\tCREATED\tREVOKED")
+	fmt.Fprintln(tw, "ID\tNAME\tSCOPES\tCREATED\tLAST USED\tREVOKED")
 	for _, token := range tokens {
+		lastUsed := "-"
+		if token.LastUsedAt != nil {
+			lastUsed = token.LastUsedAt.Format(time.RFC3339)
+		}
 		revoked := "-"
 		if token.RevokedAt != nil {
 			revoked = token.RevokedAt.Format(time.RFC3339)
 		}
 		fmt.Fprintf(
 			tw,
-			"%s\t%s\t%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\t%s\t%s\n",
 			token.ID,
 			token.Name,
 			strings.Join(token.Scopes, ","),
 			token.CreatedAt.Format(time.RFC3339),
+			lastUsed,
 			revoked,
 		)
 	}

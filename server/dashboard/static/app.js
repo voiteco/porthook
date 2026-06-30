@@ -120,6 +120,7 @@ function renderTokenRow(token) {
     monoCell(token.id),
     cell((token.scopes || []).join(", ") || "none"),
     cell(formatTime(token.created_at)),
+    cell(token.last_used_at ? formatTime(token.last_used_at) : "Never"),
     statusCell(token),
     actionCell(token),
   );

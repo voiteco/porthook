@@ -89,6 +89,19 @@ func (s *MemoryStore) LookupByID(_ context.Context, id string) (TokenRecord, boo
 	return cloneRecord(record), true, nil
 }
 
+func (s *MemoryStore) MarkUsed(_ context.Context, id string, usedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.byID[id]
+	if !ok || record.RevokedAt != nil {
+		return nil
+	}
+	record.LastUsedAt = &usedAt
+	s.byID[id] = record
+	return nil
+}
+
 func (s *MemoryStore) Revoke(_ context.Context, id string, revokedAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -104,6 +117,7 @@ func (s *MemoryStore) Revoke(_ context.Context, id string, revokedAt time.Time) 
 
 func cloneRecord(record TokenRecord) TokenRecord {
 	record.Scopes = cloneScopes(record.Scopes)
+	record.LastUsedAt = cloneTimePtr(record.LastUsedAt)
 	record.RevokedAt = cloneTimePtr(record.RevokedAt)
 	return record
 }

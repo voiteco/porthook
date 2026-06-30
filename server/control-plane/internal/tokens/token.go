@@ -10,12 +10,13 @@ import (
 const ScopeRegisterTunnel = "register_tunnel"
 
 type TokenRecord struct {
-	ID        string
-	Name      string
-	TokenHash string
-	Scopes    []string
-	CreatedAt time.Time
-	RevokedAt *time.Time
+	ID         string
+	Name       string
+	TokenHash  string
+	Scopes     []string
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
+	RevokedAt  *time.Time
 }
 
 type CreateTokenRequest struct {
@@ -32,11 +33,12 @@ type CreatedToken struct {
 }
 
 type TokenSummary struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Scopes    []string   `json:"scopes"`
-	CreatedAt time.Time  `json:"created_at"`
-	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Scopes     []string   `json:"scopes"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
 type ListTokensResponse struct {
@@ -55,5 +57,6 @@ type Store interface {
 	List(context.Context) ([]TokenRecord, error)
 	LookupByHash(context.Context, string) (TokenRecord, bool, error)
 	LookupByID(context.Context, string) (TokenRecord, bool, error)
+	MarkUsed(context.Context, string, time.Time) error
 	Revoke(context.Context, string, time.Time) error
 }
