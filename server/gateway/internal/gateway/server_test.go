@@ -1254,7 +1254,9 @@ func TestPublicRequestRejectsWhenRateLimitExceeded(t *testing.T) {
 }
 
 func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
-	server := NewServer(testConfig(), slog.Default())
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	server := NewServer(testConfig(), logger)
 	httpServer := httptest.NewServer(server.AgentHandler())
 	defer httpServer.Close()
 
@@ -1286,8 +1288,15 @@ func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 	if authResp.Type != messages.TypeAuthError {
 		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthError)
 	}
-}
 
+	got := logs.String()
+	if !strings.Contains(got, "event=gateway.agent_auth_failed") {
+		t.Fatalf("logs = %q, want gateway.agent_auth_failed event", got)
+	}
+	if strings.Contains(got, "wrong") {
+		t.Fatalf("logs leaked plaintext token: %q", got)
+	}
+}
 func registerAgent(t *testing.T, ctx context.Context, conn *websocket.Conn, subdomain string) {
 	t.Helper()
 	_ = registerAgentAndRead(t, ctx, conn, subdomain)
@@ -1519,6 +1528,7 @@ func TestPublicRequestLogsMissingTunnel(t *testing.T) {
 	got := logs.String()
 	for _, want := range []string{
 		`msg="public request"`,
+		"event=gateway.public_request",
 		"host=demo.localhost",
 		"status=404",
 		"outcome=no_active_session",

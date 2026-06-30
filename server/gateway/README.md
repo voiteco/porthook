@@ -65,6 +65,8 @@ The public listener exposes:
 
 Metrics use Prometheus text format and include active tunnels, public requests, token validation attempts, authentication failures, and tunnel registrations. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs.
 
-Gateway logs are structured text logs written to stdout. Public request logs include route outcome, status, tunnel ID, stream ID, byte counts, and duration. Token values are not logged.
+Gateway logs are structured text logs written to stdout. Operational logs include an `event` field such as `gateway.public_request`, `gateway.tunnel_registered`, `gateway.agent_auth_failed`, and `gateway.agent_keepalive_failed`.
+
+Public request logs include method, host, path, whether a query string was present, route outcome, status, tunnel ID, stream ID, byte counts, duration, remote IP, and optional `request_id` from `X-Request-ID` or `X-Correlation-ID`. Raw query strings and token values are not logged.
 
 When `PORTHOOK_CONTROL_PLANE_URL` is configured, requested subdomains require an existing control-plane reservation owned by the validated token. Agents that omit `--subdomain` still receive random subdomains without a reservation.

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -166,6 +167,10 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.authorized(r) {
 		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.Bool("token_configured", s.cfg.AdminToken != ""),
+		)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -176,7 +181,7 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.metrics.tokenAdminListsTotal.Add(1)
-		s.logger.Info("control-plane tokens listed", "count", len(listed.Tokens))
+		s.logAudit(r, slog.LevelInfo, "control-plane tokens listed", "control_plane.tokens_listed", slog.Int("count", len(listed.Tokens)))
 		writeJSON(w, http.StatusOK, listed)
 		return
 	}
@@ -196,7 +201,11 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.metrics.tokenAdminCreatesTotal.Add(1)
-	s.logger.Info("control-plane token created", "token_id", created.ID, "name", created.Name, "scopes", created.Scopes)
+	s.logAudit(r, slog.LevelInfo, "control-plane token created", "control_plane.token_created",
+		slog.String("token_id", created.ID),
+		slog.String("name", created.Name),
+		slog.Any("scopes", created.Scopes),
+	)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -207,6 +216,10 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.validatorAuthorized(r) {
 		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "validator"),
+			slog.Bool("token_configured", s.cfg.ValidatorToken != ""),
+		)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -224,6 +237,11 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, tokens.ErrUnsupportedScope) {
 			status = http.StatusBadRequest
 		}
+		s.logAudit(r, slog.LevelWarn, "control-plane token validation failed", "control_plane.token_validation_failed",
+			slog.String("scope", req.Scope),
+			slog.Int("status", status),
+			slog.Any("error", err),
+		)
 		http.Error(w, err.Error(), status)
 		return
 	}
@@ -232,6 +250,14 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.metrics.tokenValidationInvalidTotal.Add(1)
 	}
+	attrs := []slog.Attr{
+		slog.String("scope", req.Scope),
+		slog.Bool("valid", result.Valid),
+	}
+	if result.TokenID != "" {
+		attrs = append(attrs, slog.String("token_id", result.TokenID))
+	}
+	s.logAudit(r, slog.LevelInfo, "control-plane token validated", "control_plane.token_validated", attrs...)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -246,6 +272,10 @@ func (s *Server) handleReservedSubdomains(w http.ResponseWriter, r *http.Request
 	}
 	if !s.authorized(r) {
 		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.Bool("token_configured", s.cfg.AdminToken != ""),
+		)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -256,7 +286,7 @@ func (s *Server) handleReservedSubdomains(w http.ResponseWriter, r *http.Request
 			return
 		}
 		s.metrics.reservationAdminListsTotal.Add(1)
-		s.logger.Info("control-plane reserved subdomains listed", "count", len(listed.ReservedSubdomains))
+		s.logAudit(r, slog.LevelInfo, "control-plane reserved subdomains listed", "control_plane.reservations_listed", slog.Int("count", len(listed.ReservedSubdomains)))
 		writeJSON(w, http.StatusOK, listed)
 		return
 	}
@@ -293,7 +323,11 @@ func (s *Server) handleReservedSubdomains(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.metrics.reservationAdminCreatesTotal.Add(1)
-	s.logger.Info("control-plane reserved subdomain created", "reservation_id", created.ID, "subdomain", created.Name, "token_id", created.TokenID)
+	s.logAudit(r, slog.LevelInfo, "control-plane reserved subdomain created", "control_plane.reservation_created",
+		slog.String("reservation_id", created.ID),
+		slog.String("subdomain", created.Name),
+		slog.String("token_id", created.TokenID),
+	)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -304,6 +338,10 @@ func (s *Server) handleAuthorizeReservedSubdomain(w http.ResponseWriter, r *http
 	}
 	if !s.validatorAuthorized(r) {
 		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "validator"),
+			slog.Bool("token_configured", s.cfg.ValidatorToken != ""),
+		)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -320,6 +358,12 @@ func (s *Server) handleAuthorizeReservedSubdomain(w http.ResponseWriter, r *http
 		if isReservationRequestError(err) {
 			status = http.StatusBadRequest
 		}
+		s.logAudit(r, slog.LevelWarn, "control-plane reserved subdomain authorization failed", "control_plane.reservation_authorization_failed",
+			slog.String("token_id", req.TokenID),
+			slog.String("subdomain", req.Subdomain),
+			slog.Int("status", status),
+			slog.Any("error", err),
+		)
 		http.Error(w, err.Error(), status)
 		return
 	}
@@ -328,6 +372,12 @@ func (s *Server) handleAuthorizeReservedSubdomain(w http.ResponseWriter, r *http
 	} else {
 		s.metrics.reservationAuthorizationDeniedTotal.Add(1)
 	}
+	s.logAudit(r, slog.LevelInfo, "control-plane reserved subdomain authorized", "control_plane.reservation_authorized",
+		slog.String("token_id", req.TokenID),
+		slog.String("subdomain", req.Subdomain),
+		slog.Bool("allowed", result.Allowed),
+		slog.String("reason", result.Reason),
+	)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -338,6 +388,10 @@ func (s *Server) handleReservedSubdomainByID(w http.ResponseWriter, r *http.Requ
 	}
 	if !s.authorized(r) {
 		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.Bool("token_configured", s.cfg.AdminToken != ""),
+		)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -356,7 +410,7 @@ func (s *Server) handleReservedSubdomainByID(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.metrics.reservationAdminDeletesTotal.Add(1)
-	s.logger.Info("control-plane reserved subdomain deleted", "reservation_id", id)
+	s.logAudit(r, slog.LevelInfo, "control-plane reserved subdomain deleted", "control_plane.reservation_deleted", slog.String("reservation_id", id))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -367,6 +421,10 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.authorized(r) {
 		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.Bool("token_configured", s.cfg.AdminToken != ""),
+		)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -381,7 +439,7 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.metrics.tokenAdminRevokesTotal.Add(1)
-	s.logger.Info("control-plane token revoked", "token_id", id)
+	s.logAudit(r, slog.LevelInfo, "control-plane token revoked", "control_plane.token_revoked", slog.String("token_id", id))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -415,6 +473,37 @@ func secretEqual(got, want string) bool {
 	gotHash := sha256.Sum256([]byte(got))
 	wantHash := sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(gotHash[:], wantHash[:]) == 1
+}
+
+func (s *Server) logAudit(r *http.Request, level slog.Level, msg, event string, attrs ...slog.Attr) {
+	base := []slog.Attr{
+		slog.String("event", event),
+		slog.String("method", r.Method),
+		slog.String("path", r.URL.Path),
+		slog.String("remote_ip", remoteIP(r.RemoteAddr)),
+	}
+	if id := requestID(r); id != "" {
+		base = append(base, slog.String("request_id", id))
+	}
+	base = append(base, attrs...)
+	s.logger.LogAttrs(r.Context(), level, msg, base...)
+}
+
+func remoteIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err == nil {
+		return host
+	}
+	return remoteAddr
+}
+
+func requestID(r *http.Request) string {
+	for _, header := range []string{"X-Request-ID", "X-Correlation-ID"} {
+		if value := strings.TrimSpace(r.Header.Get(header)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

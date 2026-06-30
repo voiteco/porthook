@@ -411,6 +411,7 @@ func (s *agentSession) startKeepalive(ctx context.Context, interval, timeout tim
 			case <-ticker.C:
 				if err := s.ping(keepaliveCtx, timeout); err != nil {
 					logger.Warn("agent websocket keepalive failed",
+						"event", "gateway.agent_keepalive_failed",
 						"tunnel_id", s.tunnel.TunnelID,
 						"subdomain", s.tunnel.Subdomain,
 						"error", err,
@@ -431,7 +432,7 @@ func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 	for {
 		msg, err := wswire.Read(ctx, s.conn)
 		if err != nil {
-			logger.Info("agent read loop stopped", "tunnel_id", s.tunnel.TunnelID, "error", err)
+			logger.Info("agent read loop stopped", "event", "gateway.agent_read_loop_stopped", "tunnel_id", s.tunnel.TunnelID, "subdomain", s.tunnel.Subdomain, "error", err)
 			return
 		}
 		env := msg.Envelope
@@ -440,11 +441,11 @@ func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 		case messages.TypePing:
 			pong, err := messages.New(messages.TypePong, nil)
 			if err != nil {
-				logger.Warn("build pong failed", "error", err)
+				logger.Warn("build pong failed", "event", "gateway.agent_pong_build_failed", "tunnel_id", s.tunnel.TunnelID, "subdomain", s.tunnel.Subdomain, "error", err)
 				continue
 			}
 			if err := s.write(ctx, pong); err != nil {
-				logger.Warn("write pong failed", "tunnel_id", s.tunnel.TunnelID, "error", err)
+				logger.Warn("write pong failed", "event", "gateway.agent_pong_write_failed", "tunnel_id", s.tunnel.TunnelID, "subdomain", s.tunnel.Subdomain, "error", err)
 				return
 			}
 		case messages.TypeHTTPResponse,
@@ -453,10 +454,10 @@ func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 			messages.TypeHTTPResponseEnd,
 			messages.TypeHTTPStreamError:
 			if !s.deliver(ctx, msg) {
-				logger.Warn("received response for unknown stream", "tunnel_id", s.tunnel.TunnelID, "stream_id", env.StreamID)
+				logger.Warn("received response for unknown stream", "event", "gateway.unknown_stream_response", "tunnel_id", s.tunnel.TunnelID, "subdomain", s.tunnel.Subdomain, "stream_id", env.StreamID)
 			}
 		default:
-			logger.Warn("unexpected agent message", "tunnel_id", s.tunnel.TunnelID, "type", env.Type)
+			logger.Warn("unexpected agent message", "event", "gateway.unexpected_agent_message", "tunnel_id", s.tunnel.TunnelID, "subdomain", s.tunnel.Subdomain, "type", env.Type)
 		}
 	}
 }
