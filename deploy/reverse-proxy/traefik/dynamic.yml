@@ -1,0 +1,55 @@
+http:
+  routers:
+    porthook-public:
+      rule: "HostRegexp(`{subdomain:[a-z0-9-]+}.tunnels.example.com`)"
+      entryPoints:
+        - websecure
+      service: porthook-gateway-public
+      tls: {}
+
+    porthook-agent:
+      rule: "Host(`agent.example.com`)"
+      entryPoints:
+        - websecure
+      service: porthook-gateway-agent
+      tls: {}
+
+    porthook-control:
+      rule: "Host(`control.example.com`)"
+      entryPoints:
+        - websecure
+      service: porthook-control-plane
+      tls: {}
+      middlewares:
+        - control-plane-private
+
+  middlewares:
+    control-plane-private:
+      ipAllowList:
+        sourceRange:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
+
+  services:
+    porthook-gateway-public:
+      loadBalancer:
+        servers:
+          - url: "http://porthook-gateway:8080"
+
+    porthook-gateway-agent:
+      loadBalancer:
+        servers:
+          - url: "http://porthook-gateway:8081"
+
+    porthook-control-plane:
+      loadBalancer:
+        servers:
+          - url: "http://porthook-control-plane:8082"
+
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/fullchain.pem
+        keyFile: /certs/privkey.pem

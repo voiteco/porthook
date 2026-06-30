@@ -162,6 +162,8 @@ The control-plane `/readyz` endpoint checks the token store. In this Compose sta
 
 For real internet traffic, update `PORTHOOK_ROOT_DOMAIN` and `PORTHOOK_PUBLIC_URL`, point wildcard DNS at the public gateway, and terminate TLS in front of the public listener. Keep the control-plane API and dashboard private or protected by an additional access boundary.
 
+Reverse proxy examples for Caddy and Traefik live in [../reverse-proxy/](../reverse-proxy/).
+
 ## Smoke Test
 
 Start a local HTTP service on the host:
