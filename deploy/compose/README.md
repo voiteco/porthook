@@ -92,6 +92,7 @@ The production Compose stack keeps the gateway and control-plane ports private t
 
 Read [../../docs/DOMAINS_TLS.md](../../docs/DOMAINS_TLS.md) before using this stack for internet-facing traffic.
 Read [../../docs/ACCESS_BOUNDARY.md](../../docs/ACCESS_BOUNDARY.md) before exposing `PORTHOOK_CONTROL_DOMAIN`.
+Use [../../docs/OPERATIONS.md](../../docs/OPERATIONS.md) for backup, restore, upgrade, rollback, and token rotation runbooks.
 
 Copy the production example environment and replace every `change-me` value:
 

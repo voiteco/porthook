@@ -10,6 +10,7 @@ All notable changes to Porthook are documented here.
 - Added domain, wildcard DNS, and TLS guidance for internet-facing self-hosted deployments.
 - Added control-plane access-boundary guidance and a Caddy IP allowlist example.
 - Added audit-friendly gateway and control-plane log events with stable fields and token redaction tests.
+- Added operational runbooks for production Compose deploys, health triage, backups, restores, token rotation, upgrades, rollbacks, and incidents.
 
 ## [0.6.0] - 2026-06-30
 
