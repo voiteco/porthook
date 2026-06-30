@@ -38,3 +38,21 @@ make smoke-control-plane
 The compose control-plane stack lives in [compose/docker-compose.control-plane.yml](./compose/docker-compose.control-plane.yml). Copy [compose/.env.control-plane.example](./compose/.env.control-plane.example), replace the placeholder values, and start it with Docker Compose.
 
 Operators still need to configure wildcard DNS and TLS in front of the public gateway listener for real internet traffic.
+
+## Production Checklist
+
+Before using the Compose control-plane stack beyond local testing:
+
+- Replace every `change-me` value with a generated secret. Use separate values for `PORTHOOK_POSTGRES_PASSWORD`, `PORTHOOK_CONTROL_ADMIN_TOKEN`, and `PORTHOOK_CONTROL_VALIDATOR_TOKEN`.
+- Keep `.env.control-plane` out of Git. The repository ignores `.env.*` files except checked-in examples.
+- Configure `PORTHOOK_ROOT_DOMAIN` for the wildcard domain routed to the public gateway.
+- Configure `PORTHOOK_PUBLIC_URL` to the externally reachable public gateway URL.
+- Put TLS termination in front of the public gateway listener.
+- Restrict access to the control-plane API with network policy, firewall rules, or a private listener. The admin token protects API actions but should not be the only operational boundary.
+- Persist and back up the Postgres volume before relying on issued tokens.
+- Scrape `/metrics` and alert on readiness failures, auth failures, and unexpected token validation errors.
+- Rotate admin and validator tokens periodically, then update gateway and control-plane configuration together.
+- Revoke unused agent tokens with `porthook tokens revoke`.
+- Run `make smoke-control-plane` after configuration changes that affect token validation or tunnel routing.
+
+Compose is still the first supported deployment path for this pre-alpha repository. More complete reverse proxy, TLS, and wildcard DNS examples should be added before recommending internet-facing production use.

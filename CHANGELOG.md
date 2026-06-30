@@ -14,6 +14,7 @@ All notable changes to Porthook are documented here.
 - Added Prometheus text `/metrics` endpoints for gateway and control-plane operational counters.
 
 ### Changed
+- Improved self-hosted Docker Compose quickstart, deployment checklist, secret guidance, and operational endpoint documentation.
 - Hardened control-plane token APIs with strict JSON decoding, request body limits, method `Allow` headers, and explicit unknown-scope errors.
 - Control-plane `/readyz` now checks token store readiness, including Postgres ping when configured.
 - Improved `porthook` and `porthook tokens` help output, environment default coverage, and control-plane token command error guidance.
