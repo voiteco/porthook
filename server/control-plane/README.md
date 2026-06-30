@@ -26,6 +26,18 @@ make docker-build-control-plane
 
 For a local Postgres-backed stack with the gateway, see [../../deploy/compose/README.md](../../deploy/compose/README.md).
 
+## Dashboard
+
+The control plane serves the self-hosted dashboard at:
+
+```text
+http://localhost:8082/dashboard/
+```
+
+Use the configured `PORTHOOK_CONTROL_ADMIN_TOKEN` to log in. The dashboard stores that admin token in browser session storage for the current tab and sends it as a bearer token to the control-plane token APIs. Use logout to clear the browser session value.
+
+The dashboard can list, create, and revoke agent tokens. Plaintext agent tokens are displayed only from the create response; the control plane stores token hashes and later list responses contain token summaries only.
+
 ## Runtime Configuration
 
 | Environment variable | Default | Description |
@@ -70,6 +82,7 @@ The token plaintext is returned only once at creation time. Storage keeps only a
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`
+- `GET /dashboard/`
 
 `/readyz` checks the token store. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include token admin operations, token validations, authorization failures, and readiness failures.
 

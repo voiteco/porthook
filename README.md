@@ -127,7 +127,7 @@ The API layer for users, tokens, tunnel sessions, reserved names, and limits. Th
 
 ### Dashboard
 
-A web UI for active tunnels, request history, tokens, and domains.
+A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login plus token listing, creation, and revocation.
 
 ## Development Roadmap
 

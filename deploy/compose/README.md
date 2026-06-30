@@ -81,6 +81,7 @@ The stack listens on:
 - public HTTP: `http://localhost:8080`
 - agent WebSocket: `http://localhost:8081/agent/connect`
 - control-plane API: `http://localhost:8082`
+- dashboard: `http://localhost:8082/dashboard/`
 
 Postgres is available only inside the Compose network as `postgres:5432`.
 
