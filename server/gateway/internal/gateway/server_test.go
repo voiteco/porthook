@@ -963,6 +963,62 @@ func TestPublicRequestEnforcesBasicAccessPolicy(t *testing.T) {
 	}
 }
 
+func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
+	cfg := testConfig()
+	cfg.RequestLogLimit = 2
+	server := NewServer(cfg, slog.Default())
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/missing?secret=value", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "missing.localhost"
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+
+	logResp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?limit=1")
+	if err != nil {
+		t.Fatalf("GET request logs returned error: %v", err)
+	}
+	defer logResp.Body.Close()
+	body, err := io.ReadAll(logResp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if logResp.StatusCode != http.StatusOK {
+		t.Fatalf("logs status = %d, want 200; body = %q", logResp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "secret=value") {
+		t.Fatalf("request logs leaked raw query: %q", body)
+	}
+
+	var payload requestLogsResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode request logs returned error: %v", err)
+	}
+	if len(payload.RequestLogs) != 1 {
+		t.Fatalf("request_logs = %d, want 1", len(payload.RequestLogs))
+	}
+	entry := payload.RequestLogs[0]
+	if entry.Host != "missing.localhost" || entry.Path != "/missing" || !entry.QueryPresent {
+		t.Fatalf("entry = %+v, want host/path/query_present", entry)
+	}
+	if entry.Status != http.StatusNotFound || entry.Outcome != "no_active_session" {
+		t.Fatalf("entry = %+v, want 404 no_active_session", entry)
+	}
+}
+
 func TestPublicRequestRejectsLargeBody(t *testing.T) {
 	cfg := testConfig()
 	cfg.MaxBodyBytes = 3

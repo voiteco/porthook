@@ -34,14 +34,15 @@ const (
 )
 
 type Server struct {
-	cfg       Config
-	logger    *slog.Logger
-	registry  *registry.Registry
-	tokens    agentTokenValidator
-	reserved  reservedSubdomainAuthorizer
-	access    accessPolicyEvaluator
-	metrics   metrics
-	startedAt time.Time
+	cfg         Config
+	logger      *slog.Logger
+	registry    *registry.Registry
+	tokens      agentTokenValidator
+	reserved    reservedSubdomainAuthorizer
+	access      accessPolicyEvaluator
+	metrics     metrics
+	startedAt   time.Time
+	requestLogs *requestLogBuffer
 
 	sessionsMu sync.RWMutex
 	sessions   map[string]*agentSession
@@ -72,14 +73,15 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 	}
 
 	return &Server{
-		cfg:       cfg,
-		logger:    logger,
-		registry:  registry.New(),
-		tokens:    tokenValidator,
-		reserved:  reservedAuthorizer,
-		access:    accessPolicyEvaluator,
-		startedAt: time.Now().UTC(),
-		sessions:  make(map[string]*agentSession),
+		cfg:         cfg,
+		logger:      logger,
+		registry:    registry.New(),
+		tokens:      tokenValidator,
+		reserved:    reservedAuthorizer,
+		access:      accessPolicyEvaluator,
+		startedAt:   time.Now().UTC(),
+		requestLogs: newRequestLogBuffer(cfg.RequestLogLimit),
+		sessions:    make(map[string]*agentSession),
 
 		generateSubdomain: names.RandomSubdomain,
 		generateTunnelID:  newTunnelID,
@@ -139,6 +141,7 @@ func (s *Server) PublicHandler() http.Handler {
 		_, _ = w.Write([]byte("ready\n"))
 	})
 	mux.HandleFunc("/api/v1/tunnels", s.handleTunnelList)
+	mux.HandleFunc("/api/v1/request-logs", s.handleRequestLogs)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/", s.handlePublicRequest)
 	return mux
@@ -240,6 +243,23 @@ func (s *Server) handleTunnelList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, tunnelListResponse{Tunnels: tunnels})
+}
+
+func (s *Server) handleRequestLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, "GET, OPTIONS")
+		return
+	}
+
+	limit := requestLogLimit(r, s.cfg.RequestLogLimit)
+	writeJSON(w, http.StatusOK, requestLogsResponse{RequestLogs: s.requestLogs.list(limit)})
 }
 
 func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (agentTokenValidation, error) {
@@ -521,7 +541,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		if status == 0 {
 			status = http.StatusInternalServerError
 		}
-		s.logPublicRequest(r, publicRequestLog{
+		entry := publicRequestLog{
 			Started:       started,
 			Status:        status,
 			Outcome:       outcome,
@@ -531,7 +551,9 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 			RequestBytes:  requestBytes,
 			ResponseBytes: responseBytes,
 			Error:         requestErr,
-		})
+		}
+		s.logPublicRequest(r, entry)
+		s.requestLogs.add(requestLogEntryFromPublicRequest(r, entry))
 		s.recordPublicRequestMetrics(status, outcome)
 	}()
 

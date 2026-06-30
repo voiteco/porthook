@@ -30,6 +30,7 @@ const (
 	defaultWebSocketPingInterval = 15 * time.Second
 	defaultWebSocketPongTimeout  = 5 * time.Second
 	defaultShutdownTimeout       = 5 * time.Second
+	defaultRequestLogLimit       = 500
 )
 
 type Config struct {
@@ -56,6 +57,7 @@ type Config struct {
 	WebSocketPingInterval      time.Duration
 	WebSocketPongTimeout       time.Duration
 	ShutdownTimeout            time.Duration
+	RequestLogLimit            int
 }
 
 func ConfigFromEnv() Config {
@@ -83,6 +85,7 @@ func ConfigFromEnv() Config {
 		WebSocketPingInterval:      envDuration("PORTHOOK_WS_PING_INTERVAL", defaultWebSocketPingInterval),
 		WebSocketPongTimeout:       envDuration("PORTHOOK_WS_PONG_TIMEOUT", defaultWebSocketPongTimeout),
 		ShutdownTimeout:            envDuration("PORTHOOK_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
+		RequestLogLimit:            envInt("PORTHOOK_REQUEST_LOG_LIMIT", defaultRequestLogLimit),
 	})
 }
 
@@ -149,6 +152,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.ShutdownTimeout <= 0 {
 		cfg.ShutdownTimeout = defaultShutdownTimeout
+	}
+	if cfg.RequestLogLimit < 0 {
+		cfg.RequestLogLimit = defaultRequestLogLimit
 	}
 	return cfg
 }
