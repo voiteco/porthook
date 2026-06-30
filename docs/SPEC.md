@@ -457,6 +457,7 @@ api_tokens
   name
   token_hash
   scopes
+  last_used_at
   revoked_at
   created_at
 

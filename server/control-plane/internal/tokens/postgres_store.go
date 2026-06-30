@@ -46,13 +46,14 @@ func (s *PostgresStore) Create(ctx context.Context, record TokenRecord) error {
 
 	_, err = s.db.ExecContext(
 		ctx,
-		`INSERT INTO api_tokens (id, name, token_hash, scopes_json, created_at, revoked_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO api_tokens (id, name, token_hash, scopes_json, created_at, last_used_at, revoked_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		record.ID,
 		record.Name,
 		record.TokenHash,
 		scopesJSON,
 		record.CreatedAt,
+		record.LastUsedAt,
 		record.RevokedAt,
 	)
 	if err != nil {
@@ -62,11 +63,11 @@ func (s *PostgresStore) Create(ctx context.Context, record TokenRecord) error {
 }
 
 func (s *PostgresStore) LookupByHash(ctx context.Context, tokenHash string) (TokenRecord, bool, error) {
-	return s.lookup(ctx, `SELECT id, name, token_hash, scopes_json, created_at, revoked_at FROM api_tokens WHERE token_hash = $1`, tokenHash)
+	return s.lookup(ctx, selectTokenRecordSQL+` WHERE token_hash = $1`, tokenHash)
 }
 
 func (s *PostgresStore) List(ctx context.Context) ([]TokenRecord, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, token_hash, scopes_json, created_at, revoked_at FROM api_tokens ORDER BY created_at DESC, id ASC`)
+	rows, err := s.db.QueryContext(ctx, selectTokenRecordSQL+` ORDER BY created_at DESC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list tokens: %w", err)
 	}
@@ -87,7 +88,15 @@ func (s *PostgresStore) List(ctx context.Context) ([]TokenRecord, error) {
 }
 
 func (s *PostgresStore) LookupByID(ctx context.Context, id string) (TokenRecord, bool, error) {
-	return s.lookup(ctx, `SELECT id, name, token_hash, scopes_json, created_at, revoked_at FROM api_tokens WHERE id = $1`, id)
+	return s.lookup(ctx, selectTokenRecordSQL+` WHERE id = $1`, id)
+}
+
+func (s *PostgresStore) MarkUsed(ctx context.Context, id string, usedAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = $1 WHERE id = $2 AND revoked_at IS NULL`, usedAt, id)
+	if err != nil {
+		return fmt.Errorf("mark token used: %w", err)
+	}
+	return nil
 }
 
 func (s *PostgresStore) Revoke(ctx context.Context, id string, revokedAt time.Time) error {
@@ -113,9 +122,12 @@ type tokenRecordScanner interface {
 	Scan(dest ...any) error
 }
 
+const selectTokenRecordSQL = `SELECT id, name, token_hash, scopes_json, created_at, last_used_at, revoked_at FROM api_tokens`
+
 func scanTokenRecord(scanner tokenRecordScanner) (TokenRecord, error) {
 	var record TokenRecord
 	var scopesJSON string
+	var lastUsedAt sql.NullTime
 	var revokedAt sql.NullTime
 	err := scanner.Scan(
 		&record.ID,
@@ -123,6 +135,7 @@ func scanTokenRecord(scanner tokenRecordScanner) (TokenRecord, error) {
 		&record.TokenHash,
 		&scopesJSON,
 		&record.CreatedAt,
+		&lastUsedAt,
 		&revokedAt,
 	)
 	if err != nil {
@@ -131,6 +144,9 @@ func scanTokenRecord(scanner tokenRecordScanner) (TokenRecord, error) {
 	record.Scopes, err = decodeScopes(scopesJSON)
 	if err != nil {
 		return TokenRecord{}, err
+	}
+	if lastUsedAt.Valid {
+		record.LastUsedAt = &lastUsedAt.Time
 	}
 	if revokedAt.Valid {
 		record.RevokedAt = &revokedAt.Time

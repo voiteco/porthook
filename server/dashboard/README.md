@@ -19,6 +19,8 @@ Authentication uses the self-hosted `PORTHOOK_CONTROL_ADMIN_TOKEN`. The browser 
 
 The dashboard displays plaintext agent tokens only from the token create response. Token list responses contain summaries without plaintext token values.
 
+Token tables include `last_used_at` metadata, updated when the gateway successfully validates an agent token through the control plane.
+
 Future dashboard scope:
 
 - Active tunnels.

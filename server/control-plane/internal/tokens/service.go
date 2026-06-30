@@ -112,6 +112,10 @@ func (s *Service) ValidateToken(ctx context.Context, token, requiredScope string
 		return ValidationResult{Valid: false}, nil
 	}
 
+	if err := s.store.MarkUsed(ctx, record.ID, s.now()); err != nil {
+		return ValidationResult{}, err
+	}
+
 	return ValidationResult{
 		Valid:   true,
 		TokenID: record.ID,
@@ -130,11 +134,12 @@ func (s *Service) ListTokens(ctx context.Context) (ListTokensResponse, error) {
 	out := make([]TokenSummary, 0, len(records))
 	for _, record := range records {
 		out = append(out, TokenSummary{
-			ID:        record.ID,
-			Name:      record.Name,
-			Scopes:    cloneScopes(record.Scopes),
-			CreatedAt: record.CreatedAt,
-			RevokedAt: cloneTimePtr(record.RevokedAt),
+			ID:         record.ID,
+			Name:       record.Name,
+			Scopes:     cloneScopes(record.Scopes),
+			CreatedAt:  record.CreatedAt,
+			LastUsedAt: cloneTimePtr(record.LastUsedAt),
+			RevokedAt:  cloneTimePtr(record.RevokedAt),
 		})
 	}
 	return ListTokensResponse{Tokens: out}, nil

@@ -13,6 +13,10 @@ func TestServiceCreatesAndValidatesToken(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
 	service := NewService(store)
+	createdAt := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
+	usedAt := createdAt.Add(15 * time.Minute)
+	now := createdAt
+	service.now = func() time.Time { return now }
 
 	created, err := service.CreateToken(ctx, CreateTokenRequest{
 		Name:   "local agent",
@@ -31,6 +35,7 @@ func TestServiceCreatesAndValidatesToken(t *testing.T) {
 		t.Fatalf("name = %q, want local agent", created.Name)
 	}
 
+	now = usedAt
 	result, err := service.ValidateToken(ctx, created.Token, ScopeRegisterTunnel)
 	if err != nil {
 		t.Fatalf("ValidateToken returned error: %v", err)
@@ -40,6 +45,17 @@ func TestServiceCreatesAndValidatesToken(t *testing.T) {
 	}
 	if result.TokenID != created.ID {
 		t.Fatalf("token id = %q, want %q", result.TokenID, created.ID)
+	}
+
+	listed, err := service.ListTokens(ctx)
+	if err != nil {
+		t.Fatalf("ListTokens returned error: %v", err)
+	}
+	if len(listed.Tokens) != 1 {
+		t.Fatalf("listed tokens = %d, want 1", len(listed.Tokens))
+	}
+	if listed.Tokens[0].LastUsedAt == nil || !listed.Tokens[0].LastUsedAt.Equal(usedAt) {
+		t.Fatalf("last_used_at = %v, want %s", listed.Tokens[0].LastUsedAt, usedAt)
 	}
 }
 
@@ -167,6 +183,9 @@ func TestServiceListsTokenSummaries(t *testing.T) {
 	summary := listed.Tokens[0]
 	if summary.ID != created.ID || summary.Name != "listed" {
 		t.Fatalf("summary = %+v, want created token summary", summary)
+	}
+	if summary.LastUsedAt != nil {
+		t.Fatalf("summary last_used_at = %v, want nil", summary.LastUsedAt)
 	}
 	if summary.RevokedAt == nil {
 		t.Fatalf("summary revoked_at = nil, want timestamp")
