@@ -90,6 +90,8 @@ Postgres is available only inside the Compose network as `postgres:5432`.
 
 The production Compose stack keeps the gateway and control-plane ports private to the Compose network and exposes only the Caddy reverse proxy on ports `80` and `443`.
 
+Read [../../docs/DOMAINS_TLS.md](../../docs/DOMAINS_TLS.md) before using this stack for internet-facing traffic.
+
 Copy the production example environment and replace every `change-me` value:
 
 ```sh

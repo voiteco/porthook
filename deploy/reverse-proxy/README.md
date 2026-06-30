@@ -9,6 +9,8 @@ The gateway has two listeners:
 
 The control plane serves the API and dashboard. Keep the control-plane listener private or behind an additional access boundary.
 
+See [../../docs/DOMAINS_TLS.md](../../docs/DOMAINS_TLS.md) for the full domain, wildcard DNS, and TLS guide.
+
 ## Hostnames
 
 Use separate names for each surface:
