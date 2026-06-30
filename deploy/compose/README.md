@@ -4,6 +4,7 @@ This directory contains the first self-hosted Docker Compose paths.
 
 - `docker-compose.yml` runs only `porthook-gateway` with static-token auth for the local MVP smoke path.
 - `docker-compose.control-plane.yml` runs Postgres, `porthook-control-plane`, and `porthook-gateway` with control-plane token validation.
+- `docker-compose.production.yml` runs Postgres, `porthook-control-plane`, `porthook-gateway`, and Caddy for TLS termination.
 
 The local HTTP service and `porthook` agent still run on the host.
 
@@ -84,6 +85,51 @@ The stack listens on:
 - dashboard: `http://localhost:8082/dashboard/`
 
 Postgres is available only inside the Compose network as `postgres:5432`.
+
+## Production Stack
+
+The production Compose stack keeps the gateway and control-plane ports private to the Compose network and exposes only the Caddy reverse proxy on ports `80` and `443`.
+
+Copy the production example environment and replace every `change-me` value:
+
+```sh
+cp deploy/compose/.env.production.example deploy/compose/.env.production
+```
+
+Configure these public names:
+
+| Environment variable | Purpose |
+| --- | --- |
+| `PORTHOOK_ROOT_DOMAIN` | Wildcard tunnel domain, for example `tunnels.example.com`. |
+| `PORTHOOK_PUBLIC_URL` | Public URL printed for registered tunnels, for example `https://tunnels.example.com`. |
+| `PORTHOOK_AGENT_DOMAIN` | Dedicated hostname agents use for WebSocket connections. |
+| `PORTHOOK_CONTROL_DOMAIN` | Dedicated hostname for the control-plane API and dashboard. |
+| `PORTHOOK_TLS_CERT_PATH` | Absolute host path to the wildcard certificate mounted into Caddy. |
+| `PORTHOOK_TLS_KEY_PATH` | Absolute host path to the wildcard private key mounted into Caddy. |
+
+Before starting the stack:
+
+- Point wildcard DNS for `*.${PORTHOOK_ROOT_DOMAIN}` at the host running the reverse proxy.
+- Point `PORTHOOK_AGENT_DOMAIN` at the same host.
+- Keep `PORTHOOK_CONTROL_DOMAIN` private or protect it with a separate access boundary.
+- Mount a certificate that covers `*.${PORTHOOK_ROOT_DOMAIN}`, `PORTHOOK_AGENT_DOMAIN`, and `PORTHOOK_CONTROL_DOMAIN`.
+
+Start the production stack:
+
+```sh
+docker compose \
+  --env-file deploy/compose/.env.production \
+  -f deploy/compose/docker-compose.production.yml \
+  up --build -d
+```
+
+The stack listens externally on:
+
+- public HTTPS tunnels: `https://<subdomain>.<PORTHOOK_ROOT_DOMAIN>`
+- agent WebSocket endpoint: `https://<PORTHOOK_AGENT_DOMAIN>/agent/connect`
+- control-plane API and dashboard: `https://<PORTHOOK_CONTROL_DOMAIN>`
+
+The gateway, control plane, and Postgres are only reachable inside the Compose network.
 
 ## Dashboard
 
@@ -204,5 +250,14 @@ Stop the control-plane stack:
 docker compose \
   --env-file deploy/compose/.env.control-plane \
   -f deploy/compose/docker-compose.control-plane.yml \
+  down
+```
+
+Stop the production stack:
+
+```sh
+docker compose \
+  --env-file deploy/compose/.env.production \
+  -f deploy/compose/docker-compose.production.yml \
   down
 ```
