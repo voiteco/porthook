@@ -1491,7 +1491,11 @@ func TestPublicHandlerMetricsEndpoint(t *testing.T) {
 	}
 	for _, want := range []string{
 		"porthook_gateway_active_tunnels 0",
+		"porthook_gateway_uptime_seconds ",
 		"porthook_gateway_public_requests_total 1",
+		"porthook_gateway_public_request_errors_total 0",
+		"porthook_gateway_public_request_no_active_session_total 1",
+		"porthook_gateway_tunnel_registration_failures_total 0",
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("metrics = %q, want %q", string(body), want)

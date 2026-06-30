@@ -100,7 +100,7 @@ printf '%s' 'admin-secret' | porthook reserved create \
 - `POST /api/v1/reserved-subdomains`
 - `DELETE /api/v1/reserved-subdomains/{id}`
 
-`/readyz` checks the token and reservation stores. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include token admin operations, token validations, reserved subdomain operations, authorization failures, and readiness failures.
+`/readyz` checks the token and reservation stores. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include readiness state, process uptime, token inventory, reserved subdomain inventory, token admin operations, token validations, reserved subdomain operations, authorization failures, and readiness failures.
 
 `/api/v1/status` returns JSON with the control-plane readiness state and binary version for dashboard and automation checks.
 

@@ -3,9 +3,11 @@
 package controlplane
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync/atomic"
+	"time"
 )
 
 type metrics struct {
@@ -33,6 +35,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	writeMetric(w, "porthook_control_plane_ready", "Control-plane readiness state, 1 for ready and 0 for not ready.", "gauge", s.readinessGauge(r))
+	writeMetric(w, "porthook_control_plane_uptime_seconds", "Control-plane process uptime in seconds.", "gauge", uint64(time.Since(s.startedAt).Seconds()))
+	s.writeInventoryMetrics(w, r)
 	writeMetric(w, "porthook_control_plane_token_admin_creates_total", "Successful token create operations.", "counter", s.metrics.tokenAdminCreatesTotal.Load())
 	writeMetric(w, "porthook_control_plane_token_admin_lists_total", "Successful token list operations.", "counter", s.metrics.tokenAdminListsTotal.Load())
 	writeMetric(w, "porthook_control_plane_token_admin_revokes_total", "Successful token revoke operations.", "counter", s.metrics.tokenAdminRevokesTotal.Load())
@@ -48,6 +53,34 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetric(w, "porthook_control_plane_reservation_authorization_denied_total", "Reserved subdomain authorization requests that returned allowed=false.", "counter", s.metrics.reservationAuthorizationDeniedTotal.Load())
 	writeMetric(w, "porthook_control_plane_auth_failures_total", "Bearer authorization failures on control-plane endpoints.", "counter", s.metrics.authFailuresTotal.Load())
 	writeMetric(w, "porthook_control_plane_readiness_failures_total", "Readiness checks that failed.", "counter", s.metrics.readinessFailuresTotal.Load())
+}
+
+func (s *Server) readinessGauge(r *http.Request) uint64 {
+	ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
+	defer cancel()
+	if err := s.ready(ctx); err != nil {
+		return 0
+	}
+	return 1
+}
+
+func (s *Server) writeInventoryMetrics(w http.ResponseWriter, r *http.Request) {
+	listedTokens, err := s.service.ListTokens(r.Context())
+	if err == nil {
+		revoked := 0
+		for _, token := range listedTokens.Tokens {
+			if token.RevokedAt != nil {
+				revoked++
+			}
+		}
+		writeMetric(w, "porthook_control_plane_tokens", "Current token records in the control plane.", "gauge", uint64(len(listedTokens.Tokens)))
+		writeMetric(w, "porthook_control_plane_tokens_revoked", "Current revoked token records in the control plane.", "gauge", uint64(revoked))
+	}
+
+	listedReservations, err := s.reservations.ListReservations(r.Context())
+	if err == nil {
+		writeMetric(w, "porthook_control_plane_reserved_subdomains", "Current reserved subdomain records in the control plane.", "gauge", uint64(len(listedReservations.ReservedSubdomains)))
+	}
 }
 
 func writeMetric(w http.ResponseWriter, name, help, metricType string, value uint64) {

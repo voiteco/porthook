@@ -100,6 +100,20 @@ Common symptoms:
 | Dashboard login fails | Control-plane admin token, access boundary, browser session storage, `/api/v1/status`. |
 | Requested subdomain rejected | Reservation ownership for the token used by the agent. |
 
+Useful metrics:
+
+| Metric | Use |
+| --- | --- |
+| `porthook_gateway_active_tunnels` | Current gateway tunnel sessions. |
+| `porthook_gateway_public_request_errors_total` | Public requests that returned `5xx`. |
+| `porthook_gateway_public_request_rate_limited_total` | Per-tunnel rate limit pressure. |
+| `porthook_gateway_public_request_timeouts_total` | Tunnel round-trip timeout pressure. |
+| `porthook_gateway_tunnel_registration_failures_total` | Agent registration failures after authentication. |
+| `porthook_control_plane_ready` | Control-plane readiness as `1` or `0`. |
+| `porthook_control_plane_tokens` | Current token records. |
+| `porthook_control_plane_tokens_revoked` | Current revoked token records. |
+| `porthook_control_plane_reserved_subdomains` | Current reserved subdomain records. |
+
 ## Postgres Backup
 
 Create backups before upgrades, risky configuration changes, and token migrations:
