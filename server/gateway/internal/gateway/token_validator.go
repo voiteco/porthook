@@ -17,29 +17,58 @@ import (
 const scopeRegisterTunnel = "register_tunnel"
 
 type agentTokenValidator interface {
-	ValidateAgentToken(context.Context, string) (bool, error)
+	ValidateAgentToken(context.Context, string) (agentTokenValidation, error)
+}
+
+type reservedSubdomainAuthorizer interface {
+	AuthorizeReservedSubdomain(context.Context, string, string) (reservedSubdomainAuthorization, error)
+}
+
+type agentTokenValidation struct {
+	Valid   bool
+	TokenID string
+}
+
+type reservedSubdomainAuthorization struct {
+	Allowed bool
+	Reason  string
 }
 
 type staticTokenValidator struct {
 	token string
 }
 
+type staticReservedSubdomainAuthorizer struct{}
+
 type errorTokenValidator struct {
 	err error
 }
 
-func (v errorTokenValidator) ValidateAgentToken(context.Context, string) (bool, error) {
-	return false, v.err
+type errorReservedSubdomainAuthorizer struct {
+	err error
 }
 
-func (v staticTokenValidator) ValidateAgentToken(_ context.Context, token string) (bool, error) {
-	return secretEqual(token, v.token), nil
+func (v errorTokenValidator) ValidateAgentToken(context.Context, string) (agentTokenValidation, error) {
+	return agentTokenValidation{}, v.err
 }
 
-type controlPlaneTokenValidator struct {
-	endpoint    string
-	bearerToken string
-	client      *http.Client
+func (v staticTokenValidator) ValidateAgentToken(_ context.Context, token string) (agentTokenValidation, error) {
+	return agentTokenValidation{Valid: secretEqual(token, v.token)}, nil
+}
+
+func (v staticReservedSubdomainAuthorizer) AuthorizeReservedSubdomain(context.Context, string, string) (reservedSubdomainAuthorization, error) {
+	return reservedSubdomainAuthorization{Allowed: true}, nil
+}
+
+func (v errorReservedSubdomainAuthorizer) AuthorizeReservedSubdomain(context.Context, string, string) (reservedSubdomainAuthorization, error) {
+	return reservedSubdomainAuthorization{}, v.err
+}
+
+type controlPlaneClient struct {
+	tokenValidationEndpoint        string
+	reservedSubdomainAuthzEndpoint string
+	bearerToken                    string
+	client                         *http.Client
 }
 
 type validateTokenRequest struct {
@@ -48,68 +77,132 @@ type validateTokenRequest struct {
 }
 
 type validateTokenResponse struct {
-	Valid bool `json:"valid"`
+	Valid   bool   `json:"valid"`
+	TokenID string `json:"token_id,omitempty"`
+}
+
+type authorizeReservedSubdomainRequest struct {
+	TokenID   string `json:"token_id"`
+	Subdomain string `json:"subdomain"`
+}
+
+type authorizeReservedSubdomainResponse struct {
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 func newAgentTokenValidator(cfg Config) (agentTokenValidator, error) {
 	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
 		return staticTokenValidator{token: cfg.StaticToken}, nil
 	}
+	return newControlPlaneClient(cfg)
+}
+
+func newReservedSubdomainAuthorizer(cfg Config) (reservedSubdomainAuthorizer, error) {
+	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
+		return staticReservedSubdomainAuthorizer{}, nil
+	}
+	return newControlPlaneClient(cfg)
+}
+
+func newControlPlaneClient(cfg Config) (controlPlaneClient, error) {
 	controlPlaneToken := strings.TrimSpace(cfg.ControlPlaneToken)
 	if controlPlaneToken == "" {
-		return nil, fmt.Errorf("control plane token is required when control plane URL is configured")
+		return controlPlaneClient{}, fmt.Errorf("control plane token is required when control plane URL is configured")
 	}
 
 	parsed, err := url.Parse(cfg.ControlPlaneURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse control plane URL: %w", err)
+		return controlPlaneClient{}, fmt.Errorf("parse control plane URL: %w", err)
 	}
 	if parsed.Scheme == "" || parsed.Host == "" {
-		return nil, fmt.Errorf("control plane URL must include scheme and host")
+		return controlPlaneClient{}, fmt.Errorf("control plane URL must include scheme and host")
 	}
-	parsed.Path = joinURLPath(parsed.Path, "/api/v1/tokens/validate")
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
+	tokenValidationEndpoint := controlPlaneEndpoint(*parsed, "/api/v1/tokens/validate")
+	reservedSubdomainAuthzEndpoint := controlPlaneEndpoint(*parsed, "/api/v1/reserved-subdomains/authorize")
 
-	return controlPlaneTokenValidator{
-		endpoint:    parsed.String(),
-		bearerToken: controlPlaneToken,
+	return controlPlaneClient{
+		tokenValidationEndpoint:        tokenValidationEndpoint,
+		reservedSubdomainAuthzEndpoint: reservedSubdomainAuthzEndpoint,
+		bearerToken:                    controlPlaneToken,
 		client: &http.Client{
 			Timeout: cfg.ControlPlaneTimeout,
 		},
 	}, nil
 }
 
-func (v controlPlaneTokenValidator) ValidateAgentToken(ctx context.Context, token string) (bool, error) {
+func (v controlPlaneClient) ValidateAgentToken(ctx context.Context, token string) (agentTokenValidation, error) {
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(validateTokenRequest{
 		Token: token,
 		Scope: scopeRegisterTunnel,
 	}); err != nil {
-		return false, err
+		return agentTokenValidation{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.endpoint, &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.tokenValidationEndpoint, &body)
 	if err != nil {
-		return false, err
+		return agentTokenValidation{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+v.bearerToken)
 
 	resp, err := v.client.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("validate token: %w", err)
+		return agentTokenValidation{}, fmt.Errorf("validate token: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("validate token returned status %d", resp.StatusCode)
+		return agentTokenValidation{}, fmt.Errorf("validate token returned status %d", resp.StatusCode)
 	}
 
 	var result validateTokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, fmt.Errorf("decode token validation: %w", err)
+		return agentTokenValidation{}, fmt.Errorf("decode token validation: %w", err)
 	}
-	return result.Valid, nil
+	return agentTokenValidation{
+		Valid:   result.Valid,
+		TokenID: result.TokenID,
+	}, nil
+}
+
+func (v controlPlaneClient) AuthorizeReservedSubdomain(ctx context.Context, tokenID, subdomain string) (reservedSubdomainAuthorization, error) {
+	if strings.TrimSpace(tokenID) == "" {
+		return reservedSubdomainAuthorization{}, fmt.Errorf("control plane token validation did not return token_id; upgrade the control plane or omit requested subdomain")
+	}
+
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(authorizeReservedSubdomainRequest{
+		TokenID:   tokenID,
+		Subdomain: subdomain,
+	}); err != nil {
+		return reservedSubdomainAuthorization{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.reservedSubdomainAuthzEndpoint, &body)
+	if err != nil {
+		return reservedSubdomainAuthorization{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+v.bearerToken)
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return reservedSubdomainAuthorization{}, fmt.Errorf("authorize reserved subdomain: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return reservedSubdomainAuthorization{}, fmt.Errorf("authorize reserved subdomain returned status %d", resp.StatusCode)
+	}
+
+	var result authorizeReservedSubdomainResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return reservedSubdomainAuthorization{}, fmt.Errorf("decode reserved subdomain authorization: %w", err)
+	}
+	return reservedSubdomainAuthorization{
+		Allowed: result.Allowed,
+		Reason:  result.Reason,
+	}, nil
 }
 
 func secretEqual(got, want string) bool {
@@ -132,4 +225,11 @@ func joinURLPath(basePath, requestPath string) string {
 	default:
 		return basePath + requestPath
 	}
+}
+
+func controlPlaneEndpoint(base url.URL, path string) string {
+	base.Path = joinURLPath(base.Path, path)
+	base.RawQuery = ""
+	base.Fragment = ""
+	return base.String()
 }

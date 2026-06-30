@@ -37,6 +37,7 @@ type Server struct {
 	logger   *slog.Logger
 	registry *registry.Registry
 	tokens   agentTokenValidator
+	reserved reservedSubdomainAuthorizer
 	metrics  metrics
 
 	sessionsMu sync.RWMutex
@@ -56,12 +57,18 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 		logger.Warn("gateway token validator configuration failed", "error", err)
 		tokenValidator = errorTokenValidator{err: err}
 	}
+	reservedAuthorizer, err := newReservedSubdomainAuthorizer(cfg)
+	if err != nil {
+		logger.Warn("gateway reserved subdomain authorizer configuration failed", "error", err)
+		reservedAuthorizer = errorReservedSubdomainAuthorizer{err: err}
+	}
 
 	return &Server{
 		cfg:      cfg,
 		logger:   logger,
 		registry: registry.New(),
 		tokens:   tokenValidator,
+		reserved: reservedAuthorizer,
 		sessions: make(map[string]*agentSession),
 
 		generateSubdomain: names.RandomSubdomain,
@@ -144,14 +151,15 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r.Context(), s.cfg.HandshakeTimeout)
 	defer cancel()
 
-	if err := s.authenticateAgent(ctx, conn); err != nil {
+	identity, err := s.authenticateAgent(ctx, conn)
+	if err != nil {
 		s.metrics.authFailuresTotal.Add(1)
 		s.logger.Warn("agent authentication failed", "error", err)
 		_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
 		return
 	}
 
-	session, err := s.registerTunnel(ctx, conn)
+	session, err := s.registerTunnel(ctx, conn, identity)
 	if err != nil {
 		s.logger.Warn("tunnel registration failed", "error", err)
 		_ = conn.Close(websocket.StatusPolicyViolation, "registration failed")
@@ -174,21 +182,21 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	session.readLoop(r.Context(), s.logger)
 }
 
-func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) error {
+func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (agentTokenValidation, error) {
 	var env messages.Envelope
 	if err := wsjson.Read(ctx, conn, &env); err != nil {
-		return fmt.Errorf("read auth request: %w", err)
+		return agentTokenValidation{}, fmt.Errorf("read auth request: %w", err)
 	}
 	if env.Type != messages.TypeAuthRequest {
-		return fmt.Errorf("expected %s, got %s", messages.TypeAuthRequest, env.Type)
+		return agentTokenValidation{}, fmt.Errorf("expected %s, got %s", messages.TypeAuthRequest, env.Type)
 	}
 
 	payload, err := messages.DecodePayload[messages.AuthRequest](env)
 	if err != nil {
-		return err
+		return agentTokenValidation{}, err
 	}
 	s.metrics.tokenValidationsTotal.Add(1)
-	validToken, err := s.tokens.ValidateAgentToken(ctx, payload.Token)
+	validation, err := s.tokens.ValidateAgentToken(ctx, payload.Token)
 	if err != nil {
 		s.metrics.tokenValidationErrorsTotal.Add(1)
 		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
@@ -196,15 +204,15 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) er
 			Message: "token validation failed",
 		})
 		_ = wsjson.Write(ctx, conn, authErr)
-		return fmt.Errorf("validate token: %w", err)
+		return agentTokenValidation{}, fmt.Errorf("validate token: %w", err)
 	}
-	if !validToken {
+	if !validation.Valid {
 		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
 			Code:    "invalid_token",
 			Message: "invalid token",
 		})
 		_ = wsjson.Write(ctx, conn, authErr)
-		return errors.New("invalid token")
+		return agentTokenValidation{}, errors.New("invalid token")
 	}
 	if payload.ProtocolVersion != messages.ProtocolVersion {
 		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
@@ -212,7 +220,7 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) er
 			Message: fmt.Sprintf("protocol version %q is not supported, expected %q", payload.ProtocolVersion, messages.ProtocolVersion),
 		})
 		_ = wsjson.Write(ctx, conn, authErr)
-		return fmt.Errorf("unsupported protocol version %q", payload.ProtocolVersion)
+		return agentTokenValidation{}, fmt.Errorf("unsupported protocol version %q", payload.ProtocolVersion)
 	}
 	missing := messages.MissingRequiredCapabilities(payload.Capabilities, messages.DefaultProtocolCapabilities())
 	if len(missing) > 0 {
@@ -221,7 +229,7 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) er
 			Message: fmt.Sprintf("agent protocol is missing capabilities: %s", strings.Join(missing, ", ")),
 		})
 		_ = wsjson.Write(ctx, conn, authErr)
-		return fmt.Errorf("agent capabilities missing: %v", strings.Join(missing, ", "))
+		return agentTokenValidation{}, fmt.Errorf("agent capabilities missing: %v", strings.Join(missing, ", "))
 	}
 
 	authOK, err := messages.New(messages.TypeAuthOK, messages.AuthOK{
@@ -229,12 +237,15 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) er
 		Capabilities:    messages.DefaultProtocolCapabilities(),
 	})
 	if err != nil {
-		return err
+		return agentTokenValidation{}, err
 	}
-	return wsjson.Write(ctx, conn, authOK)
+	if err := wsjson.Write(ctx, conn, authOK); err != nil {
+		return agentTokenValidation{}, err
+	}
+	return validation, nil
 }
 
-func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn) (*agentSession, error) {
+func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn, identity agentTokenValidation) (*agentSession, error) {
 	var env messages.Envelope
 	if err := wsjson.Read(ctx, conn, &env); err != nil {
 		return nil, fmt.Errorf("read tunnel registration: %w", err)
@@ -252,7 +263,7 @@ func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn) (*age
 		return nil, fmt.Errorf("unsupported tunnel protocol %q", payload.Protocol)
 	}
 
-	tunnel, err := s.registerTunnelSession(ctx, conn, payload)
+	tunnel, err := s.registerTunnelSession(ctx, conn, identity, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -281,18 +292,30 @@ func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn) (*age
 	), nil
 }
 
-func (s *Server) registerTunnelSession(ctx context.Context, conn *websocket.Conn, payload messages.TunnelRegister) (*registry.Session, error) {
+func (s *Server) registerTunnelSession(ctx context.Context, conn *websocket.Conn, identity agentTokenValidation, payload messages.TunnelRegister) (*registry.Session, error) {
 	if payload.RequestedSubdomain != "" {
-		return s.registerRequestedSubdomain(ctx, conn, payload)
+		return s.registerRequestedSubdomain(ctx, conn, identity, payload)
 	}
 	return s.registerRandomSubdomain(ctx, conn, payload)
 }
 
-func (s *Server) registerRequestedSubdomain(ctx context.Context, conn *websocket.Conn, payload messages.TunnelRegister) (*registry.Session, error) {
+func (s *Server) registerRequestedSubdomain(ctx context.Context, conn *websocket.Conn, identity agentTokenValidation, payload messages.TunnelRegister) (*registry.Session, error) {
 	subdomain := payload.RequestedSubdomain
 	if err := names.ValidateSubdomain(subdomain); err != nil {
 		message := fmt.Sprintf("invalid requested subdomain %q: %s", subdomain, err)
 		_ = writeTunnelError(ctx, conn, "invalid_subdomain", message)
+		return nil, errors.New(message)
+	}
+
+	authorization, err := s.reserved.AuthorizeReservedSubdomain(ctx, identity.TokenID, subdomain)
+	if err != nil {
+		message := "reserved subdomain authorization failed"
+		_ = writeTunnelError(ctx, conn, "subdomain_authorization_unavailable", message)
+		return nil, fmt.Errorf("%s: %w", message, err)
+	}
+	if !authorization.Allowed {
+		code, message := reservedSubdomainDeniedError(subdomain, authorization.Reason)
+		_ = writeTunnelError(ctx, conn, code, message)
 		return nil, errors.New(message)
 	}
 
@@ -379,6 +402,22 @@ func writeTunnelError(ctx context.Context, conn *websocket.Conn, code, message s
 		return err
 	}
 	return wsjson.Write(ctx, conn, tunnelErr)
+}
+
+func reservedSubdomainDeniedError(subdomain, reason string) (string, string) {
+	switch reason {
+	case "not_reserved":
+		return "subdomain_not_reserved", fmt.Sprintf("subdomain %q is not reserved for this token; reserve it first or omit --subdomain for a random subdomain", subdomain)
+	case "reserved_for_another_token":
+		return "subdomain_reserved", fmt.Sprintf("subdomain %q is reserved for another token; choose another name or omit --subdomain for a random subdomain", subdomain)
+	case "missing_token_id":
+		return "subdomain_authorization_unavailable", "control plane did not identify the agent token; omit --subdomain or upgrade the control plane"
+	default:
+		if strings.TrimSpace(reason) == "" {
+			reason = "not allowed"
+		}
+		return "subdomain_not_allowed", fmt.Sprintf("subdomain %q is not allowed: %s", subdomain, reason)
+	}
 }
 
 func (s *Server) publicURLForSubdomain(subdomain string) string {
