@@ -5,7 +5,7 @@ VERSION ?= dev
 LDFLAGS ?= -s -w -X main.version=$(VERSION)
 RELEASE_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: build clean compose-config docker-build docker-build-control-plane docker-build-gateway fmt fmt-check release-build release-checksums smoke-control-plane smoke-local test vet
+.PHONY: build clean compose-config docker-build docker-build-control-plane docker-build-gateway fmt fmt-check production-hardening-check release-build release-checksums smoke-control-plane smoke-local test vet
 
 build:
 	mkdir -p $(BIN_DIR)
@@ -28,6 +28,9 @@ compose-config:
 	docker compose -f deploy/compose/docker-compose.yml config
 	docker compose --env-file deploy/compose/.env.control-plane.example -f deploy/compose/docker-compose.control-plane.yml config
 	docker compose --env-file deploy/compose/.env.production.example -f deploy/compose/docker-compose.production.yml config
+
+production-hardening-check:
+	sh scripts/production-hardening-check.sh
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -path './.git/*')

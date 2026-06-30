@@ -12,6 +12,7 @@ All notable changes to Porthook are documented here.
 - Added audit-friendly gateway and control-plane log events with stable fields and token redaction tests.
 - Added operational runbooks for production Compose deploys, health triage, backups, restores, token rotation, upgrades, rollbacks, and incidents.
 - Added gateway request outcome metrics and control-plane readiness/inventory metrics.
+- Added a CI-enforced production hardening check for the production Compose stack and control-plane allowlist override.
 
 ## [0.6.0] - 2026-06-30
 

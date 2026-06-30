@@ -50,5 +50,8 @@ jobs:
       - name: Validate Docker Compose config
         run: make compose-config
 
+      - name: Check production hardening
+        run: make production-hardening-check
+
       - name: Build Docker images
         run: make docker-build VERSION=ci
