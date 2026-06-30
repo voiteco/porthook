@@ -21,6 +21,13 @@ import (
 
 var version = "dev"
 
+const usageText = `usage: porthook login --server URL [--token TOKEN | --token-stdin]
+       porthook logout
+       porthook http <port> [--server URL] [--token TOKEN] [--subdomain NAME]
+       porthook tokens <create|list|revoke> [options]
+       porthook version
+       porthook help`
+
 func main() {
 	if err := runWithIO(os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -74,6 +81,9 @@ func runWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Write
 		return nil
 	case "tokens":
 		return runTokensCommand(args[1:], stdin, stdout, stderr)
+	case "help", "--help", "-h":
+		printUsage(stdout)
+		return nil
 	default:
 		return usageError()
 	}
@@ -216,5 +226,9 @@ func readTokenInput(cfg tokenInputConfig) (string, error) {
 }
 
 func usageError() error {
-	return fmt.Errorf("usage: porthook login --server URL [--token TOKEN | --token-stdin]\n       porthook logout\n       porthook http <port> [--server URL] [--token TOKEN] [--subdomain NAME]\n       porthook tokens <create|list|revoke> [options]\n       porthook version")
+	return fmt.Errorf("%s", usageText)
+}
+
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, usageText)
 }

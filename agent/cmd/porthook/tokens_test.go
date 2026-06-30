@@ -69,6 +69,34 @@ func TestRunTokensCreateUsesAdminTokenStdin(t *testing.T) {
 	}
 }
 
+func TestRunTokensHelpPrintsUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := runWithIO([]string{"tokens", "help"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("run tokens help returned error: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{"tokens create", "tokens list", "tokens revoke"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestRunTokensCreateHelpPrintsScopeDefault(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := runWithIO([]string{"tokens", "create", "--help"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("run tokens create help returned error: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{"register_tunnel", "--admin-token-stdin", "--json"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
 func TestRunTokensListPrintsTable(t *testing.T) {
 	createdAt := time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC)
 	revokedAt := createdAt.Add(time.Minute)
@@ -111,6 +139,41 @@ func TestRunTokensListPrintsTable(t *testing.T) {
 	}
 }
 
+func TestRunTokensListUsesEnvironmentDefaults(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/tokens" {
+			t.Fatalf("request = %s %s, want GET /api/v1/tokens", r.Method, r.URL.Path)
+		}
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(listTokensResponse{})
+	}))
+	defer server.Close()
+
+	t.Setenv("PORTHOOK_CONTROL_PLANE_URL", server.URL)
+	t.Setenv("PORTHOOK_CONTROL_ADMIN_TOKEN", "admin-env")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runWithIO(
+		[]string{"tokens", "list", "--json"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	)
+	if err != nil {
+		t.Fatalf("run tokens list returned error: %v", err)
+	}
+	if gotAuth != "Bearer admin-env" {
+		t.Fatalf("Authorization = %q, want env admin token", gotAuth)
+	}
+	var listed listTokensResponse
+	if err := json.NewDecoder(&stdout).Decode(&listed); err != nil {
+		t.Fatalf("decode stdout returned error: %v", err)
+	}
+}
+
 func TestRunTokensRevokeUsesTokenID(t *testing.T) {
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +201,45 @@ func TestRunTokensRevokeUsesTokenID(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Token revoked: tok_revoke") {
 		t.Fatalf("stdout = %q, want revoke confirmation", stdout.String())
+	}
+}
+
+func TestRunTokensRejectsAdminTokenFlagAndStdin(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runWithIO(
+		[]string{"tokens", "list", "--control-plane", "http://127.0.0.1:8082", "--admin-token", "admin-flag", "--admin-token-stdin"},
+		strings.NewReader("admin-stdin"),
+		&stdout,
+		&stderr,
+	)
+	if err == nil {
+		t.Fatal("run tokens list returned nil error")
+	}
+	if !strings.Contains(err.Error(), "--admin-token and --admin-token-stdin are mutually exclusive") {
+		t.Fatalf("error = %q, want mutually exclusive guidance", err.Error())
+	}
+}
+
+func TestRunTokensReportsUnauthorizedClearly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runWithIO(
+		[]string{"tokens", "list", "--control-plane", server.URL, "--admin-token", "wrong"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	)
+	if err == nil {
+		t.Fatal("run tokens list returned nil error")
+	}
+	if !strings.Contains(err.Error(), "check --admin-token or --admin-token-stdin") {
+		t.Fatalf("error = %q, want admin token guidance", err.Error())
 	}
 }
 
