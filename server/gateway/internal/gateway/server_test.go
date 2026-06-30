@@ -1289,14 +1289,28 @@ func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 		t.Fatalf("auth response type = %s, want %s", authResp.Type, messages.TypeAuthError)
 	}
 
-	got := logs.String()
-	if !strings.Contains(got, "event=gateway.agent_auth_failed") {
-		t.Fatalf("logs = %q, want gateway.agent_auth_failed event", got)
-	}
+	got := waitForLog(t, &logs, "event=gateway.agent_auth_failed")
 	if strings.Contains(got, "wrong") {
 		t.Fatalf("logs leaked plaintext token: %q", got)
 	}
 }
+
+func waitForLog(t *testing.T, logs *bytes.Buffer, want string) string {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		got := logs.String()
+		if strings.Contains(got, want) {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("logs = %q, want %q", got, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func registerAgent(t *testing.T, ctx context.Context, conn *websocket.Conn, subdomain string) {
 	t.Helper()
 	_ = registerAgentAndRead(t, ctx, conn, subdomain)
