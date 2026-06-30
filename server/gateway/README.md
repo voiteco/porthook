@@ -11,7 +11,7 @@ Responsibilities:
 - Maintain agent tunnel connections.
 - Forward requests and responses.
 - Enforce limits.
-- Expose health endpoints.
+- Expose health and metrics endpoints.
 
 Default local listeners:
 
@@ -53,5 +53,15 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_SHUTDOWN_TIMEOUT` | `5s` | Graceful shutdown timeout. |
 
 Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
+
+## Operational Endpoints
+
+The public listener exposes:
+
+- `GET /healthz`
+- `GET /readyz`
+- `GET /metrics`
+
+Metrics use Prometheus text format and include active tunnels, public requests, token validation attempts, authentication failures, and tunnel registrations.
 
 Gateway logs are structured text logs written to stdout. Public request logs include route outcome, status, tunnel ID, stream ID, byte counts, and duration. Token values are not logged.

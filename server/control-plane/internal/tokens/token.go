@@ -50,6 +50,7 @@ type ValidationResult struct {
 }
 
 type Store interface {
+	Ping(context.Context) error
 	Create(context.Context, TokenRecord) error
 	List(context.Context) ([]TokenRecord, error)
 	LookupByHash(context.Context, string) (TokenRecord, bool, error)

@@ -22,6 +22,7 @@ type Server struct {
 	cfg     Config
 	service *tokens.Service
 	logger  *slog.Logger
+	metrics metrics
 }
 
 type validateTokenRequest struct {
@@ -30,6 +31,8 @@ type validateTokenRequest struct {
 }
 
 const maxJSONBodyBytes = 1 << 20
+
+const readinessTimeout = 2 * time.Second
 
 func NewServer(cfg Config, service *tokens.Service) *Server {
 	if cfg.Addr == "" {
@@ -73,14 +76,28 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ready\n"))
-	})
+	mux.HandleFunc("/readyz", s.handleReady)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/api/v1/tokens", s.handleTokens)
 	mux.HandleFunc("/api/v1/tokens/", s.handleTokenByID)
 	mux.HandleFunc("/api/v1/tokens/validate", s.handleValidateToken)
 	return mux
+}
+
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, "GET")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
+	defer cancel()
+	if err := s.service.Ready(ctx); err != nil {
+		s.metrics.readinessFailuresTotal.Add(1)
+		http.Error(w, "not ready: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ready\n"))
 }
 
 func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +110,7 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.authorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -102,6 +120,7 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.metrics.tokenAdminListsTotal.Add(1)
 		s.logger.Info("control-plane tokens listed", "count", len(listed.Tokens))
 		writeJSON(w, http.StatusOK, listed)
 		return
@@ -121,6 +140,7 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
+	s.metrics.tokenAdminCreatesTotal.Add(1)
 	s.logger.Info("control-plane token created", "token_id", created.ID, "name", created.Name, "scopes", created.Scopes)
 	writeJSON(w, http.StatusCreated, created)
 }
@@ -131,6 +151,7 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.validatorAuthorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -140,14 +161,21 @@ func (s *Server) handleValidateToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.metrics.tokenValidationsTotal.Add(1)
 	result, err := s.service.ValidateToken(r.Context(), req.Token, req.Scope)
 	if err != nil {
+		s.metrics.tokenValidationErrorsTotal.Add(1)
 		status := http.StatusInternalServerError
 		if errors.Is(err, tokens.ErrUnsupportedScope) {
 			status = http.StatusBadRequest
 		}
 		http.Error(w, err.Error(), status)
 		return
+	}
+	if result.Valid {
+		s.metrics.tokenValidationValidTotal.Add(1)
+	} else {
+		s.metrics.tokenValidationInvalidTotal.Add(1)
 	}
 	writeJSON(w, http.StatusOK, result)
 }
@@ -158,6 +186,7 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.authorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -171,6 +200,7 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.metrics.tokenAdminRevokesTotal.Add(1)
 	s.logger.Info("control-plane token revoked", "token_id", id)
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -427,10 +427,10 @@ Minimum:
 - Active tunnel count.
 - Request count.
 - Error count.
+- Prometheus text metrics.
 
 Future:
 
-- Prometheus metrics.
 - OpenTelemetry traces.
 - Dashboard charts.
 
@@ -492,6 +492,7 @@ GET  /api/v1/tunnels/{id}
 POST /api/v1/reserved-subdomains
 GET  /healthz
 GET  /readyz
+GET  /metrics
 ```
 
 The tunnel transport endpoint:

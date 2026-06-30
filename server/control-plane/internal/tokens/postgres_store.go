@@ -31,6 +31,13 @@ func (s *PostgresStore) Migrate(ctx context.Context) error {
 	return nil
 }
 
+func (s *PostgresStore) Ping(ctx context.Context) error {
+	if err := s.db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping database: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) Create(ctx context.Context, record TokenRecord) error {
 	scopesJSON, err := encodeScopes(record.Scopes)
 	if err != nil {

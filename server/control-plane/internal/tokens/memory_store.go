@@ -25,6 +25,10 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
+func (s *MemoryStore) Ping(context.Context) error {
+	return nil
+}
+
 func (s *MemoryStore) Create(_ context.Context, record TokenRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

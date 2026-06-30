@@ -11,9 +11,11 @@ All notable changes to Porthook are documented here.
 - Added `porthook tokens create`, `porthook tokens list`, and `porthook tokens revoke` for self-hosted control-plane token management.
 - Added `GET /api/v1/tokens` for admin token listing without plaintext token exposure.
 - Added control-plane token admin operation logs without plaintext token values.
+- Added Prometheus text `/metrics` endpoints for gateway and control-plane operational counters.
 
 ### Changed
 - Hardened control-plane token APIs with strict JSON decoding, request body limits, method `Allow` headers, and explicit unknown-scope errors.
+- Control-plane `/readyz` now checks token store readiness, including Postgres ping when configured.
 
 ## [0.3.0] - 2026-06-29
 
