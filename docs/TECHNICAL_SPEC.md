@@ -352,6 +352,8 @@ If the hostname does not match an active tunnel, return `404`.
 
 If the tunnel exists but is disconnected, return `503`.
 
+The current gateway supports custom root domains through `PORTHOOK_ROOT_DOMAIN`. Arbitrary per-tunnel custom domains are not implemented yet.
+
 ### 11.2 Tunnel Registry
 
 The MVP can use an in-memory registry:

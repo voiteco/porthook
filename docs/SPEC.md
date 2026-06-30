@@ -365,6 +365,8 @@ For self-hosted deployments, the operator configures:
 - TLS certificate.
 - Gateway public URL.
 
+The current self-hosted implementation supports a custom root domain for wildcard tunnel routing. Arbitrary per-tunnel custom domains are future work.
+
 Unknown hostnames should return `404`.
 
 Inactive tunnels should return `502` or `503` with a short plain-text error.
