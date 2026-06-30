@@ -45,7 +45,7 @@ The first product shape is intentionally narrow:
 - Health, readiness, and Prometheus text metrics endpoints.
 - Basic request logs for local debugging.
 - Agent reconnects for transient gateway disconnects.
-- A simple dashboard after the tunnel core is stable.
+- A self-hosted dashboard for control-plane administration.
 
 This public repository should stay focused on the self-hosted open-source product.
 
@@ -140,10 +140,11 @@ Completed foundations:
 5. Docker Compose self-hosting.
 6. Request logging, reconnects, keepalives, timeouts, and CLI polish.
 7. Self-hosted control-plane token API and CLI token helpers.
+8. Self-hosted dashboard for token administration.
 
 Next major public work:
 
-1. Self-hosted dashboard.
+1. Reserved subdomains.
 2. More complete operational guides.
 3. Custom domains and TLS documentation.
 
