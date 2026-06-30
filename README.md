@@ -170,6 +170,14 @@ docker compose \
   up --build
 ```
 
+Open the self-hosted dashboard:
+
+```text
+http://localhost:8082/dashboard/
+```
+
+Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens.
+
 Create an agent token:
 
 ```sh
@@ -204,5 +212,7 @@ The implementation-focused technical specification lives in [docs/TECHNICAL_SPEC
 The first Go MVP smoke test lives in [docs/MVP_SMOKE_TEST.md](./docs/MVP_SMOKE_TEST.md).
 
 The release process lives in [docs/RELEASE.md](./docs/RELEASE.md).
+
+Upgrade notes live in [docs/UPGRADING.md](./docs/UPGRADING.md).
 
 Release notes are maintained in [CHANGELOG.md](./CHANGELOG.md).

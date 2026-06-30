@@ -29,6 +29,8 @@ Minimal production shape:
 4. Run `porthook-gateway` with `PORTHOOK_CONTROL_PLANE_URL` pointing at the control plane and `PORTHOOK_CONTROL_PLANE_TOKEN` matching the control-plane validator token.
 5. Save the local agent login with `printf '%s' '<created-token>' | porthook login --server <gateway-agent-url> --token-stdin`.
 
+The control-plane process also serves the self-hosted dashboard at `/dashboard/` on the control-plane listener. It uses the same admin token as the token admin API.
+
 The end-to-end control-plane path can be checked locally with:
 
 ```sh
@@ -49,10 +51,14 @@ Before using the Compose control-plane stack beyond local testing:
 - Configure `PORTHOOK_PUBLIC_URL` to the externally reachable public gateway URL.
 - Put TLS termination in front of the public gateway listener.
 - Restrict access to the control-plane API with network policy, firewall rules, or a private listener. The admin token protects API actions but should not be the only operational boundary.
+- Treat `/dashboard/` as part of the control-plane API surface and protect it with the same access boundary.
 - Persist and back up the Postgres volume before relying on issued tokens.
+- Back up Postgres before upgrades. The control plane applies pending embedded migrations at startup.
 - Scrape `/metrics` and alert on readiness failures, auth failures, and unexpected token validation errors.
 - Rotate admin and validator tokens periodically, then update gateway and control-plane configuration together.
 - Revoke unused agent tokens with `porthook tokens revoke`.
 - Run `make smoke-control-plane` after configuration changes that affect token validation or tunnel routing.
 
 Compose is still the first supported deployment path for this pre-1.0 repository. More complete reverse proxy, TLS, and wildcard DNS examples should be added before recommending internet-facing production use.
+
+Upgrade notes live in [../docs/UPGRADING.md](../docs/UPGRADING.md).
