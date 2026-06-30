@@ -39,6 +39,7 @@ type Server struct {
 	registry  *registry.Registry
 	tokens    agentTokenValidator
 	reserved  reservedSubdomainAuthorizer
+	access    accessPolicyEvaluator
 	metrics   metrics
 	startedAt time.Time
 
@@ -64,6 +65,11 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 		logger.Warn("gateway reserved subdomain authorizer configuration failed", "event", "gateway.reserved_authorizer_config_failed", "error", err)
 		reservedAuthorizer = errorReservedSubdomainAuthorizer{err: err}
 	}
+	accessPolicyEvaluator, err := newAccessPolicyEvaluator(cfg)
+	if err != nil {
+		logger.Warn("gateway access policy evaluator configuration failed", "event", "gateway.access_policy_evaluator_config_failed", "error", err)
+		accessPolicyEvaluator = errorAccessPolicyEvaluator{err: err}
+	}
 
 	return &Server{
 		cfg:       cfg,
@@ -71,6 +77,7 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 		registry:  registry.New(),
 		tokens:    tokenValidator,
 		reserved:  reservedAuthorizer,
+		access:    accessPolicyEvaluator,
 		startedAt: time.Now().UTC(),
 		sessions:  make(map[string]*agentSession),
 
@@ -553,6 +560,21 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	accessResult, err := s.evaluatePublicAccess(r, subdomain)
+	if err != nil {
+		status = http.StatusServiceUnavailable
+		outcome = "access_policy_unavailable"
+		requestErr = err
+		http.Error(w, "access policy unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !accessResult.Allowed {
+		status = accessDeniedStatus(accessResult)
+		outcome = "access_denied"
+		writeAccessDenied(w, accessResult)
+		return
+	}
+
 	streamID, err = newStreamID()
 	if err != nil {
 		status = http.StatusInternalServerError
@@ -563,6 +585,9 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestHeader := httpwire.StripHopByHopHeaders(r.Header)
+	if accessConsumesAuthorization(accessResult) {
+		requestHeader.Del("Authorization")
+	}
 	requestHeader = httpwire.AddForwardedHeaders(
 		requestHeader,
 		session.tunnel.TunnelID,
@@ -662,6 +687,52 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 
 	status = result.Status
 	outcome = "completed"
+}
+
+func (s *Server) evaluatePublicAccess(r *http.Request, subdomain string) (accessPolicyEvaluation, error) {
+	username, password, _ := r.BasicAuth()
+	evaluation := accessPolicyEvaluationRequest{
+		Subdomain:     subdomain,
+		RemoteIP:      remoteIP(r.RemoteAddr),
+		BasicUsername: username,
+		BasicPassword: password,
+		BearerToken:   bearerToken(r),
+	}
+	return s.access.EvaluateAccessPolicy(r.Context(), evaluation)
+}
+
+func bearerToken(r *http.Request) string {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(token)
+}
+
+func accessDeniedStatus(result accessPolicyEvaluation) int {
+	switch result.Mode {
+	case "basic_auth", "bearer_token":
+		return http.StatusUnauthorized
+	default:
+		return http.StatusForbidden
+	}
+}
+
+func writeAccessDenied(w http.ResponseWriter, result accessPolicyEvaluation) {
+	switch result.Mode {
+	case "basic_auth":
+		w.Header().Set("WWW-Authenticate", `Basic realm="Porthook tunnel"`)
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+	case "bearer_token":
+		w.Header().Set("WWW-Authenticate", `Bearer realm="Porthook tunnel"`)
+		http.Error(w, "bearer token required", http.StatusUnauthorized)
+	default:
+		http.Error(w, "access denied", http.StatusForbidden)
+	}
+}
+
+func accessConsumesAuthorization(result accessPolicyEvaluation) bool {
+	return result.Allowed && (result.Mode == "basic_auth" || result.Mode == "bearer_token")
 }
 
 type publicRequestLog struct {

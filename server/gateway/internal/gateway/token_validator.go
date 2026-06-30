@@ -24,6 +24,10 @@ type reservedSubdomainAuthorizer interface {
 	AuthorizeReservedSubdomain(context.Context, string, string) (reservedSubdomainAuthorization, error)
 }
 
+type accessPolicyEvaluator interface {
+	EvaluateAccessPolicy(context.Context, accessPolicyEvaluationRequest) (accessPolicyEvaluation, error)
+}
+
 type agentTokenValidation struct {
 	Valid   bool
 	TokenID string
@@ -34,17 +38,36 @@ type reservedSubdomainAuthorization struct {
 	Reason  string
 }
 
+type accessPolicyEvaluationRequest struct {
+	Subdomain     string
+	RemoteIP      string
+	BasicUsername string
+	BasicPassword string
+	BearerToken   string
+}
+
+type accessPolicyEvaluation struct {
+	Allowed bool
+	Mode    string
+	Reason  string
+}
+
 type staticTokenValidator struct {
 	token string
 }
 
 type staticReservedSubdomainAuthorizer struct{}
+type staticAccessPolicyEvaluator struct{}
 
 type errorTokenValidator struct {
 	err error
 }
 
 type errorReservedSubdomainAuthorizer struct {
+	err error
+}
+
+type errorAccessPolicyEvaluator struct {
 	err error
 }
 
@@ -60,13 +83,22 @@ func (v staticReservedSubdomainAuthorizer) AuthorizeReservedSubdomain(context.Co
 	return reservedSubdomainAuthorization{Allowed: true}, nil
 }
 
+func (v staticAccessPolicyEvaluator) EvaluateAccessPolicy(context.Context, accessPolicyEvaluationRequest) (accessPolicyEvaluation, error) {
+	return accessPolicyEvaluation{Allowed: true, Mode: "public", Reason: "no_control_plane"}, nil
+}
+
 func (v errorReservedSubdomainAuthorizer) AuthorizeReservedSubdomain(context.Context, string, string) (reservedSubdomainAuthorization, error) {
 	return reservedSubdomainAuthorization{}, v.err
+}
+
+func (v errorAccessPolicyEvaluator) EvaluateAccessPolicy(context.Context, accessPolicyEvaluationRequest) (accessPolicyEvaluation, error) {
+	return accessPolicyEvaluation{}, v.err
 }
 
 type controlPlaneClient struct {
 	tokenValidationEndpoint        string
 	reservedSubdomainAuthzEndpoint string
+	accessPolicyEvaluationEndpoint string
 	bearerToken                    string
 	client                         *http.Client
 }
@@ -91,6 +123,20 @@ type authorizeReservedSubdomainResponse struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
+type evaluateAccessPolicyRequest struct {
+	Subdomain     string `json:"subdomain"`
+	RemoteIP      string `json:"remote_ip,omitempty"`
+	BasicUsername string `json:"basic_username,omitempty"`
+	BasicPassword string `json:"basic_password,omitempty"`
+	BearerToken   string `json:"bearer_token,omitempty"`
+}
+
+type evaluateAccessPolicyResponse struct {
+	Allowed bool   `json:"allowed"`
+	Mode    string `json:"mode"`
+	Reason  string `json:"reason,omitempty"`
+}
+
 func newAgentTokenValidator(cfg Config) (agentTokenValidator, error) {
 	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
 		return staticTokenValidator{token: cfg.StaticToken}, nil
@@ -101,6 +147,13 @@ func newAgentTokenValidator(cfg Config) (agentTokenValidator, error) {
 func newReservedSubdomainAuthorizer(cfg Config) (reservedSubdomainAuthorizer, error) {
 	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
 		return staticReservedSubdomainAuthorizer{}, nil
+	}
+	return newControlPlaneClient(cfg)
+}
+
+func newAccessPolicyEvaluator(cfg Config) (accessPolicyEvaluator, error) {
+	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
+		return staticAccessPolicyEvaluator{}, nil
 	}
 	return newControlPlaneClient(cfg)
 }
@@ -120,14 +173,55 @@ func newControlPlaneClient(cfg Config) (controlPlaneClient, error) {
 	}
 	tokenValidationEndpoint := controlPlaneEndpoint(*parsed, "/api/v1/tokens/validate")
 	reservedSubdomainAuthzEndpoint := controlPlaneEndpoint(*parsed, "/api/v1/reserved-subdomains/authorize")
+	accessPolicyEvaluationEndpoint := controlPlaneEndpoint(*parsed, "/api/v1/access-policies/evaluate")
 
 	return controlPlaneClient{
 		tokenValidationEndpoint:        tokenValidationEndpoint,
 		reservedSubdomainAuthzEndpoint: reservedSubdomainAuthzEndpoint,
+		accessPolicyEvaluationEndpoint: accessPolicyEvaluationEndpoint,
 		bearerToken:                    controlPlaneToken,
 		client: &http.Client{
 			Timeout: cfg.ControlPlaneTimeout,
 		},
+	}, nil
+}
+
+func (v controlPlaneClient) EvaluateAccessPolicy(ctx context.Context, evaluation accessPolicyEvaluationRequest) (accessPolicyEvaluation, error) {
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(evaluateAccessPolicyRequest{
+		Subdomain:     evaluation.Subdomain,
+		RemoteIP:      evaluation.RemoteIP,
+		BasicUsername: evaluation.BasicUsername,
+		BasicPassword: evaluation.BasicPassword,
+		BearerToken:   evaluation.BearerToken,
+	}); err != nil {
+		return accessPolicyEvaluation{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.accessPolicyEvaluationEndpoint, &body)
+	if err != nil {
+		return accessPolicyEvaluation{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+v.bearerToken)
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return accessPolicyEvaluation{}, fmt.Errorf("evaluate access policy: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return accessPolicyEvaluation{}, fmt.Errorf("evaluate access policy returned status %d", resp.StatusCode)
+	}
+
+	var result evaluateAccessPolicyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return accessPolicyEvaluation{}, fmt.Errorf("decode access policy evaluation: %w", err)
+	}
+	return accessPolicyEvaluation{
+		Allowed: result.Allowed,
+		Mode:    result.Mode,
+		Reason:  result.Reason,
 	}, nil
 }
 
