@@ -239,6 +239,30 @@ if ! grep -q "${AGENT_TOKEN_ID}" "${LOG_DIR}/tokens-list.json"; then
 	exit 1
 fi
 
+printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" reserved create \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--name "${SUBDOMAIN}" \
+	--token-id "${AGENT_TOKEN_ID}" \
+	--json \
+	>"${LOG_DIR}/reserved-create.json" 2>"${LOG_DIR}/reserved-create.err"
+if ! grep -q "${SUBDOMAIN}" "${LOG_DIR}/reserved-create.json"; then
+	echo "Reserved subdomain was not created: ${SUBDOMAIN}" >&2
+	exit 1
+fi
+
+printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" reserved list \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--json \
+	>"${LOG_DIR}/reserved-list.json" 2>"${LOG_DIR}/reserved-list.err"
+if ! grep -q "${AGENT_TOKEN_ID}" "${LOG_DIR}/reserved-list.json"; then
+	echo "Reserved subdomain owner token was not listed: ${AGENT_TOKEN_ID}" >&2
+	exit 1
+fi
+
 PORTHOOK_ADDR="127.0.0.1:${PUBLIC_PORT}" \
 PORTHOOK_AGENT_ADDR="127.0.0.1:${AGENT_PORT}" \
 PORTHOOK_ROOT_DOMAIN="localhost" \
