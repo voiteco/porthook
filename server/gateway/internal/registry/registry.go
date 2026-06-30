@@ -93,3 +93,14 @@ func (r *Registry) Count() int {
 	defer r.mu.RUnlock()
 	return len(r.byTunnelID)
 }
+
+func (r *Registry) List() []Session {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	sessions := make([]Session, 0, len(r.byTunnelID))
+	for _, session := range r.byTunnelID {
+		sessions = append(sessions, *session)
+	}
+	return sessions
+}

@@ -4,6 +4,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -128,6 +129,7 @@ func (s *Server) PublicHandler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
+	mux.HandleFunc("/api/v1/tunnels", s.handleTunnelList)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/", s.handlePublicRequest)
 	return mux
@@ -180,6 +182,45 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer stopKeepalive()
 
 	session.readLoop(r.Context(), s.logger)
+}
+
+type tunnelListResponse struct {
+	Tunnels []tunnelSummary `json:"tunnels"`
+}
+
+type tunnelSummary struct {
+	TunnelID    string    `json:"tunnel_id"`
+	Subdomain   string    `json:"subdomain"`
+	PublicURL   string    `json:"public_url"`
+	Protocol    string    `json:"protocol"`
+	ConnectedAt time.Time `json:"connected_at"`
+}
+
+func (s *Server) handleTunnelList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, "GET, OPTIONS")
+		return
+	}
+
+	sessions := s.registry.List()
+	tunnels := make([]tunnelSummary, 0, len(sessions))
+	for _, session := range sessions {
+		tunnels = append(tunnels, tunnelSummary{
+			TunnelID:    session.TunnelID,
+			Subdomain:   session.Subdomain,
+			PublicURL:   session.PublicURL,
+			Protocol:    session.Protocol,
+			ConnectedAt: session.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, tunnelListResponse{Tunnels: tunnels})
 }
 
 func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (agentTokenValidation, error) {
@@ -402,6 +443,12 @@ func writeTunnelError(ctx context.Context, conn *websocket.Conn, code, message s
 		return err
 	}
 	return wsjson.Write(ctx, conn, tunnelErr)
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func reservedSubdomainDeniedError(subdomain, reason string) (string, string) {

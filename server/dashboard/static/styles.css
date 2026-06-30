@@ -29,7 +29,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -73,7 +74,8 @@ button.danger:hover:not(:disabled) {
   background: #ffe2df;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-height: 40px;
   border: 1px solid var(--line);
@@ -82,7 +84,8 @@ input {
   padding: 8px 10px;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: var(--accent);
   outline: 3px solid rgba(15, 118, 110, 0.14);
 }
@@ -184,6 +187,20 @@ h3 {
   grid-template-columns: minmax(240px, 1fr) minmax(180px, 0.45fr) auto;
   margin-top: 20px;
   padding-top: 20px;
+}
+
+.reservation-form {
+  grid-template-columns: minmax(180px, 0.75fr) minmax(260px, 1fr) auto;
+}
+
+.gateway-form {
+  grid-template-columns: minmax(260px, 1fr) auto;
+}
+
+.subsection {
+  border-top: 1px solid var(--line);
+  margin-top: 26px;
+  padding-top: 24px;
 }
 
 label {

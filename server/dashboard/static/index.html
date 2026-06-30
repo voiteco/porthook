@@ -95,6 +95,84 @@
             <h3>No tokens</h3>
             <p class="muted">Create an agent token to register tunnels through this control plane.</p>
           </div>
+
+          <div class="subsection">
+            <div class="section-heading">
+              <div>
+                <h2>Reserved subdomains</h2>
+                <p class="muted" id="reservation-count">No reservations loaded</p>
+              </div>
+            </div>
+
+            <form class="create-form reservation-form" id="reservation-form">
+              <div class="field">
+                <label for="reservation-name">Subdomain</label>
+                <input id="reservation-name" name="reservation-name" type="text" maxlength="63" placeholder="demo" required>
+              </div>
+              <div class="field">
+                <label for="reservation-token">Owner token</label>
+                <select id="reservation-token" name="reservation-token" required></select>
+              </div>
+              <button type="submit">Reserve</button>
+            </form>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>ID</th>
+                    <th>Token ID</th>
+                    <th>Created</th>
+                    <th class="right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="reservations-body"></tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" id="reservations-empty-state" hidden>
+              <h3>No reserved subdomains</h3>
+              <p class="muted">Reserve a requested subdomain for an active agent token.</p>
+            </div>
+          </div>
+
+          <div class="subsection">
+            <div class="section-heading">
+              <div>
+                <h2>Active tunnels</h2>
+                <p class="muted" id="tunnel-count">No tunnels loaded</p>
+              </div>
+            </div>
+
+            <form class="create-form gateway-form" id="gateway-form">
+              <div class="field">
+                <label for="gateway-url">Gateway URL</label>
+                <input id="gateway-url" name="gateway-url" type="url" required>
+              </div>
+              <button type="submit">Load tunnels</button>
+            </form>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Subdomain</th>
+                    <th>Tunnel ID</th>
+                    <th>Public URL</th>
+                    <th>Protocol</th>
+                    <th>Connected</th>
+                  </tr>
+                </thead>
+                <tbody id="tunnels-body"></tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" id="tunnels-empty-state" hidden>
+              <h3>No active tunnels</h3>
+              <p class="muted">Active gateway sessions appear after an agent connects.</p>
+            </div>
+          </div>
         </section>
       </main>
     </div>

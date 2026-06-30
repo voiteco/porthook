@@ -52,6 +52,9 @@ func TestDashboardEndpoint(t *testing.T) {
 	if !strings.Contains(body, "Token management") {
 		t.Fatalf("body = %q, want dashboard token management UI", body)
 	}
+	if !strings.Contains(body, "Reserved subdomains") || !strings.Contains(body, "Active tunnels") {
+		t.Fatalf("body = %q, want dashboard reserved subdomains and active tunnels UI", body)
+	}
 
 	resp, err = httpServer.Client().Get(httpServer.URL + "/dashboard/app.js")
 	if err != nil {
@@ -64,6 +67,9 @@ func TestDashboardEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(body, "/api/v1/tokens") {
 		t.Fatalf("asset body = %q, want token API client", body)
+	}
+	if !strings.Contains(body, "/api/v1/reserved-subdomains") || !strings.Contains(body, "/api/v1/tunnels") {
+		t.Fatalf("asset body = %q, want reservation and tunnel API clients", body)
 	}
 }
 

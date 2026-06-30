@@ -20,6 +20,7 @@ import (
 	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
 	"github.com/voiteco/porthook/protocol/wswire"
+	"github.com/voiteco/porthook/server/gateway/internal/registry"
 )
 
 func TestAgentWebSocketAuthAndRegister(t *testing.T) {
@@ -1396,6 +1397,55 @@ func TestPublicHandlerHealthEndpoints(t *testing.T) {
 		if resp.StatusCode != 200 {
 			t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
 		}
+	}
+}
+
+func TestPublicHandlerListsActiveTunnels(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	connectedAt := time.Date(2026, 6, 30, 11, 0, 0, 0, time.UTC)
+	if err := server.registry.Register(&registry.Session{
+		TunnelID:    "tun_active",
+		Subdomain:   "demo",
+		PublicURL:   "http://demo.localhost:8080",
+		LocalTarget: "http://localhost:3000",
+		Protocol:    "http",
+		CreatedAt:   connectedAt,
+	}); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	httpServer := httptest.NewServer(server.PublicHandler())
+	defer httpServer.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/tunnels", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Header.Set("Origin", "http://127.0.0.1:8082")
+	resp, err := httpServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET tunnels returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
+	}
+	var listed tunnelListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if len(listed.Tunnels) != 1 {
+		t.Fatalf("tunnels = %d, want 1", len(listed.Tunnels))
+	}
+	tunnel := listed.Tunnels[0]
+	if tunnel.TunnelID != "tun_active" || tunnel.Subdomain != "demo" || tunnel.PublicURL != "http://demo.localhost:8080" || tunnel.Protocol != "http" {
+		t.Fatalf("tunnel = %+v, want active demo tunnel", tunnel)
+	}
+	if !tunnel.ConnectedAt.Equal(connectedAt) {
+		t.Fatalf("connected_at = %s, want %s", tunnel.ConnectedAt, connectedAt)
 	}
 }
 
