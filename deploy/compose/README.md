@@ -91,6 +91,7 @@ Postgres is available only inside the Compose network as `postgres:5432`.
 The production Compose stack keeps the gateway and control-plane ports private to the Compose network and exposes only the Caddy reverse proxy on ports `80` and `443`.
 
 Read [../../docs/DOMAINS_TLS.md](../../docs/DOMAINS_TLS.md) before using this stack for internet-facing traffic.
+Read [../../docs/ACCESS_BOUNDARY.md](../../docs/ACCESS_BOUNDARY.md) before exposing `PORTHOOK_CONTROL_DOMAIN`.
 
 Copy the production example environment and replace every `change-me` value:
 
@@ -106,6 +107,8 @@ Configure these public names:
 | `PORTHOOK_PUBLIC_URL` | Public URL printed for registered tunnels, for example `https://tunnels.example.com`. |
 | `PORTHOOK_AGENT_DOMAIN` | Dedicated hostname agents use for WebSocket connections. |
 | `PORTHOOK_CONTROL_DOMAIN` | Dedicated hostname for the control-plane API and dashboard. |
+| `PORTHOOK_CADDYFILE_PATH` | Caddyfile mounted into the reverse proxy. |
+| `PORTHOOK_CONTROL_ALLOWED_IPS` | CIDR allowlist used by `Caddyfile.control-allowlist`. |
 | `PORTHOOK_TLS_CERT_PATH` | Absolute host path to the wildcard certificate mounted into Caddy. |
 | `PORTHOOK_TLS_KEY_PATH` | Absolute host path to the wildcard private key mounted into Caddy. |
 
@@ -115,6 +118,13 @@ Before starting the stack:
 - Point `PORTHOOK_AGENT_DOMAIN` at the same host.
 - Keep `PORTHOOK_CONTROL_DOMAIN` private or protect it with a separate access boundary.
 - Mount a certificate that covers `*.${PORTHOOK_ROOT_DOMAIN}`, `PORTHOOK_AGENT_DOMAIN`, and `PORTHOOK_CONTROL_DOMAIN`.
+
+To use the checked-in Caddy IP allowlist example for the control-plane hostname:
+
+```text
+PORTHOOK_CADDYFILE_PATH=../reverse-proxy/caddy/Caddyfile.control-allowlist
+PORTHOOK_CONTROL_ALLOWED_IPS="203.0.113.0/24 2001:db8:1234::/48"
+```
 
 Start the production stack:
 

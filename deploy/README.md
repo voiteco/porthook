@@ -14,7 +14,7 @@ The first supported deployment path should be Docker Compose.
 
 The Docker Compose gateway-only, control-plane, and production stacks are documented in [compose/README.md](./compose/README.md).
 
-Reverse proxy examples for internet-facing gateway traffic live in [reverse-proxy/README.md](./reverse-proxy/README.md). Domain, wildcard DNS, and TLS guidance lives in [../docs/DOMAINS_TLS.md](../docs/DOMAINS_TLS.md).
+Reverse proxy examples for internet-facing gateway traffic live in [reverse-proxy/README.md](./reverse-proxy/README.md). Domain, wildcard DNS, and TLS guidance lives in [../docs/DOMAINS_TLS.md](../docs/DOMAINS_TLS.md). Control-plane and dashboard access-boundary guidance lives in [../docs/ACCESS_BOUNDARY.md](../docs/ACCESS_BOUNDARY.md).
 
 ## Self-Hosted Token Flow
 
@@ -56,7 +56,7 @@ Before using the Compose control-plane stack beyond local testing:
 - Configure `PORTHOOK_PUBLIC_URL` to the externally reachable public gateway URL.
 - Put TLS termination in front of the public gateway listener.
 - Confirm certificates cover the wildcard tunnel domain and the dedicated agent/control hostnames.
-- Restrict access to the control-plane API with network policy, firewall rules, or a private listener. The admin token protects API actions but should not be the only operational boundary.
+- Restrict access to the control-plane API with network policy, firewall rules, reverse-proxy rules, or a private listener. The admin token protects API actions but should not be the only operational boundary.
 - Treat `/dashboard/` as part of the control-plane API surface and protect it with the same access boundary.
 - Persist and back up the Postgres volume before relying on issued tokens.
 - Back up Postgres before upgrades. The control plane applies pending embedded migrations at startup.
