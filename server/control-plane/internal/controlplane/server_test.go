@@ -34,6 +34,38 @@ func TestHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestDashboardEndpoint(t *testing.T) {
+	server := NewServer(Config{}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/dashboard/")
+	if err != nil {
+		t.Fatalf("GET dashboard returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readResponseBody(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %q", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "Token management") {
+		t.Fatalf("body = %q, want dashboard token management UI", body)
+	}
+
+	resp, err = httpServer.Client().Get(httpServer.URL + "/dashboard/app.js")
+	if err != nil {
+		t.Fatalf("GET dashboard app returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body = readResponseBody(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("asset status = %d, want 200; body = %q", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "/api/v1/tokens") {
+		t.Fatalf("asset body = %q, want token API client", body)
+	}
+}
+
 func TestReadyzReportsStoreFailure(t *testing.T) {
 	server := NewServer(Config{}, tokens.NewService(failingReadyStore{MemoryStore: tokens.NewMemoryStore()}))
 	httpServer := httptest.NewServer(server.Handler())

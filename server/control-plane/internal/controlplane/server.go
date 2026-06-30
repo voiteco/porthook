@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
+	"github.com/voiteco/porthook/server/dashboard"
 )
 
 type Server struct {
@@ -72,12 +73,15 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	dashboardHandler := dashboard.Handler()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("/readyz", s.handleReady)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.Handle("/dashboard", dashboardHandler)
+	mux.Handle("/dashboard/", dashboardHandler)
 	mux.HandleFunc("/api/v1/tokens", s.handleTokens)
 	mux.HandleFunc("/api/v1/tokens/", s.handleTokenByID)
 	mux.HandleFunc("/api/v1/tokens/validate", s.handleValidateToken)

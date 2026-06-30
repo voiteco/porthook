@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Porthook Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/styles.css">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Self-hosted control plane</p>
+          <h1>Porthook</h1>
+        </div>
+        <div class="actions">
+          <button class="secondary" id="refresh-button" type="button">Refresh</button>
+          <button class="secondary" id="logout-button" type="button" hidden>Logout</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="panel login-panel" id="login-panel">
+          <div>
+            <h2>Admin login</h2>
+            <p class="muted">Use the self-hosted control-plane admin token.</p>
+          </div>
+          <form class="login-form" id="login-form">
+            <label for="admin-token">Admin token</label>
+            <div class="inline-control">
+              <input id="admin-token" name="admin-token" type="password" autocomplete="current-password" required>
+              <button type="submit">Login</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel" id="app-panel" hidden>
+          <div class="section-heading">
+            <div>
+              <h2>Token management</h2>
+              <p class="muted" id="token-count">No tokens loaded</p>
+            </div>
+            <div class="status-row">
+              <span class="status-pill" id="ready-status">Checking readiness</span>
+            </div>
+          </div>
+
+          <form class="create-form" id="create-form">
+            <div class="field">
+              <label for="token-name">Token name</label>
+              <input id="token-name" name="token-name" type="text" maxlength="120" placeholder="local agent" required>
+            </div>
+            <div class="field compact">
+              <label>Scope</label>
+              <label class="checkbox-row">
+                <input id="scope-register-tunnel" type="checkbox" checked>
+                <span>register_tunnel</span>
+              </label>
+            </div>
+            <button type="submit">Create token</button>
+          </form>
+
+          <div class="secret-output" id="created-token-panel" hidden>
+            <div>
+              <p class="eyebrow">Plaintext token</p>
+              <p class="muted">This value is only returned by the create response.</p>
+            </div>
+            <div class="secret-row">
+              <code id="created-token-value"></code>
+              <button class="secondary" id="copy-created-token" type="button">Copy</button>
+            </div>
+          </div>
+
+          <div class="notice" id="notice" hidden></div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>ID</th>
+                  <th>Scopes</th>
+                  <th>Created</th>
+                  <th>Status</th>
+                  <th class="right">Action</th>
+                </tr>
+              </thead>
+              <tbody id="tokens-body"></tbody>
+            </table>
+          </div>
+
+          <div class="empty-state" id="empty-state" hidden>
+            <h3>No tokens</h3>
+            <p class="muted">Create an agent token to register tunnels through this control plane.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/dashboard/app.js"></script>
+  </body>
+</html>
