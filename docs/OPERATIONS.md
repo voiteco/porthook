@@ -261,6 +261,7 @@ Expect existing agents to reconnect if the gateway process restarts.
    make test
    make vet
    make compose-config
+   make production-hardening-check
    ```
 
 5. Recreate the production stack:
