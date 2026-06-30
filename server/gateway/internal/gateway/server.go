@@ -34,12 +34,13 @@ const (
 )
 
 type Server struct {
-	cfg      Config
-	logger   *slog.Logger
-	registry *registry.Registry
-	tokens   agentTokenValidator
-	reserved reservedSubdomainAuthorizer
-	metrics  metrics
+	cfg       Config
+	logger    *slog.Logger
+	registry  *registry.Registry
+	tokens    agentTokenValidator
+	reserved  reservedSubdomainAuthorizer
+	metrics   metrics
+	startedAt time.Time
 
 	sessionsMu sync.RWMutex
 	sessions   map[string]*agentSession
@@ -65,12 +66,13 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 	}
 
 	return &Server{
-		cfg:      cfg,
-		logger:   logger,
-		registry: registry.New(),
-		tokens:   tokenValidator,
-		reserved: reservedAuthorizer,
-		sessions: make(map[string]*agentSession),
+		cfg:       cfg,
+		logger:    logger,
+		registry:  registry.New(),
+		tokens:    tokenValidator,
+		reserved:  reservedAuthorizer,
+		startedAt: time.Now().UTC(),
+		sessions:  make(map[string]*agentSession),
 
 		generateSubdomain: names.RandomSubdomain,
 		generateTunnelID:  newTunnelID,
@@ -167,6 +169,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	session, err := s.registerTunnel(ctx, conn, identity)
 	if err != nil {
+		s.metrics.tunnelRegistrationFailuresTotal.Add(1)
 		attrs := requestAuditAttrs(r, "gateway.tunnel_registration_failed")
 		attrs = append(attrs, slog.String("token_id", identity.TokenID), slog.Any("error", err))
 		s.logger.LogAttrs(r.Context(), slog.LevelWarn, "tunnel registration failed", attrs...)
@@ -522,7 +525,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 			ResponseBytes: responseBytes,
 			Error:         requestErr,
 		})
-		s.metrics.publicRequestsTotal.Add(1)
+		s.recordPublicRequestMetrics(status, outcome)
 	}()
 
 	subdomain, ok := s.subdomainFromHost(r.Host)

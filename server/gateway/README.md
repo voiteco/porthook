@@ -63,7 +63,7 @@ The public listener exposes:
 - `GET /metrics`
 - `GET /api/v1/tunnels`
 
-Metrics use Prometheus text format and include active tunnels, public requests, token validation attempts, authentication failures, and tunnel registrations. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs.
+Metrics use Prometheus text format and include active tunnels, process uptime, public request totals, selected public request outcome counters, token validation attempts, authentication failures, and tunnel registration successes/failures. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs.
 
 Gateway logs are structured text logs written to stdout. Operational logs include an `event` field such as `gateway.public_request`, `gateway.tunnel_registered`, `gateway.agent_auth_failed`, and `gateway.agent_keepalive_failed`.
 

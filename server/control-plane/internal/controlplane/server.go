@@ -27,6 +27,7 @@ type Server struct {
 	reservations *reserved.Service
 	logger       *slog.Logger
 	metrics      metrics
+	startedAt    time.Time
 }
 
 type validateTokenRequest struct {
@@ -69,6 +70,7 @@ func NewServer(cfg Config, service *tokens.Service, reservationServices ...*rese
 		service:      service,
 		reservations: reservationService,
 		logger:       slog.Default(),
+		startedAt:    time.Now().UTC(),
 	}
 }
 

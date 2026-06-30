@@ -11,6 +11,7 @@ All notable changes to Porthook are documented here.
 - Added control-plane access-boundary guidance and a Caddy IP allowlist example.
 - Added audit-friendly gateway and control-plane log events with stable fields and token redaction tests.
 - Added operational runbooks for production Compose deploys, health triage, backups, restores, token rotation, upgrades, rollbacks, and incidents.
+- Added gateway request outcome metrics and control-plane readiness/inventory metrics.
 
 ## [0.6.0] - 2026-06-30
 

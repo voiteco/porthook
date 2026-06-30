@@ -175,6 +175,11 @@ func TestMetricsEndpoint(t *testing.T) {
 		t.Fatalf("metrics status = %d, want 200; body = %q", resp.StatusCode, body)
 	}
 	for _, want := range []string{
+		"porthook_control_plane_ready 1",
+		"porthook_control_plane_uptime_seconds ",
+		"porthook_control_plane_tokens 1",
+		"porthook_control_plane_tokens_revoked 0",
+		"porthook_control_plane_reserved_subdomains 0",
 		"porthook_control_plane_token_admin_creates_total 1",
 		"porthook_control_plane_token_validations_total 1",
 		"porthook_control_plane_token_validation_valid_total 1",
