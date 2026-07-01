@@ -57,6 +57,74 @@ func TestHandlerReturnsRequestIDHeader(t *testing.T) {
 	}
 }
 
+func TestAuditEventsEndpointReturnsRecentEvents(t *testing.T) {
+	server := NewServer(Config{AdminToken: "admin-secret"}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	unauthorizedResp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/events")
+	if err != nil {
+		t.Fatalf("GET events returned error: %v", err)
+	}
+	unauthorizedResp.Body.Close()
+	if unauthorizedResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d, want 401", unauthorizedResp.StatusCode)
+	}
+
+	createResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens", "admin-secret", map[string]any{
+		"name": "agent",
+	})
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("token create status = %d, want 201", createResp.StatusCode)
+	}
+	var created tokens.CreatedToken
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode token returned error: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/events?limit=10", nil)
+	if err != nil {
+		t.Fatalf("NewRequest events returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer admin-secret")
+	resp, err := httpServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET events authorized returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readResponseBody(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("events status = %d, want 200; body = %q", resp.StatusCode, body)
+	}
+	if strings.Contains(body, created.Token) {
+		t.Fatalf("events leaked plaintext token: %q", body)
+	}
+	var events auditEventsResponse
+	if err := json.Unmarshal([]byte(body), &events); err != nil {
+		t.Fatalf("decode events returned error: %v", err)
+	}
+	if len(events.Events) == 0 {
+		t.Fatal("events response is empty")
+	}
+	var foundTokenCreated bool
+	var foundAuthFailed bool
+	for _, event := range events.Events {
+		if event.Event == "control_plane.token_created" {
+			foundTokenCreated = true
+			if event.Fields["token_id"] == "" || event.Fields["name"] != "agent" {
+				t.Fatalf("token_created event = %+v, want token fields", event)
+			}
+		}
+		if event.Event == "control_plane.auth_failed" {
+			foundAuthFailed = true
+		}
+	}
+	if !foundTokenCreated || !foundAuthFailed {
+		t.Fatalf("events = %+v, want token_created and auth_failed", events.Events)
+	}
+}
+
 func TestDashboardEndpoint(t *testing.T) {
 	server := NewServer(Config{}, tokens.NewService(tokens.NewMemoryStore()))
 	httpServer := httptest.NewServer(server.Handler())

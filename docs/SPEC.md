@@ -523,6 +523,7 @@ For the very first self-hosted MVP, this may start with static tokens in configu
 Initial control-plane endpoints:
 
 ```text
+GET  /api/v1/events
 GET  /api/v1/tokens
 POST /api/v1/tokens
 POST /api/v1/tokens/validate
