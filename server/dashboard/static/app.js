@@ -26,6 +26,12 @@ const elements = {
   reservationsBody: document.querySelector("#reservations-body"),
   reservationsEmptyState: document.querySelector("#reservations-empty-state"),
   reservationCount: document.querySelector("#reservation-count"),
+  customDomainForm: document.querySelector("#custom-domain-form"),
+  customDomainHostname: document.querySelector("#custom-domain-hostname"),
+  customDomainReservation: document.querySelector("#custom-domain-reservation"),
+  customDomainsBody: document.querySelector("#custom-domains-body"),
+  customDomainsEmptyState: document.querySelector("#custom-domains-empty-state"),
+  customDomainCount: document.querySelector("#custom-domain-count"),
   accessPolicyForm: document.querySelector("#access-policy-form"),
   accessReservation: document.querySelector("#access-reservation"),
   accessMode: document.querySelector("#access-mode"),
@@ -58,6 +64,7 @@ const elements = {
 let adminToken = sessionStorage.getItem(storageKey) || "";
 let currentTokens = [];
 let currentReservations = [];
+let currentCustomDomains = [];
 let currentAccessPolicies = [];
 let currentRequestLogs = [];
 let editingAccessPolicyID = "";
@@ -72,25 +79,30 @@ function setAuthenticated(authenticated) {
   if (!authenticated) {
     currentTokens = [];
     currentReservations = [];
+    currentCustomDomains = [];
     currentAccessPolicies = [];
     currentRequestLogs = [];
     editingAccessPolicyID = "";
     elements.tokensBody.replaceChildren();
     elements.reservationsBody.replaceChildren();
+    elements.customDomainsBody.replaceChildren();
     elements.accessPoliciesBody.replaceChildren();
     elements.tunnelsBody.replaceChildren();
     elements.requestLogsBody.replaceChildren();
     elements.emptyState.hidden = true;
     elements.reservationsEmptyState.hidden = true;
+    elements.customDomainsEmptyState.hidden = true;
     elements.accessPoliciesEmptyState.hidden = true;
     elements.tunnelsEmptyState.hidden = true;
     elements.requestLogsEmptyState.hidden = true;
     elements.tokenCount.textContent = "No tokens loaded";
     elements.reservationCount.textContent = "No reservations loaded";
+    elements.customDomainCount.textContent = "No custom domains loaded";
     elements.accessPolicyCount.textContent = "No access policies loaded";
     elements.tunnelCount.textContent = "No tunnels loaded";
     elements.requestLogCount.textContent = "No request logs loaded";
     renderReservationTokenOptions();
+    renderCustomDomainReservationOptions();
     renderAccessReservationOptions();
     resetAccessPolicyForm();
   }
@@ -163,6 +175,7 @@ async function refreshApp() {
   clearCreatedToken();
   await Promise.all([loadTokens(), refreshStatus(), loadTunnels({ silent: true }), loadRequestLogs({ silent: true })]);
   await loadReservations();
+  await loadCustomDomains();
   await loadAccessPolicies();
 }
 
@@ -231,6 +244,7 @@ async function loadReservations() {
   currentReservations = payload.reserved_subdomains || [];
   renderReservations(currentReservations);
   renderAccessReservationOptions();
+  renderCustomDomainReservationOptions();
 }
 
 function renderReservations(reservations) {
@@ -249,6 +263,77 @@ function renderReservationRow(reservation) {
     reservationActionCell(reservation),
   );
   return row;
+}
+
+function renderCustomDomainReservationOptions() {
+  elements.customDomainReservation.replaceChildren();
+  if (currentReservations.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No reserved subdomains";
+    elements.customDomainReservation.append(option);
+    elements.customDomainReservation.disabled = true;
+    return;
+  }
+
+  elements.customDomainReservation.disabled = false;
+  for (const reservation of currentReservations) {
+    const option = document.createElement("option");
+    option.value = reservation.id;
+    option.textContent = `${reservation.name} (${reservation.id})`;
+    elements.customDomainReservation.append(option);
+  }
+}
+
+async function loadCustomDomains() {
+  elements.customDomainCount.textContent = "Loading custom domains";
+  elements.customDomainsBody.replaceChildren();
+  elements.customDomainsEmptyState.hidden = true;
+
+  const payload = await apiRequest("/api/v1/custom-domains");
+  currentCustomDomains = payload.custom_domains || [];
+  renderCustomDomains(currentCustomDomains);
+}
+
+function renderCustomDomains(domains) {
+  elements.customDomainsBody.replaceChildren(...domains.map(renderCustomDomainRow));
+  elements.customDomainsEmptyState.hidden = domains.length !== 0;
+  elements.customDomainCount.textContent = `${domains.length} custom domain${domains.length === 1 ? "" : "s"}`;
+}
+
+function renderCustomDomainRow(domain) {
+  const row = document.createElement("tr");
+  const reservation = reservationByID(domain.reserved_subdomain_id);
+  row.append(
+    cell(domain.hostname),
+    monoCell(domain.id),
+    cell(reservation ? reservation.name : domain.reserved_subdomain_id),
+    customDomainStatusCell(domain),
+    cell(formatTime(domain.updated_at)),
+    customDomainActionCell(domain),
+  );
+  return row;
+}
+
+function customDomainStatusCell(domain) {
+  const item = document.createElement("td");
+  const badge = document.createElement("span");
+  badge.className = domain.status === "active" ? "badge active" : "badge";
+  badge.textContent = domain.status || "unknown";
+  item.append(badge);
+  return item;
+}
+
+function customDomainActionCell(domain) {
+  const item = document.createElement("td");
+  item.classList.add("right");
+  const button = document.createElement("button");
+  button.className = "danger";
+  button.type = "button";
+  button.textContent = "Delete";
+  button.addEventListener("click", () => deleteCustomDomain(domain));
+  item.append(button);
+  return item;
 }
 
 function renderAccessReservationOptions() {
@@ -621,8 +706,50 @@ async function deleteReservation(reservation) {
   try {
     await apiRequest(`/api/v1/reserved-subdomains/${encodeURIComponent(reservation.id)}`, { method: "DELETE" });
     await loadReservations();
+    await loadCustomDomains();
     await loadAccessPolicies();
     showNotice(`Deleted reserved subdomain ${reservation.name}.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function createCustomDomain(event) {
+  event.preventDefault();
+  showNotice("");
+
+  const hostname = elements.customDomainHostname.value.trim();
+  const reservedSubdomainID = elements.customDomainReservation.value.trim();
+  if (!hostname) {
+    showNotice("Custom domain hostname is required.", "error");
+    return;
+  }
+  if (!reservedSubdomainID) {
+    showNotice("Reserved subdomain is required.", "error");
+    return;
+  }
+
+  try {
+    const created = await apiRequest("/api/v1/custom-domains", {
+      method: "POST",
+      body: JSON.stringify({ hostname, reserved_subdomain_id: reservedSubdomainID }),
+    });
+    elements.customDomainHostname.value = "";
+    await loadCustomDomains();
+    showNotice(`Added custom domain ${created.hostname}.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function deleteCustomDomain(domain) {
+  if (!window.confirm(`Delete custom domain ${domain.hostname}?`)) {
+    return;
+  }
+  try {
+    await apiRequest(`/api/v1/custom-domains/${encodeURIComponent(domain.id)}`, { method: "DELETE" });
+    await loadCustomDomains();
+    showNotice(`Deleted custom domain ${domain.hostname}.`, "success");
   } catch (error) {
     showNotice(error.message, "error");
   }
@@ -798,6 +925,7 @@ elements.refreshButton.addEventListener("click", async () => {
 elements.createForm.addEventListener("submit", createToken);
 elements.copyCreatedToken.addEventListener("click", copyCreatedToken);
 elements.reservationForm.addEventListener("submit", createReservation);
+elements.customDomainForm.addEventListener("submit", createCustomDomain);
 elements.accessPolicyForm.addEventListener("submit", saveAccessPolicy);
 elements.accessMode.addEventListener("change", updateAccessPolicyFields);
 elements.accessPolicyCancel.addEventListener("click", resetAccessPolicyForm);
