@@ -2,6 +2,28 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.8.x to 0.9.x
+
+Version 0.9.x adds custom domain mappings for control-plane-backed self-hosted deployments. Custom domains map a fully qualified hostname to a reserved subdomain, and gateway access policies continue to apply through that reservation.
+
+Before upgrading a Postgres-backed control plane:
+
+1. Back up the Postgres volume or database.
+2. Stop the old `porthook-control-plane` and `porthook-gateway` processes or Compose stack.
+3. Deploy the new control-plane, gateway, dashboard assets, and CLI binaries or images together.
+4. Start the control plane and check `GET /readyz`.
+5. Start the gateway and check `GET /readyz` and `GET /metrics`.
+6. Use `porthook domains create` or the dashboard to map custom hostnames to reserved subdomains.
+7. Point each custom hostname at the gateway edge, provision TLS for that hostname, and confirm the reverse proxy preserves the original `Host` header.
+8. Run a custom-domain request and confirm it reaches the same active tunnel as the reserved subdomain.
+
+The 0.9.x migration is additive:
+
+- create `custom_domains` if it does not exist
+- create custom-domain hostname and reserved-subdomain indexes if they do not exist
+
+Rollback to 0.8.x should not require removing the `custom_domains` table, but a 0.8.x gateway will not route custom domains and a 0.8.x dashboard will not display them. Wildcard reserved subdomain routing remains available after rollback.
+
 ## Upgrade from 0.7.x to 0.8.x
 
 Version 0.8.x adds reserved-subdomain access policies, gateway enforcement for those policies, CLI/dashboard access policy management, and gateway request log visibility.
