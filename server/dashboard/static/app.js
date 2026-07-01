@@ -8,6 +8,8 @@ const elements = {
   adminToken: document.querySelector("#admin-token"),
   logoutButton: document.querySelector("#logout-button"),
   refreshButton: document.querySelector("#refresh-button"),
+  exportButton: document.querySelector("#export-button"),
+  exportCount: document.querySelector("#export-count"),
   createForm: document.querySelector("#create-form"),
   tokenName: document.querySelector("#token-name"),
   scopeRegisterTunnel: document.querySelector("#scope-register-tunnel"),
@@ -123,6 +125,7 @@ function setAuthenticated(authenticated) {
   elements.appPanel.hidden = !authenticated;
   elements.logoutButton.hidden = !authenticated;
   elements.refreshButton.disabled = !authenticated;
+  elements.exportButton.disabled = !authenticated;
   if (!authenticated) {
     currentTokens = [];
     currentReservations = [];
@@ -166,6 +169,7 @@ function setAuthenticated(authenticated) {
     elements.metricsCount.textContent = "No metrics loaded";
     elements.tunnelCount.textContent = "No tunnels loaded";
     elements.requestLogCount.textContent = "No request logs loaded";
+    elements.exportCount.textContent = "No export downloaded";
     clearTunnelDetail();
     renderOperationalOverview();
     renderReservationTokenOptions();
@@ -1710,6 +1714,160 @@ function defaultGatewayURL() {
   return `${protocol}//${hostname}:8080`;
 }
 
+async function downloadOperationalExport() {
+  elements.exportButton.disabled = true;
+  elements.exportCount.textContent = "Collecting export";
+  try {
+    const snapshot = await buildOperationalExport();
+    const data = `${JSON.stringify(snapshot, null, 2)}\n`;
+    const blob = new Blob([data], { type: "application/json" });
+    const objectURL = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectURL;
+    link.download = operationalExportFilename(snapshot.exported_at);
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectURL), 0);
+
+    const errorCount = (snapshot.errors || []).length;
+    elements.exportCount.textContent = errorCount === 0 ? "Export downloaded" : `Export downloaded with ${errorCount} error${errorCount === 1 ? "" : "s"}`;
+    showNotice(errorCount === 0 ? "Operational export downloaded." : `Operational export downloaded with ${errorCount} error${errorCount === 1 ? "" : "s"}.`, errorCount === 0 ? "success" : "error");
+  } catch (error) {
+    elements.exportCount.textContent = "Export failed";
+    showNotice(error.message, "error");
+  } finally {
+    elements.exportButton.disabled = !adminToken;
+  }
+}
+
+async function buildOperationalExport() {
+  const gatewayURL = normalizedGatewayURL();
+  const requestLogQueryString = safeRequestLogQuery();
+  const snapshot = {
+    exported_at: new Date().toISOString(),
+    exporter: "porthook-dashboard",
+    sources: {
+      dashboard_url: window.location.href,
+      control_plane_url: window.location.origin,
+      gateway_url: gatewayURL,
+      event_limit: normalizedAuditEventLimit(),
+      request_log_query: requestLogQueryString.query,
+      request_log_filters: requestLogExportFilters(),
+    },
+    control_plane: {
+      tokens: [],
+      reserved_subdomains: [],
+      custom_domains: [],
+      access_policies: [],
+      audit_events: [],
+    },
+    gateway: {
+      tunnels: [],
+      tunnel_details: [],
+      metrics: [],
+      request_logs: [],
+    },
+    diagnostics: currentDiagnostics.map((check) => ({ ...check })),
+    errors: [],
+  };
+
+  if (requestLogQueryString.error) {
+    snapshot.errors.push({ component: "gateway", endpoint: "/api/v1/request-logs", error: requestLogQueryString.error });
+  }
+
+  const status = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/status", () => localJSON("/api/v1/status"));
+  if (status) {
+    snapshot.control_plane.status = status;
+  }
+  const tokens = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/tokens", () => apiRequest("/api/v1/tokens"));
+  snapshot.control_plane.tokens = (tokens && tokens.tokens) || [];
+  const reservations = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/reserved-subdomains", () => apiRequest("/api/v1/reserved-subdomains"));
+  snapshot.control_plane.reserved_subdomains = (reservations && reservations.reserved_subdomains) || [];
+  const domains = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/custom-domains", () => apiRequest("/api/v1/custom-domains"));
+  snapshot.control_plane.custom_domains = (domains && domains.custom_domains) || [];
+  const policies = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/access-policies", () => apiRequest("/api/v1/access-policies"));
+  snapshot.control_plane.access_policies = (policies && policies.access_policies) || [];
+  const events = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/events", () => apiRequest(`/api/v1/events?limit=${encodeURIComponent(normalizedAuditEventLimit())}`));
+  snapshot.control_plane.audit_events = (events && events.events) || [];
+
+  if (!gatewayURL) {
+    snapshot.errors.push({ component: "gateway", endpoint: "*", error: "gateway URL is required" });
+    return snapshot;
+  }
+
+  const tunnels = await captureOperationalExport(snapshot.errors, "gateway", "/api/v1/tunnels", () => gatewayJSON("/api/v1/tunnels"));
+  snapshot.gateway.tunnels = (tunnels && tunnels.tunnels) || [];
+  const tunnelDetails = await Promise.all(
+    snapshot.gateway.tunnels
+      .filter((tunnel) => tunnel.tunnel_id)
+      .map((tunnel) => captureOperationalExport(snapshot.errors, "gateway", `/api/v1/tunnels/${tunnel.tunnel_id}`, () => gatewayJSON(`/api/v1/tunnels/${encodeURIComponent(tunnel.tunnel_id)}`))),
+  );
+  snapshot.gateway.tunnel_details = tunnelDetails.filter(Boolean).map((detail) => detail.tunnel || detail);
+
+  const runtime = await captureOperationalExport(snapshot.errors, "gateway", "/api/v1/runtime", () => gatewayJSON("/api/v1/runtime"));
+  if (runtime) {
+    snapshot.gateway.runtime = runtime.runtime || {};
+  }
+  const metricsText = await captureOperationalExport(snapshot.errors, "gateway", "/metrics", () => gatewayText("/metrics"));
+  if (metricsText !== null && metricsText !== undefined) {
+    snapshot.gateway.metrics_text = metricsText;
+    snapshot.gateway.metrics = parsePrometheusMetrics(metricsText);
+  }
+  if (!requestLogQueryString.error) {
+    const requestLogs = await captureOperationalExport(snapshot.errors, "gateway", "/api/v1/request-logs", () => gatewayJSON(`/api/v1/request-logs?${requestLogQueryString.query}`));
+    snapshot.gateway.request_logs = (requestLogs && requestLogs.request_logs) || [];
+  }
+  return snapshot;
+}
+
+async function localJSON(path) {
+  const response = await fetch(path, { cache: "no-store" });
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    throw new Error(responseDetail(payload, response.status));
+  }
+  return payload || {};
+}
+
+async function captureOperationalExport(errors, component, endpoint, task) {
+  try {
+    return await task();
+  } catch (error) {
+    errors.push({ component, endpoint, error: error.message });
+    return null;
+  }
+}
+
+function safeRequestLogQuery() {
+  try {
+    return { query: requestLogQuery(), error: "" };
+  } catch (error) {
+    return { query: `limit=${encodeURIComponent(normalizedRequestLogLimit())}`, error: error.message };
+  }
+}
+
+function requestLogExportFilters() {
+  return {
+    subdomain: elements.requestLogSubdomain.value.trim(),
+    method: elements.requestLogMethod.value.trim(),
+    host: elements.requestLogHost.value.trim(),
+    path: elements.requestLogPath.value.trim(),
+    status: elements.requestLogStatus.value.trim(),
+    outcome: elements.requestLogOutcome.value.trim(),
+    request_id: elements.requestLogRequestID.value.trim(),
+    tunnel_id: elements.requestLogTunnelID.value.trim(),
+    since: elements.requestLogSince.value.trim(),
+    until: elements.requestLogUntil.value.trim(),
+    limit: normalizedRequestLogLimit(),
+  };
+}
+
+function operationalExportFilename(exportedAt) {
+  const stamp = String(exportedAt || new Date().toISOString()).replace(/[:.]/g, "-");
+  return `porthook-operational-export-${stamp}.json`;
+}
+
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   adminToken = elements.adminToken.value.trim();
@@ -1743,6 +1901,7 @@ elements.refreshButton.addEventListener("click", async () => {
   }
 });
 
+elements.exportButton.addEventListener("click", downloadOperationalExport);
 elements.createForm.addEventListener("submit", createToken);
 elements.copyCreatedToken.addEventListener("click", copyCreatedToken);
 elements.reservationForm.addEventListener("submit", createReservation);

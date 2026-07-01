@@ -91,6 +91,18 @@ printf '%s' '<admin-token>' | porthook doctor \
   --admin-token-stdin
 ```
 
+Capture a best-effort operational export for incident handoff or offline review:
+
+```sh
+printf '%s' '<admin-token>' | porthook export \
+  --gateway https://check.${PORTHOOK_ROOT_DOMAIN} \
+  --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+  --admin-token-stdin \
+  --output porthook-operational-export.json
+```
+
+The export includes safe control-plane summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, and request logs. It records partial endpoint failures in `errors` and does not include plaintext agent tokens, policy secrets, or local target URLs.
+
 Useful log events:
 
 | Event | Meaning |

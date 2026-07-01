@@ -419,6 +419,7 @@ porthook access update --control-plane <url> <policy-id> --mode <mode>
 porthook access delete --control-plane <url> <policy-id>
 porthook tunnels list --gateway <url>
 porthook tunnels show --gateway <url> <tunnel-id>
+porthook export --gateway <url> --control-plane <url>
 porthook version
 ```
 
@@ -426,13 +427,15 @@ porthook version
 
 `porthook tunnels list` and `porthook tunnels show` read active tunnel summaries from the gateway public API. They do not require an admin token and do not expose local target URLs.
 
+`porthook export` writes a best-effort operational JSON snapshot for self-hosted debugging. It includes safe control-plane summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, and request logs. It records partial endpoint failures in an `errors` array and does not include plaintext agent tokens, policy secrets, or local target URLs.
+
 Postgres-backed control-plane token storage uses embedded versioned SQL migrations. The control plane applies pending migrations at startup and records applied versions in `schema_migrations`.
 
 The control plane exposes `GET /api/v1/status` for dashboard and automation checks. It returns JSON with readiness state and the binary version.
 
 The control plane exposes `GET /api/v1/events` for dashboard audit visibility. The endpoint returns recent in-memory audit events, newest first, and omits plaintext tokens and access policy secrets.
 
-The dashboard includes browser diagnostics for control-plane status/readiness, audit event API access, and configured gateway tunnel/runtime/metrics/request-log API reachability.
+The dashboard includes browser diagnostics for control-plane status/readiness, audit event API access, configured gateway tunnel/runtime/metrics/request-log API reachability, and an operational JSON export download.
 
 The gateway exposes `GET /api/v1/tunnels` for dashboard active-tunnel visibility. The endpoint returns active tunnel summaries and omits local target URLs.
 
