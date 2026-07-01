@@ -233,6 +233,7 @@ Responsibilities:
 - Show control-plane audit events.
 - Run browser diagnostics for self-hosted API reachability.
 - Show gateway runtime summary.
+- Show gateway metrics drilldown.
 - Manage self-hosted instance settings.
 
 The dashboard is useful, but not required for the first tunnel MVP.
@@ -452,6 +453,7 @@ Minimum:
 - Dashboard control-plane audit event view.
 - Dashboard diagnostics view.
 - Dashboard gateway runtime summary.
+- Dashboard gateway metrics drilldown.
 
 Future:
 

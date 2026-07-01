@@ -2239,6 +2239,9 @@ func TestPublicHandlerMetricsEndpoint(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("metrics status = %d, want 200; body = %q", resp.StatusCode, string(body))
 	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("metrics CORS = %q, want *", got)
+	}
 	for _, want := range []string{
 		"porthook_gateway_active_tunnels 0",
 		"porthook_gateway_uptime_seconds ",
@@ -2250,6 +2253,19 @@ func TestPublicHandlerMetricsEndpoint(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("metrics = %q, want %q", string(body), want)
 		}
+	}
+
+	req, err = http.NewRequestWithContext(context.Background(), http.MethodOptions, httpServer.URL+"/metrics", nil)
+	if err != nil {
+		t.Fatalf("NewRequest metrics OPTIONS returned error: %v", err)
+	}
+	resp, err = httpServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("OPTIONS metrics returned error: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("OPTIONS metrics status = %d, want 204", resp.StatusCode)
 	}
 }
 

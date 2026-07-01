@@ -407,6 +407,34 @@
           <div class="subsection">
             <div class="section-heading">
               <div>
+                <h2>Metrics drilldown</h2>
+                <p class="muted" id="metrics-count">No metrics loaded</p>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Type</th>
+                    <th>Value</th>
+                    <th>Help</th>
+                  </tr>
+                </thead>
+                <tbody id="metrics-body"></tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" id="metrics-empty-state" hidden>
+              <h3>No metrics</h3>
+              <p class="muted">Gateway metrics appear after the configured gateway responds.</p>
+            </div>
+          </div>
+
+          <div class="subsection">
+            <div class="section-heading">
+              <div>
                 <h2>Operational overview</h2>
                 <p class="muted" id="overview-count">No gateway data loaded</p>
               </div>

@@ -428,11 +428,13 @@ The control plane exposes `GET /api/v1/status` for dashboard and automation chec
 
 The control plane exposes `GET /api/v1/events` for dashboard audit visibility. The endpoint returns recent in-memory audit events, newest first, and omits plaintext tokens and access policy secrets.
 
-The dashboard includes browser diagnostics for control-plane status/readiness, audit event API access, and configured gateway tunnel/runtime/request-log API reachability.
+The dashboard includes browser diagnostics for control-plane status/readiness, audit event API access, and configured gateway tunnel/runtime/metrics/request-log API reachability.
 
 The gateway exposes `GET /api/v1/tunnels` for dashboard active-tunnel visibility. The endpoint returns active tunnel summaries and omits local target URLs.
 
 The gateway exposes `GET /api/v1/runtime` for dashboard runtime visibility. The endpoint returns safe uptime, request-log buffer usage, stream totals, selected limits/timeouts, and counters without local target URLs, tokens, or control-plane URLs.
+
+The dashboard can read the gateway Prometheus `GET /metrics` endpoint and render metric names, types, values, and help text for self-hosted operators.
 
 The gateway exposes `GET /api/v1/request-logs` for dashboard request-log visibility. The endpoint returns recent public request summaries from an in-memory ring buffer, newest first. It supports `limit`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`; `since` and `until` use RFC3339 timestamps, and `limit` is applied after filtering. It includes path and `query_present`, but never raw query strings.
 
