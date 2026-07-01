@@ -1279,6 +1279,7 @@ func TestPublicRequestRejectsLargeBody(t *testing.T) {
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	registerAgent(t, ctx, conn, "demo")
+	waitForSession(t, ctx, server, "demo")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, publicServer.URL+"/upload", bytes.NewBufferString("too-large"))
 	if err != nil {
@@ -1822,6 +1823,25 @@ func waitForPublicStatus(t *testing.T, ctx context.Context, client *http.Client,
 				t.Fatalf("public request did not reach status %d before timeout: %v", want, err)
 			}
 			t.Fatalf("public request did not reach status %d before timeout", want)
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForSession(t *testing.T, ctx context.Context, server *Server, subdomain string) {
+	t.Helper()
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if _, ok := server.sessionBySubdomain(subdomain); ok {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			t.Fatalf("session %q did not register before timeout", subdomain)
 		case <-ticker.C:
 		}
 	}
