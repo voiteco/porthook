@@ -231,6 +231,7 @@ Responsibilities:
 - Reserve subdomains.
 - Manage access policies.
 - Show control-plane audit events.
+- Run browser diagnostics for self-hosted API reachability.
 - Manage self-hosted instance settings.
 
 The dashboard is useful, but not required for the first tunnel MVP.
@@ -448,6 +449,7 @@ Minimum:
 - OpenTelemetry traces for gateway/control-plane HTTP paths.
 - Dashboard operational overview charts.
 - Dashboard control-plane audit event view.
+- Dashboard diagnostics view.
 
 Future:
 

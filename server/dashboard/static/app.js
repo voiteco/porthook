@@ -56,6 +56,10 @@ const elements = {
   auditEventsBody: document.querySelector("#audit-events-body"),
   auditEventsEmptyState: document.querySelector("#audit-events-empty-state"),
   auditEventCount: document.querySelector("#audit-event-count"),
+  diagnosticsForm: document.querySelector("#diagnostics-form"),
+  diagnosticsBody: document.querySelector("#diagnostics-body"),
+  diagnosticsEmptyState: document.querySelector("#diagnostics-empty-state"),
+  diagnosticsCount: document.querySelector("#diagnostics-count"),
   gatewayForm: document.querySelector("#gateway-form"),
   gatewayURL: document.querySelector("#gateway-url"),
   tunnelsBody: document.querySelector("#tunnels-body"),
@@ -98,6 +102,7 @@ let currentReservations = [];
 let currentCustomDomains = [];
 let currentAccessPolicies = [];
 let currentAuditEvents = [];
+let currentDiagnostics = [];
 let currentTunnels = [];
 let currentRequestLogs = [];
 let editingAccessPolicyID = "";
@@ -116,6 +121,7 @@ function setAuthenticated(authenticated) {
     currentCustomDomains = [];
     currentAccessPolicies = [];
     currentAuditEvents = [];
+    currentDiagnostics = [];
     currentTunnels = [];
     currentRequestLogs = [];
     editingAccessPolicyID = "";
@@ -125,6 +131,7 @@ function setAuthenticated(authenticated) {
     elements.customDomainsBody.replaceChildren();
     elements.accessPoliciesBody.replaceChildren();
     elements.auditEventsBody.replaceChildren();
+    elements.diagnosticsBody.replaceChildren();
     elements.tunnelsBody.replaceChildren();
     elements.requestLogsBody.replaceChildren();
     elements.emptyState.hidden = true;
@@ -132,6 +139,7 @@ function setAuthenticated(authenticated) {
     elements.customDomainsEmptyState.hidden = true;
     elements.accessPoliciesEmptyState.hidden = true;
     elements.auditEventsEmptyState.hidden = true;
+    elements.diagnosticsEmptyState.hidden = true;
     elements.tunnelsEmptyState.hidden = true;
     elements.requestLogsEmptyState.hidden = true;
     elements.tokenCount.textContent = "No tokens loaded";
@@ -139,6 +147,7 @@ function setAuthenticated(authenticated) {
     elements.customDomainCount.textContent = "No custom domains loaded";
     elements.accessPolicyCount.textContent = "No access policies loaded";
     elements.auditEventCount.textContent = "No audit events loaded";
+    elements.diagnosticsCount.textContent = "No diagnostics run";
     elements.tunnelCount.textContent = "No tunnels loaded";
     elements.requestLogCount.textContent = "No request logs loaded";
     clearTunnelDetail();
@@ -559,6 +568,149 @@ function auditEventFields(event) {
   const fields = event.fields || {};
   const entries = Object.entries(fields).sort(([left], [right]) => left.localeCompare(right));
   return entries.map(([key, value]) => `${key}=${value}`).join(", ") || "-";
+}
+
+async function runDiagnostics() {
+  elements.diagnosticsCount.textContent = "Running diagnostics";
+  elements.diagnosticsBody.replaceChildren();
+  elements.diagnosticsEmptyState.hidden = true;
+
+  const checks = [
+    {
+      name: "Control-plane status",
+      target: "/api/v1/status",
+      run: checkControlPlaneStatus,
+    },
+    {
+      name: "Control-plane readiness",
+      target: "/readyz",
+      run: checkControlPlaneReadiness,
+    },
+    {
+      name: "Audit events API",
+      target: "/api/v1/events",
+      run: checkAuditEventsAPI,
+    },
+    {
+      name: "Gateway tunnel API",
+      target: "gateway /api/v1/tunnels",
+      run: checkGatewayTunnelAPI,
+    },
+    {
+      name: "Gateway request logs API",
+      target: "gateway /api/v1/request-logs",
+      run: checkGatewayRequestLogsAPI,
+    },
+  ];
+
+  currentDiagnostics = await Promise.all(checks.map(runDiagnosticCheck));
+  renderDiagnostics(currentDiagnostics);
+}
+
+async function runDiagnosticCheck(check) {
+  const started = performance.now();
+  try {
+    const detail = await check.run();
+    return {
+      name: check.name,
+      target: check.target,
+      status: "pass",
+      latency_ms: Math.round(performance.now() - started),
+      detail,
+    };
+  } catch (error) {
+    return {
+      name: check.name,
+      target: check.target,
+      status: "fail",
+      latency_ms: Math.round(performance.now() - started),
+      detail: error.message,
+    };
+  }
+}
+
+function renderDiagnostics(checks) {
+  elements.diagnosticsBody.replaceChildren(...checks.map(renderDiagnosticRow));
+  elements.diagnosticsEmptyState.hidden = checks.length !== 0;
+  const failed = checks.filter((check) => check.status === "fail").length;
+  elements.diagnosticsCount.textContent = failed === 0 ? `${checks.length} checks passed` : `${failed} of ${checks.length} checks failed`;
+}
+
+function renderDiagnosticRow(check) {
+  const row = document.createElement("tr");
+  row.append(
+    cell(check.name),
+    cell(check.target),
+    diagnosticStatusCell(check.status),
+    cell(`${check.latency_ms || 0} ms`),
+    cell(check.detail || "-"),
+  );
+  return row;
+}
+
+function diagnosticStatusCell(status) {
+  const item = document.createElement("td");
+  const badge = document.createElement("span");
+  badge.className = status === "pass" ? "badge active" : "badge revoked";
+  badge.textContent = status;
+  item.append(badge);
+  return item;
+}
+
+async function checkControlPlaneStatus() {
+  const response = await fetch("/api/v1/status", { cache: "no-store" });
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    throw new Error(responseDetail(payload, response.status));
+  }
+  if (!payload || !payload.ready) {
+    throw new Error("control plane is not ready");
+  }
+  return `ready, version ${payload.version || "unknown"}`;
+}
+
+async function checkControlPlaneReadiness() {
+  const response = await fetch("/readyz", { cache: "no-store" });
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    throw new Error(responseDetail(payload, response.status));
+  }
+  return typeof payload === "string" && payload ? payload : "ready";
+}
+
+async function checkAuditEventsAPI() {
+  const payload = await apiRequest("/api/v1/events?limit=1");
+  const count = (payload.events || []).length;
+  return `${count} recent event${count === 1 ? "" : "s"}`;
+}
+
+async function checkGatewayTunnelAPI() {
+  const payload = await gatewayJSON("/api/v1/tunnels");
+  const count = (payload.tunnels || []).length;
+  return `${count} active tunnel${count === 1 ? "" : "s"}`;
+}
+
+async function checkGatewayRequestLogsAPI() {
+  const payload = await gatewayJSON("/api/v1/request-logs?limit=1");
+  const count = (payload.request_logs || []).length;
+  return `${count} recent request log${count === 1 ? "" : "s"}`;
+}
+
+async function gatewayJSON(path) {
+  const baseURL = normalizedGatewayURL();
+  if (!baseURL) {
+    throw new Error("gateway URL is required");
+  }
+  const response = await fetch(`${baseURL}${path}`, { cache: "no-store" });
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    throw new Error(responseDetail(payload, response.status));
+  }
+  return payload || {};
+}
+
+function responseDetail(payload, status) {
+  return typeof payload === "string" && payload ? payload : `status ${status}`;
 }
 
 function reservationByID(id) {
@@ -1394,6 +1546,10 @@ elements.auditEventForm.addEventListener("submit", async (event) => {
     elements.auditEventsEmptyState.hidden = false;
     showNotice(error.message, "error");
   }
+});
+elements.diagnosticsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await runDiagnostics();
 });
 elements.gatewayForm.addEventListener("submit", async (event) => {
   event.preventDefault();

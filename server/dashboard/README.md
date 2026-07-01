@@ -13,6 +13,7 @@ The current dashboard scope is self-hosted administration:
 - Control-plane audit event visibility.
 - Active gateway tunnel visibility.
 - Active gateway tunnel detail view.
+- Browser-run diagnostics for control-plane and gateway API reachability.
 - Operational overview charts.
 - Gateway request logs.
 - Control-plane readiness status.
@@ -32,6 +33,8 @@ Token tables include `last_used_at` metadata, updated when the gateway successfu
 Access policy tables show policy modes and non-secret settings. Plaintext policy secrets are accepted only in create/update form submissions and are never returned by list responses.
 
 Audit events are loaded from `GET /api/v1/events` with the configured admin token. The dashboard renders recent event metadata and flattened audit fields, while the control plane omits plaintext tokens and access policy secrets from event payloads.
+
+Diagnostics run from the browser and check control-plane status/readiness, audit event API access, the configured gateway tunnel API, and the configured gateway request log API.
 
 Custom domain management maps a fully qualified hostname to a reserved subdomain. DNS and TLS for that hostname are handled outside the dashboard.
 
