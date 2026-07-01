@@ -56,6 +56,15 @@ OpenTelemetry tracing is disabled by default. See [../../docs/OBSERVABILITY.md](
 
 ## CLI
 
+Run operational diagnostics:
+
+```sh
+printf '%s' 'admin-secret' | porthook doctor \
+  --gateway http://localhost:8080 \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin
+```
+
 Create an agent token:
 
 ```sh
@@ -157,6 +166,8 @@ printf '%s' 'admin-secret' | porthook domains delete \
 `/api/v1/status` returns JSON with the control-plane readiness state and binary version for dashboard and automation checks.
 
 `/api/v1/events` returns recent in-memory audit events for admin users. Events are newest-first, support `?limit=N`, and omit plaintext tokens and access policy secrets.
+
+`porthook doctor` checks gateway and control-plane operational endpoints, including `/api/v1/events` when an admin token is provided, and prints response request IDs for log correlation.
 
 Control-plane logs are structured text logs written to stdout. Audit-relevant logs include an `event` field such as `control_plane.auth_failed`, `control_plane.token_created`, `control_plane.token_validated`, `control_plane.token_revoked`, `control_plane.reservation_created`, `control_plane.reservation_authorized`, `control_plane.custom_domain_created`, `control_plane.custom_domain_lookup`, `control_plane.access_policy_created`, and `control_plane.access_policy_evaluated`. Logs include method, path, remote IP, optional `request_id` from `X-Request-ID` or `X-Correlation-ID`, token IDs where available, subdomains, custom domain IDs, policy IDs, outcomes, and denial reasons. Authorization headers, plaintext token values, and access policy secrets are not logged.
 

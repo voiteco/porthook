@@ -76,6 +76,15 @@ docker compose \
   logs --tail=200 porthook-gateway porthook-control-plane reverse-proxy
 ```
 
+Run the CLI diagnostics bundle:
+
+```sh
+printf '%s' '<admin-token>' | porthook doctor \
+  --gateway https://check.${PORTHOOK_ROOT_DOMAIN} \
+  --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+  --admin-token-stdin
+```
+
 Useful log events:
 
 | Event | Meaning |

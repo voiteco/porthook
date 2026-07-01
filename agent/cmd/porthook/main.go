@@ -28,6 +28,7 @@ const usageText = `usage: porthook login --server URL [--token TOKEN | --token-s
        porthook reserved <create|list|delete> [options]
        porthook access <create|list|update|delete> [options]
        porthook domains <create|list|verify|delete> [options]
+       porthook doctor [options]
        porthook version
        porthook help`
 
@@ -90,6 +91,12 @@ func runWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Write
 		return runAccessCommand(args[1:], stdin, stdout, stderr)
 	case "domains":
 		return runDomainsCommand(args[1:], stdin, stdout, stderr)
+	case "doctor":
+		if wantsHelp(args[1:]) {
+			printDoctorHelp(stdout)
+			return nil
+		}
+		return runDoctorCommand(args[1:], stdin, stdout, stderr)
 	case "help", "--help", "-h":
 		printUsage(stdout)
 		return nil
