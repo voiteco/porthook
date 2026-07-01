@@ -233,6 +233,59 @@
               <p class="muted">Active gateway sessions appear after an agent connects.</p>
             </div>
           </div>
+
+          <div class="subsection">
+            <div class="section-heading">
+              <div>
+                <h2>Request logs</h2>
+                <p class="muted" id="request-log-count">No request logs loaded</p>
+              </div>
+            </div>
+
+            <form class="create-form request-log-form" id="request-log-form">
+              <div class="field">
+                <label for="request-log-subdomain">Subdomain</label>
+                <input id="request-log-subdomain" name="request-log-subdomain" type="text" maxlength="63">
+              </div>
+              <div class="field">
+                <label for="request-log-status">Status</label>
+                <input id="request-log-status" name="request-log-status" type="number" min="100" max="599">
+              </div>
+              <div class="field">
+                <label for="request-log-outcome">Outcome</label>
+                <input id="request-log-outcome" name="request-log-outcome" type="text">
+              </div>
+              <div class="field compact">
+                <label for="request-log-limit">Limit</label>
+                <input id="request-log-limit" name="request-log-limit" type="number" min="1" max="1000" value="100">
+              </div>
+              <button type="submit">Load logs</button>
+            </form>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Subdomain</th>
+                    <th>Method</th>
+                    <th>Path</th>
+                    <th>Status</th>
+                    <th>Outcome</th>
+                    <th>Duration</th>
+                    <th>Bytes</th>
+                    <th>Remote IP</th>
+                  </tr>
+                </thead>
+                <tbody id="request-logs-body"></tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" id="request-logs-empty-state" hidden>
+              <h3>No request logs</h3>
+              <p class="muted">Gateway request log entries appear after public traffic reaches the gateway.</p>
+            </div>
+          </div>
         </section>
       </main>
     </div>
