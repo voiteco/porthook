@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type PostgresStore struct {
@@ -114,7 +115,7 @@ func (s *PostgresStore) verifySchema(ctx context.Context) error {
 		FROM information_schema.columns
 		WHERE table_schema = current_schema()
 			AND table_name = 'custom_domains'
-			AND column_name IN ('id', 'hostname', 'reserved_subdomain_id', 'status', 'created_at', 'updated_at')`,
+			AND column_name IN ('id', 'hostname', 'reserved_subdomain_id', 'status', 'verification_token', 'verified_at', 'created_at', 'updated_at')`,
 	).Scan(&count); err != nil {
 		return err
 	}
@@ -127,12 +128,14 @@ func (s *PostgresStore) verifySchema(ctx context.Context) error {
 func (s *PostgresStore) Create(ctx context.Context, record DomainRecord) error {
 	_, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO custom_domains (id, hostname, reserved_subdomain_id, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO custom_domains (id, hostname, reserved_subdomain_id, status, verification_token, verified_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		record.ID,
 		record.Hostname,
 		record.ReservedSubdomainID,
 		record.Status,
+		record.VerificationToken,
+		nullableTime(record.VerifiedAt),
 		record.CreatedAt,
 		record.UpdatedAt,
 	)
@@ -174,6 +177,41 @@ func (s *PostgresStore) LookupByHostname(ctx context.Context, hostname string) (
 	return s.lookup(ctx, selectDomainRecordSQL+` WHERE hostname = $1`, hostname)
 }
 
+func (s *PostgresStore) Update(ctx context.Context, record DomainRecord) error {
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE custom_domains
+		SET hostname = $2,
+			reserved_subdomain_id = $3,
+			status = $4,
+			verification_token = $5,
+			verified_at = $6,
+			updated_at = $7
+		WHERE id = $1`,
+		record.ID,
+		record.Hostname,
+		record.ReservedSubdomainID,
+		record.Status,
+		record.VerificationToken,
+		nullableTime(record.VerifiedAt),
+		record.UpdatedAt,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "custom_domains_hostname_key") {
+			return ErrDomainAlreadyExists
+		}
+		return fmt.Errorf("update custom domain: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update custom domain: %w", err)
+	}
+	if affected == 0 {
+		return ErrDomainNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) Delete(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM custom_domains WHERE id = $1`, id)
 	if err != nil {
@@ -197,7 +235,7 @@ type domainRecordScanner interface {
 	Scan(dest ...any) error
 }
 
-const selectDomainRecordSQL = `SELECT id, hostname, reserved_subdomain_id, status, created_at, updated_at FROM custom_domains`
+const selectDomainRecordSQL = `SELECT id, hostname, reserved_subdomain_id, status, verification_token, verified_at, created_at, updated_at FROM custom_domains`
 
 const postgresMigrationStateTableSQL = `CREATE TABLE IF NOT EXISTS schema_migrations (
 	version INTEGER PRIMARY KEY,
@@ -205,16 +243,19 @@ const postgresMigrationStateTableSQL = `CREATE TABLE IF NOT EXISTS schema_migrat
 	applied_at TIMESTAMPTZ NOT NULL
 )`
 
-const requiredPostgresCustomDomainColumns = 6
+const requiredPostgresCustomDomainColumns = 8
 
 func scanDomainRecord(scanner domainRecordScanner) (DomainRecord, error) {
 	var record DomainRecord
 	var status string
+	var verifiedAt sql.NullTime
 	err := scanner.Scan(
 		&record.ID,
 		&record.Hostname,
 		&record.ReservedSubdomainID,
 		&status,
+		&record.VerificationToken,
+		&verifiedAt,
 		&record.CreatedAt,
 		&record.UpdatedAt,
 	)
@@ -222,5 +263,15 @@ func scanDomainRecord(scanner domainRecordScanner) (DomainRecord, error) {
 		return DomainRecord{}, err
 	}
 	record.Status = DomainStatus(status)
+	if verifiedAt.Valid {
+		record.VerifiedAt = &verifiedAt.Time
+	}
 	return record, nil
+}
+
+func nullableTime(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return *value
 }

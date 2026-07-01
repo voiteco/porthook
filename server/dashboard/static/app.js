@@ -321,6 +321,7 @@ function renderCustomDomainRow(domain) {
     monoCell(domain.id),
     cell(reservation ? reservation.name : domain.reserved_subdomain_id),
     customDomainStatusCell(domain),
+    customDomainVerificationCell(domain),
     cell(formatTime(domain.updated_at)),
     customDomainActionCell(domain),
   );
@@ -330,21 +331,54 @@ function renderCustomDomainRow(domain) {
 function customDomainStatusCell(domain) {
   const item = document.createElement("td");
   const badge = document.createElement("span");
-  badge.className = domain.status === "active" ? "badge active" : "badge";
+  badge.className = domain.status === "active" ? "badge active" : domain.status === "verification_failed" ? "badge revoked" : "badge";
   badge.textContent = domain.status || "unknown";
   item.append(badge);
   return item;
 }
 
+function customDomainVerificationCell(domain) {
+  const item = document.createElement("td");
+  item.classList.add("verification-cell");
+  if (domain.verified_at) {
+    item.textContent = formatTime(domain.verified_at);
+    return item;
+  }
+  if (!domain.verification_name && !domain.verification_token) {
+    item.textContent = "-";
+    return item;
+  }
+
+  if (domain.verification_name) {
+    const name = document.createElement("code");
+    name.textContent = domain.verification_name;
+    item.append(name);
+  }
+  if (domain.verification_token) {
+    const value = document.createElement("code");
+    value.textContent = `porthook-domain-verification=${domain.verification_token}`;
+    item.append(value);
+  }
+  return item;
+}
+
 function customDomainActionCell(domain) {
   const item = document.createElement("td");
-  item.classList.add("right");
-  const button = document.createElement("button");
-  button.className = "danger";
-  button.type = "button";
-  button.textContent = "Delete";
-  button.addEventListener("click", () => deleteCustomDomain(domain));
-  item.append(button);
+  item.classList.add("right", "button-cell");
+  if (domain.status !== "active") {
+    const verify = document.createElement("button");
+    verify.className = "secondary";
+    verify.type = "button";
+    verify.textContent = "Verify";
+    verify.addEventListener("click", () => verifyCustomDomain(domain));
+    item.append(verify);
+  }
+  const remove = document.createElement("button");
+  remove.className = "danger";
+  remove.type = "button";
+  remove.textContent = "Delete";
+  remove.addEventListener("click", () => deleteCustomDomain(domain));
+  item.append(remove);
   return item;
 }
 
@@ -874,6 +908,20 @@ async function deleteCustomDomain(domain) {
     await apiRequest(`/api/v1/custom-domains/${encodeURIComponent(domain.id)}`, { method: "DELETE" });
     await loadCustomDomains();
     showNotice(`Deleted custom domain ${domain.hostname}.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function verifyCustomDomain(domain) {
+  try {
+    const verified = await apiRequest(`/api/v1/custom-domains/${encodeURIComponent(domain.id)}/verify`, { method: "POST" });
+    await loadCustomDomains();
+    if (verified.status === "active") {
+      showNotice(`Verified custom domain ${verified.hostname}.`, "success");
+      return;
+    }
+    showNotice(`Custom domain ${verified.hostname} is still ${verified.status}.`, "error");
   } catch (error) {
     showNotice(error.message, "error");
   }

@@ -29,7 +29,9 @@ func TestRunDomainsCreateUsesAdminTokenStdin(t *testing.T) {
 			ID:                  "cd_created",
 			Hostname:            "preview.example.test",
 			ReservedSubdomainID: gotReq.ReservedSubdomainID,
-			Status:              "active",
+			Status:              "pending_verification",
+			VerificationToken:   "phdv_test",
+			VerificationName:    "_porthook.preview.example.test",
 			CreatedAt:           now,
 			UpdatedAt:           now,
 		})
@@ -68,6 +70,9 @@ func TestRunDomainsCreateUsesAdminTokenStdin(t *testing.T) {
 	if created.ID != "cd_created" || created.Hostname != "preview.example.test" {
 		t.Fatalf("created = %+v, want created custom domain JSON", created)
 	}
+	if created.Status != "pending_verification" || created.VerificationToken != "phdv_test" || created.VerificationName != "_porthook.preview.example.test" {
+		t.Fatalf("created verification = %+v, want pending verification fields", created)
+	}
 }
 
 func TestRunDomainsListPrintsTable(t *testing.T) {
@@ -83,7 +88,8 @@ func TestRunDomainsListPrintsTable(t *testing.T) {
 			ID:                  "cd_listed",
 			Hostname:            "preview.example.test",
 			ReservedSubdomainID: "rs_demo",
-			Status:              "active",
+			Status:              "pending_verification",
+			VerificationName:    "_porthook.preview.example.test",
 			UpdatedAt:           now,
 		}}})
 	}))
@@ -104,7 +110,72 @@ func TestRunDomainsListPrintsTable(t *testing.T) {
 		t.Fatalf("Authorization = %q, want bearer admin token", gotAuth)
 	}
 	output := stdout.String()
-	for _, want := range []string{"ID", "HOSTNAME", "RESERVED SUBDOMAIN ID", "STATUS", "UPDATED", "cd_listed", "preview.example.test", "rs_demo", "active", now.Format(time.RFC3339)} {
+	for _, want := range []string{"ID", "HOSTNAME", "RESERVED SUBDOMAIN ID", "STATUS", "VERIFICATION", "UPDATED", "cd_listed", "preview.example.test", "rs_demo", "pending_verification", "_porthook.preview.example.test", now.Format(time.RFC3339)} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestRunDomainsVerifyResolvesHostname(t *testing.T) {
+	now := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	verifiedAt := time.Date(2026, 7, 1, 10, 5, 0, 0, time.UTC)
+	var gotAuth []string
+	var verifiedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/custom-domains":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(listCustomDomainsResponse{CustomDomains: []customDomainSummary{{
+				ID:                  "cd_verify",
+				Hostname:            "preview.example.test",
+				ReservedSubdomainID: "rs_demo",
+				Status:              "pending_verification",
+				VerificationToken:   "phdv_test",
+				VerificationName:    "_porthook.preview.example.test",
+				UpdatedAt:           now,
+			}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/custom-domains/cd_verify/verify":
+			verifiedPath = r.URL.Path
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(customDomainSummary{
+				ID:                  "cd_verify",
+				Hostname:            "preview.example.test",
+				ReservedSubdomainID: "rs_demo",
+				Status:              "active",
+				VerificationToken:   "phdv_test",
+				VerificationName:    "_porthook.preview.example.test",
+				VerifiedAt:          &verifiedAt,
+				UpdatedAt:           verifiedAt,
+			})
+		default:
+			t.Fatalf("unexpected request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runWithIO(
+		[]string{"domains", "verify", "--control-plane", server.URL, "--admin-token", "admin-secret", "Preview.Example.Test."},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	)
+	if err != nil {
+		t.Fatalf("run domains verify returned error: %v", err)
+	}
+	if verifiedPath != "/api/v1/custom-domains/cd_verify/verify" {
+		t.Fatalf("verified path = %q, want verify endpoint", verifiedPath)
+	}
+	for _, auth := range gotAuth {
+		if auth != "Bearer admin-secret" {
+			t.Fatalf("Authorization = %q, want bearer admin token", auth)
+		}
+	}
+	output := stdout.String()
+	for _, want := range []string{"Verified custom domain cd_verify", "Status: active", "Verified: " + verifiedAt.Format(time.RFC3339)} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stdout = %q, want %q", output, want)
 		}
@@ -164,7 +235,7 @@ func TestRunDomainsHelpPrintsUsage(t *testing.T) {
 		t.Fatalf("run domains help returned error: %v", err)
 	}
 	output := stdout.String()
-	for _, want := range []string{"domains create", "domains list", "domains delete"} {
+	for _, want := range []string{"domains create", "domains list", "domains verify", "domains delete"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stdout = %q, want %q", output, want)
 		}

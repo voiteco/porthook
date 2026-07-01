@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -20,14 +21,23 @@ var (
 )
 
 type Service struct {
-	store Store
-	now   func() time.Time
+	store    Store
+	now      func() time.Time
+	resolver TXTResolver
 }
 
 func NewService(store Store) *Service {
+	return NewServiceWithResolver(store, netTXTResolver{})
+}
+
+func NewServiceWithResolver(store Store, resolver TXTResolver) *Service {
+	if resolver == nil {
+		resolver = netTXTResolver{}
+	}
 	return &Service{
-		store: store,
-		now:   func() time.Time { return time.Now().UTC() },
+		store:    store,
+		now:      func() time.Time { return time.Now().UTC() },
+		resolver: resolver,
 	}
 }
 
@@ -55,12 +65,17 @@ func (s *Service) CreateDomain(ctx context.Context, req CreateDomainRequest) (Cr
 	if err != nil {
 		return CreatedDomain{}, err
 	}
+	verificationToken, err := randomVerificationToken()
+	if err != nil {
+		return CreatedDomain{}, err
+	}
 	now := s.now()
 	record := DomainRecord{
 		ID:                  id,
 		Hostname:            hostname,
 		ReservedSubdomainID: reservedSubdomainID,
-		Status:              StatusActive,
+		Status:              StatusPendingVerification,
+		VerificationToken:   verificationToken,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
@@ -88,6 +103,47 @@ func (s *Service) ListDomains(ctx context.Context) (ListDomainsResponse, error) 
 		out = append(out, summarize(record))
 	}
 	return ListDomainsResponse{CustomDomains: out}, nil
+}
+
+func (s *Service) VerifyDomain(ctx context.Context, id string) (VerifyDomainResponse, error) {
+	if s == nil || s.store == nil {
+		return VerifyDomainResponse{}, errors.New("custom domain store is required")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return VerifyDomainResponse{}, ErrDomainNotFound
+	}
+
+	record, ok, err := s.store.LookupByID(ctx, id)
+	if err != nil {
+		return VerifyDomainResponse{}, err
+	}
+	if !ok {
+		return VerifyDomainResponse{}, ErrDomainNotFound
+	}
+	if record.Status == StatusActive {
+		return VerifyDomainResponse(summarize(record)), nil
+	}
+	if strings.TrimSpace(record.VerificationToken) == "" {
+		return VerifyDomainResponse{}, errors.New("custom domain verification token is empty")
+	}
+
+	status := StatusVerificationFailed
+	verifiedAt := record.VerifiedAt
+	txtValues, err := s.resolver.LookupTXT(ctx, VerificationName(record.Hostname))
+	now := s.now()
+	if err == nil && verificationTXTMatches(txtValues, record.VerificationToken) {
+		status = StatusActive
+		verifiedAt = &now
+	}
+
+	record.Status = status
+	record.VerifiedAt = verifiedAt
+	record.UpdatedAt = now
+	if err := s.store.Update(ctx, record); err != nil {
+		return VerifyDomainResponse{}, fmt.Errorf("verify custom domain: %w", err)
+	}
+	return VerifyDomainResponse(summarize(record)), nil
 }
 
 func (s *Service) GetDomain(ctx context.Context, id string) (DomainSummary, bool, error) {
@@ -198,9 +254,27 @@ func summarize(record DomainRecord) DomainSummary {
 		Hostname:            record.Hostname,
 		ReservedSubdomainID: record.ReservedSubdomainID,
 		Status:              record.Status,
+		VerificationToken:   record.VerificationToken,
+		VerificationName:    VerificationName(record.Hostname),
+		VerifiedAt:          record.VerifiedAt,
 		CreatedAt:           record.CreatedAt,
 		UpdatedAt:           record.UpdatedAt,
 	}
+}
+
+func VerificationName(hostname string) string {
+	return "_porthook." + strings.TrimSuffix(strings.ToLower(strings.TrimSpace(hostname)), ".")
+}
+
+func verificationTXTMatches(values []string, token string) bool {
+	expected := "porthook-domain-verification=" + token
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == token || value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func randomDomainID() (string, error) {
@@ -209,4 +283,22 @@ func randomDomainID() (string, error) {
 		return "", fmt.Errorf("generate custom domain id: %w", err)
 	}
 	return "cd_" + base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func randomVerificationToken() (string, error) {
+	data := make([]byte, 24)
+	if _, err := rand.Read(data); err != nil {
+		return "", fmt.Errorf("generate custom domain verification token: %w", err)
+	}
+	return "phdv_" + base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+type TXTResolver interface {
+	LookupTXT(context.Context, string) ([]string, error)
+}
+
+type netTXTResolver struct{}
+
+func (netTXTResolver) LookupTXT(ctx context.Context, name string) ([]string, error) {
+	return net.DefaultResolver.LookupTXT(ctx, name)
 }

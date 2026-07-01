@@ -884,10 +884,11 @@ func TestAccessPolicyLifecycleAndEvaluation(t *testing.T) {
 
 func TestCustomDomainLifecycle(t *testing.T) {
 	var logs bytes.Buffer
-	server := NewServer(Config{
+	txtResolver := testTXTResolver{values: map[string][]string{}}
+	server := NewServerWithCustomDomains(Config{
 		AdminToken:     "admin-secret",
 		ValidatorToken: "validator-secret",
-	}, tokens.NewService(tokens.NewMemoryStore()))
+	}, tokens.NewService(tokens.NewMemoryStore()), nil, nil, customdomains.NewServiceWithResolver(customdomains.NewMemoryStore(), txtResolver))
 	server.logger = slog.New(slog.NewTextHandler(&logs, nil))
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
@@ -930,8 +931,11 @@ func TestCustomDomainLifecycle(t *testing.T) {
 	if err := json.NewDecoder(createDomainResp.Body).Decode(&createdDomain); err != nil {
 		t.Fatalf("decode custom domain returned error: %v", err)
 	}
-	if createdDomain.Hostname != "preview.example.test" || createdDomain.ReservedSubdomainID != createdReservation.ID || createdDomain.Status != customdomains.StatusActive {
-		t.Fatalf("created custom domain = %+v, want normalized active mapping", createdDomain)
+	if createdDomain.Hostname != "preview.example.test" || createdDomain.ReservedSubdomainID != createdReservation.ID || createdDomain.Status != customdomains.StatusPendingVerification {
+		t.Fatalf("created custom domain = %+v, want normalized pending mapping", createdDomain)
+	}
+	if createdDomain.VerificationToken == "" || createdDomain.VerificationName != "_porthook.preview.example.test" {
+		t.Fatalf("created custom domain verification = %+v, want token and verification name", createdDomain)
 	}
 
 	listReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/custom-domains", nil)
@@ -967,6 +971,37 @@ func TestCustomDomainLifecycle(t *testing.T) {
 	getResp.Body.Close()
 	if getResp.StatusCode != http.StatusOK {
 		t.Fatalf("get status = %d, want 200", getResp.StatusCode)
+	}
+
+	pendingLookupResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/custom-domains/lookup", "validator-secret", map[string]any{
+		"hostname": "preview.example.test",
+	})
+	defer pendingLookupResp.Body.Close()
+	if pendingLookupResp.StatusCode != http.StatusOK {
+		body := readResponseBody(t, pendingLookupResp)
+		t.Fatalf("pending lookup status = %d, want 200; body = %q", pendingLookupResp.StatusCode, body)
+	}
+	var pendingLookup lookupCustomDomainResponse
+	if err := json.NewDecoder(pendingLookupResp.Body).Decode(&pendingLookup); err != nil {
+		t.Fatalf("decode pending lookup returned error: %v", err)
+	}
+	if pendingLookup.Found || pendingLookup.Reason != "not_verified" || pendingLookup.CustomDomainID != createdDomain.ID {
+		t.Fatalf("pending lookup = %+v, want not_verified custom domain", pendingLookup)
+	}
+
+	txtResolver.values[createdDomain.VerificationName] = []string{"porthook-domain-verification=" + createdDomain.VerificationToken}
+	verifyResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/custom-domains/"+createdDomain.ID+"/verify", "admin-secret", nil)
+	defer verifyResp.Body.Close()
+	if verifyResp.StatusCode != http.StatusOK {
+		body := readResponseBody(t, verifyResp)
+		t.Fatalf("verify status = %d, want 200; body = %q", verifyResp.StatusCode, body)
+	}
+	var verified customdomains.VerifyDomainResponse
+	if err := json.NewDecoder(verifyResp.Body).Decode(&verified); err != nil {
+		t.Fatalf("decode verify returned error: %v", err)
+	}
+	if verified.Status != customdomains.StatusActive || verified.VerifiedAt == nil {
+		t.Fatalf("verified custom domain = %+v, want active with verified_at", verified)
 	}
 
 	lookupResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/custom-domains/lookup", "validator-secret", map[string]any{
@@ -1014,7 +1049,7 @@ func TestCustomDomainLifecycle(t *testing.T) {
 		t.Fatalf("delete status = %d, want 204", deleteResp.StatusCode)
 	}
 
-	for _, want := range []string{"control_plane.custom_domain_created", "hostname=preview.example.test", "control_plane.custom_domain_lookup", "control_plane.custom_domain_deleted"} {
+	for _, want := range []string{"control_plane.custom_domain_created", "hostname=preview.example.test", "control_plane.custom_domain_verification_checked", "control_plane.custom_domain_lookup", "control_plane.custom_domain_deleted"} {
 		if !strings.Contains(logs.String(), want) {
 			t.Fatalf("logs = %q, want %q", logs.String(), want)
 		}
@@ -1144,6 +1179,18 @@ func readResponseBody(t *testing.T, resp *http.Response) string {
 		t.Fatalf("ReadAll returned error: %v", err)
 	}
 	return string(data)
+}
+
+type testTXTResolver struct {
+	values map[string][]string
+	err    error
+}
+
+func (r testTXTResolver) LookupTXT(_ context.Context, name string) ([]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.values[name], nil
 }
 
 type failingReadyStore struct {

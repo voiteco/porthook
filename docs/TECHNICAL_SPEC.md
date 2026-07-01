@@ -349,7 +349,7 @@ Routing rule:
 
 If the hostname matches `{subdomain}.{root_domain}`, route directly to that subdomain.
 
-If the hostname does not match the root domain and the gateway is connected to a control plane, validate it as a custom domain hostname and resolve it through `POST /api/v1/custom-domains/lookup`.
+If the hostname does not match the root domain and the gateway is connected to a control plane, validate it as a custom domain hostname and resolve active custom-domain mappings through `POST /api/v1/custom-domains/lookup`. Pending or failed custom-domain verification records are treated as unroutable.
 
 If no route exists for the hostname, return `404`.
 

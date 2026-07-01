@@ -15,6 +15,7 @@ import (
 
 const domainsUsageText = `usage: porthook domains create --control-plane URL --hostname HOSTNAME --reserved-subdomain-id ID [--admin-token TOKEN | --admin-token-stdin] [--json]
        porthook domains list --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--json]
+       porthook domains verify --control-plane URL [--admin-token TOKEN | --admin-token-stdin] ID_OR_HOSTNAME [--json]
        porthook domains delete --control-plane URL [--admin-token TOKEN | --admin-token-stdin] ID_OR_HOSTNAME [--json]
        porthook domains help`
 
@@ -29,18 +30,26 @@ type domainDeleteConfig struct {
 	target string
 }
 
+type domainVerifyConfig struct {
+	tokenAdminConfig
+	target string
+}
+
 type createCustomDomainRequest struct {
 	Hostname            string `json:"hostname"`
 	ReservedSubdomainID string `json:"reserved_subdomain_id"`
 }
 
 type customDomainSummary struct {
-	ID                  string    `json:"id"`
-	Hostname            string    `json:"hostname"`
-	ReservedSubdomainID string    `json:"reserved_subdomain_id"`
-	Status              string    `json:"status"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                  string     `json:"id"`
+	Hostname            string     `json:"hostname"`
+	ReservedSubdomainID string     `json:"reserved_subdomain_id"`
+	Status              string     `json:"status"`
+	VerificationToken   string     `json:"verification_token"`
+	VerificationName    string     `json:"verification_name"`
+	VerifiedAt          *time.Time `json:"verified_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 type listCustomDomainsResponse struct {
@@ -65,6 +74,12 @@ func runDomainsCommand(args []string, stdin io.Reader, stdout io.Writer, stderr 
 			return nil
 		}
 		return runDomainList(args[1:], stdin, stdout, stderr)
+	case "verify":
+		if wantsHelp(args[1:]) {
+			printDomainVerifyHelp(stdout)
+			return nil
+		}
+		return runDomainVerify(args[1:], stdin, stdout, stderr)
 	case "delete":
 		if wantsHelp(args[1:]) {
 			printDomainDeleteHelp(stdout)
@@ -122,7 +137,7 @@ func runDomainDelete(args []string, stdin io.Reader, stdout io.Writer, stderr io
 		return err
 	}
 	client := newTokenAdminClient(cfg.tokenAdminConfig)
-	deleted, err := client.resolveCustomDomainDeleteTarget(context.Background(), cfg.target)
+	deleted, err := client.resolveCustomDomainTarget(context.Background(), cfg.target)
 	if err != nil {
 		return err
 	}
@@ -141,6 +156,27 @@ func runDomainDelete(args []string, stdin io.Reader, stdout io.Writer, stderr io
 		return nil
 	}
 	fmt.Fprintf(stdout, "Custom domain deleted: %s\n", deleted.ID)
+	return nil
+}
+
+func runDomainVerify(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	cfg, err := parseDomainVerifyConfig(args, stdin, stderr)
+	if err != nil {
+		return err
+	}
+	client := newTokenAdminClient(cfg.tokenAdminConfig)
+	domain, err := client.resolveCustomDomainTarget(context.Background(), cfg.target)
+	if err != nil {
+		return err
+	}
+	verified, err := client.verifyCustomDomain(context.Background(), domain.ID)
+	if err != nil {
+		return err
+	}
+	if cfg.jsonOutput {
+		return writeJSONOutput(stdout, verified)
+	}
+	printCustomDomain(stdout, "Verified custom domain", verified)
 	return nil
 }
 
@@ -203,6 +239,25 @@ func parseDomainDeleteConfig(args []string, stdin io.Reader, stderr io.Writer) (
 	return cfg, nil
 }
 
+func parseDomainVerifyConfig(args []string, stdin io.Reader, stderr io.Writer) (domainVerifyConfig, error) {
+	var cfg domainVerifyConfig
+	fs := newTokenAdminFlagSet("domains verify", &cfg.tokenAdminConfig, stderr)
+	if err := fs.Parse(args); err != nil {
+		return domainVerifyConfig{}, err
+	}
+	if fs.NArg() != 1 {
+		return domainVerifyConfig{}, fmt.Errorf("usage: porthook domains verify --control-plane URL [--admin-token TOKEN | --admin-token-stdin] ID_OR_HOSTNAME")
+	}
+	cfg.target = strings.TrimSpace(fs.Arg(0))
+	if cfg.target == "" {
+		return domainVerifyConfig{}, fmt.Errorf("custom domain id or hostname is required")
+	}
+	if err := finalizeTokenAdminConfig(fs, &cfg.tokenAdminConfig, stdin, stderr); err != nil {
+		return domainVerifyConfig{}, err
+	}
+	return cfg, nil
+}
+
 func (c tokenAdminClient) createCustomDomain(ctx context.Context, req createCustomDomainRequest) (customDomainSummary, error) {
 	var created customDomainSummary
 	if err := c.do(ctx, http.MethodPost, "/api/v1/custom-domains", req, &created); err != nil {
@@ -219,11 +274,19 @@ func (c tokenAdminClient) listCustomDomains(ctx context.Context) (listCustomDoma
 	return listed, nil
 }
 
+func (c tokenAdminClient) verifyCustomDomain(ctx context.Context, id string) (customDomainSummary, error) {
+	var verified customDomainSummary
+	if err := c.do(ctx, http.MethodPost, "/api/v1/custom-domains/"+url.PathEscape(id)+"/verify", nil, &verified); err != nil {
+		return customDomainSummary{}, err
+	}
+	return verified, nil
+}
+
 func (c tokenAdminClient) deleteCustomDomain(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/api/v1/custom-domains/"+url.PathEscape(id), nil, nil)
 }
 
-func (c tokenAdminClient) resolveCustomDomainDeleteTarget(ctx context.Context, target string) (customDomainSummary, error) {
+func (c tokenAdminClient) resolveCustomDomainTarget(ctx context.Context, target string) (customDomainSummary, error) {
 	if strings.HasPrefix(target, "cd_") {
 		return customDomainSummary{ID: target}, nil
 	}
@@ -250,24 +313,47 @@ func printCustomDomain(w io.Writer, prefix string, domain customDomainSummary) {
 	fmt.Fprintf(w, "Hostname: %s\n", domain.Hostname)
 	fmt.Fprintf(w, "Reserved subdomain ID: %s\n", domain.ReservedSubdomainID)
 	fmt.Fprintf(w, "Status: %s\n", domain.Status)
+	if domain.VerificationName != "" {
+		fmt.Fprintf(w, "Verification TXT name: %s\n", domain.VerificationName)
+	}
+	if domain.VerificationToken != "" {
+		fmt.Fprintf(w, "Verification TXT value: porthook-domain-verification=%s\n", domain.VerificationToken)
+	}
+	if domain.VerifiedAt != nil {
+		fmt.Fprintf(w, "Verified: %s\n", domain.VerifiedAt.Format(time.RFC3339))
+	}
 	fmt.Fprintf(w, "Updated: %s\n", domain.UpdatedAt.Format(time.RFC3339))
 }
 
 func printCustomDomainList(w io.Writer, domains []customDomainSummary) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tHOSTNAME\tRESERVED SUBDOMAIN ID\tSTATUS\tUPDATED")
+	fmt.Fprintln(tw, "ID\tHOSTNAME\tRESERVED SUBDOMAIN ID\tSTATUS\tVERIFICATION\tUPDATED")
 	for _, domain := range domains {
 		fmt.Fprintf(
 			tw,
-			"%s\t%s\t%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\t%s\t%s\n",
 			domain.ID,
 			domain.Hostname,
 			domain.ReservedSubdomainID,
 			domain.Status,
+			customDomainVerificationSummary(domain),
 			domain.UpdatedAt.Format(time.RFC3339),
 		)
 	}
 	_ = tw.Flush()
+}
+
+func customDomainVerificationSummary(domain customDomainSummary) string {
+	if domain.VerifiedAt != nil {
+		return domain.VerifiedAt.Format(time.RFC3339)
+	}
+	if domain.VerificationName != "" {
+		return domain.VerificationName
+	}
+	if domain.Status == "active" {
+		return "active"
+	}
+	return "-"
 }
 
 func domainsUsageError() error {
@@ -296,6 +382,18 @@ func printDomainListHelp(w io.Writer) {
 	fmt.Fprintln(w, `usage: porthook domains list --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--json]
 
 List custom domain mappings.
+
+Options:
+  --control-plane URL        Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.
+  --admin-token TOKEN        Control-plane admin token. Prefer --admin-token-stdin outside local development.
+  --admin-token-stdin        Read the control-plane admin token from stdin.
+  --json                     Write JSON output.`)
+}
+
+func printDomainVerifyHelp(w io.Writer) {
+	fmt.Fprintln(w, `usage: porthook domains verify --control-plane URL [--admin-token TOKEN | --admin-token-stdin] ID_OR_HOSTNAME [--json]
+
+Check DNS TXT verification and activate a custom domain when the expected record is present.
 
 Options:
   --control-plane URL        Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.

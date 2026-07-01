@@ -81,6 +81,25 @@ func (s *MemoryStore) LookupByHostname(_ context.Context, hostname string) (Doma
 	return record, ok, nil
 }
 
+func (s *MemoryStore) Update(_ context.Context, record DomainRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.byID[record.ID]
+	if !ok {
+		return ErrDomainNotFound
+	}
+	if existing.Hostname != record.Hostname {
+		if otherID, exists := s.byHostname[record.Hostname]; exists && otherID != record.ID {
+			return ErrDomainAlreadyExists
+		}
+		delete(s.byHostname, existing.Hostname)
+	}
+	s.byID[record.ID] = record
+	s.byHostname[record.Hostname] = record.ID
+	return nil
+}
+
 func (s *MemoryStore) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
