@@ -247,6 +247,48 @@ h3 {
   line-height: 1.1;
 }
 
+.detail-panel {
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.detail-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.detail-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.detail-item span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.detail-item strong {
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .chart-grid {
   display: grid;
   gap: 18px;
@@ -405,6 +447,10 @@ tr.revoked {
   color: var(--muted);
 }
 
+tr.selected {
+  background: #eef8f6;
+}
+
 .right {
   text-align: right;
 }
@@ -475,6 +521,7 @@ tr.revoked {
 
   .topbar,
   .section-heading,
+  .detail-heading,
   .inline-control,
   .secret-row {
     align-items: stretch;
@@ -495,6 +542,7 @@ tr.revoked {
   .login-panel,
   .create-form,
   .overview-grid,
+  .detail-grid,
   .chart-grid {
     grid-template-columns: 1fr;
   }

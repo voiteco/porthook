@@ -71,9 +71,10 @@ The public listener exposes:
 - `GET /readyz`
 - `GET /metrics`
 - `GET /api/v1/tunnels`
+- `GET /api/v1/tunnels/{id}`
 - `GET /api/v1/request-logs`
 
-Metrics use Prometheus text format and include active tunnels, process uptime, public request totals, selected public request outcome counters, custom domain lookup results, access policy denials/errors, token validation attempts, authentication failures, and tunnel registration successes/failures. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs.
+Metrics use Prometheus text format and include active tunnels, process uptime, public request totals, selected public request outcome counters, custom domain lookup results, access policy denials/errors, token validation attempts, authentication failures, and tunnel registration successes/failures. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs. `GET /api/v1/tunnels/{id}` returns a single active tunnel with public metadata, stream counts, uptime, and a recent request summary; it also omits local target URLs.
 
 Use `porthook doctor --gateway http://localhost:8080` to check gateway health, readiness, and tunnel API reachability from the CLI. Add `--control-plane` and an admin token to include control-plane checks.
 

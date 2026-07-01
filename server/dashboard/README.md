@@ -11,6 +11,7 @@ The current dashboard scope is self-hosted administration:
 - Custom domain management.
 - Access policy management.
 - Active gateway tunnel visibility.
+- Active gateway tunnel detail view.
 - Operational overview charts.
 - Gateway request logs.
 - Control-plane readiness status.
@@ -31,7 +32,7 @@ Access policy tables show policy modes and non-secret settings. Plaintext policy
 
 Custom domain management maps a fully qualified hostname to a reserved subdomain. DNS and TLS for that hostname are handled outside the dashboard.
 
-The operational overview, active tunnels, and request logs views read `GET /api/v1/tunnels` and `GET /api/v1/request-logs` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack. Request log entries include path, `query_present`, and `request_id`, but not raw query strings.
+The operational overview, active tunnels, tunnel detail, and request logs views read `GET /api/v1/tunnels`, `GET /api/v1/tunnels/{id}`, and `GET /api/v1/request-logs` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack. Request log entries include path, `query_present`, and `request_id`, but not raw query strings. Tunnel detail omits local target URLs.
 
 Future dashboard scope:
 

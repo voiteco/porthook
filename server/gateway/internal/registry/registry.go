@@ -14,12 +14,14 @@ var (
 )
 
 type Session struct {
-	TunnelID    string
-	Subdomain   string
-	PublicURL   string
-	LocalTarget string
-	Protocol    string
-	CreatedAt   time.Time
+	TunnelID        string
+	Subdomain       string
+	PublicURL       string
+	LocalTarget     string
+	Protocol        string
+	AgentVersion    string
+	ProtocolVersion string
+	CreatedAt       time.Time
 }
 
 type Registry struct {

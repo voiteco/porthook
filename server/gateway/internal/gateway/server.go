@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -150,6 +151,7 @@ func (s *Server) PublicHandler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
+	mux.HandleFunc("/api/v1/tunnels/", s.handleTunnelDetail)
 	mux.HandleFunc("/api/v1/tunnels", s.handleTunnelList)
 	mux.HandleFunc("/api/v1/request-logs", s.handleRequestLogs)
 	mux.HandleFunc("/metrics", s.handleMetrics)
@@ -228,6 +230,34 @@ type tunnelSummary struct {
 	ConnectedAt time.Time `json:"connected_at"`
 }
 
+type tunnelDetailResponse struct {
+	Tunnel tunnelDetail `json:"tunnel"`
+}
+
+type tunnelDetail struct {
+	TunnelID         string               `json:"tunnel_id"`
+	Subdomain        string               `json:"subdomain"`
+	PublicURL        string               `json:"public_url"`
+	Protocol         string               `json:"protocol"`
+	AgentVersion     string               `json:"agent_version,omitempty"`
+	ProtocolVersion  string               `json:"protocol_version,omitempty"`
+	ConnectedAt      time.Time            `json:"connected_at"`
+	ConnectedSeconds int64                `json:"connected_seconds"`
+	ActiveStreams    int                  `json:"active_streams"`
+	StreamCapacity   int                  `json:"stream_capacity"`
+	RecentRequests   tunnelRequestSummary `json:"recent_requests"`
+}
+
+type tunnelRequestSummary struct {
+	Count         int        `json:"count"`
+	LastRequestAt *time.Time `json:"last_request_at,omitempty"`
+	LastStatus    int        `json:"last_status,omitempty"`
+	LastOutcome   string     `json:"last_outcome,omitempty"`
+	LastRequestID string     `json:"last_request_id,omitempty"`
+	ErrorCount    int        `json:"error_count"`
+	CustomDomains []string   `json:"custom_domains,omitempty"`
+}
+
 func (s *Server) handleTunnelList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -255,6 +285,33 @@ func (s *Server) handleTunnelList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tunnelListResponse{Tunnels: tunnels})
 }
 
+func (s *Server) handleTunnelDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, "GET, OPTIONS")
+		return
+	}
+
+	tunnelID, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/api/v1/tunnels/"))
+	if err != nil || tunnelID == "" || strings.Contains(tunnelID, "/") {
+		http.Error(w, "tunnel id is required", http.StatusBadRequest)
+		return
+	}
+
+	session, ok := s.sessionByTunnelID(tunnelID)
+	if !ok {
+		http.Error(w, "tunnel not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, tunnelDetailResponse{Tunnel: s.tunnelDetail(session)})
+}
+
 func (s *Server) handleRequestLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -272,18 +329,75 @@ func (s *Server) handleRequestLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, requestLogsResponse{RequestLogs: s.requestLogs.list(limit)})
 }
 
-func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (agentTokenValidation, error) {
+func (s *Server) tunnelDetail(session *agentSession) tunnelDetail {
+	connectedAt := session.tunnel.CreatedAt
+	return tunnelDetail{
+		TunnelID:         session.tunnel.TunnelID,
+		Subdomain:        session.tunnel.Subdomain,
+		PublicURL:        session.tunnel.PublicURL,
+		Protocol:         session.tunnel.Protocol,
+		AgentVersion:     session.tunnel.AgentVersion,
+		ProtocolVersion:  session.tunnel.ProtocolVersion,
+		ConnectedAt:      connectedAt,
+		ConnectedSeconds: int64(time.Since(connectedAt).Seconds()),
+		ActiveStreams:    session.activeStreams(),
+		StreamCapacity:   session.streamCapacity(),
+		RecentRequests:   s.tunnelRequestSummary(session.tunnel.TunnelID),
+	}
+}
+
+func (s *Server) tunnelRequestSummary(tunnelID string) tunnelRequestSummary {
+	logs := s.requestLogs.list(s.cfg.RequestLogLimit)
+	summary := tunnelRequestSummary{}
+	customDomains := make(map[string]struct{})
+	for _, entry := range logs {
+		if entry.TunnelID != tunnelID {
+			continue
+		}
+		summary.Count++
+		if summary.LastRequestAt == nil {
+			requestAt := entry.Time
+			summary.LastRequestAt = &requestAt
+			summary.LastStatus = entry.Status
+			summary.LastOutcome = entry.Outcome
+			summary.LastRequestID = entry.RequestID
+		}
+		if entry.Status >= http.StatusInternalServerError {
+			summary.ErrorCount++
+		}
+		if entry.CustomDomain != "" {
+			customDomains[entry.CustomDomain] = struct{}{}
+		}
+	}
+	if len(customDomains) > 0 {
+		summary.CustomDomains = make([]string, 0, len(customDomains))
+		for hostname := range customDomains {
+			summary.CustomDomains = append(summary.CustomDomains, hostname)
+		}
+		sort.Strings(summary.CustomDomains)
+	}
+	return summary
+}
+
+type agentIdentity struct {
+	agentTokenValidation
+	AgentVersion    string
+	ProtocolVersion string
+	Capabilities    []string
+}
+
+func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (agentIdentity, error) {
 	var env messages.Envelope
 	if err := wsjson.Read(ctx, conn, &env); err != nil {
-		return agentTokenValidation{}, fmt.Errorf("read auth request: %w", err)
+		return agentIdentity{}, fmt.Errorf("read auth request: %w", err)
 	}
 	if env.Type != messages.TypeAuthRequest {
-		return agentTokenValidation{}, fmt.Errorf("expected %s, got %s", messages.TypeAuthRequest, env.Type)
+		return agentIdentity{}, fmt.Errorf("expected %s, got %s", messages.TypeAuthRequest, env.Type)
 	}
 
 	payload, err := messages.DecodePayload[messages.AuthRequest](env)
 	if err != nil {
-		return agentTokenValidation{}, err
+		return agentIdentity{}, err
 	}
 	s.metrics.tokenValidationsTotal.Add(1)
 	validation, err := s.tokens.ValidateAgentToken(ctx, payload.Token)
@@ -294,7 +408,7 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (a
 			Message: "token validation failed",
 		})
 		_ = wsjson.Write(ctx, conn, authErr)
-		return agentTokenValidation{}, fmt.Errorf("validate token: %w", err)
+		return agentIdentity{}, fmt.Errorf("validate token: %w", err)
 	}
 	if !validation.Valid {
 		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
@@ -302,7 +416,7 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (a
 			Message: "invalid token",
 		})
 		_ = wsjson.Write(ctx, conn, authErr)
-		return agentTokenValidation{}, errors.New("invalid token")
+		return agentIdentity{}, errors.New("invalid token")
 	}
 	if payload.ProtocolVersion != messages.ProtocolVersion {
 		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
@@ -310,7 +424,7 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (a
 			Message: fmt.Sprintf("protocol version %q is not supported, expected %q", payload.ProtocolVersion, messages.ProtocolVersion),
 		})
 		_ = wsjson.Write(ctx, conn, authErr)
-		return agentTokenValidation{}, fmt.Errorf("unsupported protocol version %q", payload.ProtocolVersion)
+		return agentIdentity{}, fmt.Errorf("unsupported protocol version %q", payload.ProtocolVersion)
 	}
 	missing := messages.MissingRequiredCapabilities(payload.Capabilities, messages.DefaultProtocolCapabilities())
 	if len(missing) > 0 {
@@ -319,7 +433,7 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (a
 			Message: fmt.Sprintf("agent protocol is missing capabilities: %s", strings.Join(missing, ", ")),
 		})
 		_ = wsjson.Write(ctx, conn, authErr)
-		return agentTokenValidation{}, fmt.Errorf("agent capabilities missing: %v", strings.Join(missing, ", "))
+		return agentIdentity{}, fmt.Errorf("agent capabilities missing: %v", strings.Join(missing, ", "))
 	}
 
 	authOK, err := messages.New(messages.TypeAuthOK, messages.AuthOK{
@@ -327,15 +441,20 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (a
 		Capabilities:    messages.DefaultProtocolCapabilities(),
 	})
 	if err != nil {
-		return agentTokenValidation{}, err
+		return agentIdentity{}, err
 	}
 	if err := wsjson.Write(ctx, conn, authOK); err != nil {
-		return agentTokenValidation{}, err
+		return agentIdentity{}, err
 	}
-	return validation, nil
+	return agentIdentity{
+		agentTokenValidation: validation,
+		AgentVersion:         payload.AgentVersion,
+		ProtocolVersion:      payload.ProtocolVersion,
+		Capabilities:         append([]string(nil), payload.Capabilities...),
+	}, nil
 }
 
-func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn, identity agentTokenValidation) (*agentSession, error) {
+func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn, identity agentIdentity) (*agentSession, error) {
 	var env messages.Envelope
 	if err := wsjson.Read(ctx, conn, &env); err != nil {
 		return nil, fmt.Errorf("read tunnel registration: %w", err)
@@ -382,14 +501,14 @@ func (s *Server) registerTunnel(ctx context.Context, conn *websocket.Conn, ident
 	), nil
 }
 
-func (s *Server) registerTunnelSession(ctx context.Context, conn *websocket.Conn, identity agentTokenValidation, payload messages.TunnelRegister) (*registry.Session, error) {
+func (s *Server) registerTunnelSession(ctx context.Context, conn *websocket.Conn, identity agentIdentity, payload messages.TunnelRegister) (*registry.Session, error) {
 	if payload.RequestedSubdomain != "" {
 		return s.registerRequestedSubdomain(ctx, conn, identity, payload)
 	}
-	return s.registerRandomSubdomain(ctx, conn, payload)
+	return s.registerRandomSubdomain(ctx, conn, identity, payload)
 }
 
-func (s *Server) registerRequestedSubdomain(ctx context.Context, conn *websocket.Conn, identity agentTokenValidation, payload messages.TunnelRegister) (*registry.Session, error) {
+func (s *Server) registerRequestedSubdomain(ctx context.Context, conn *websocket.Conn, identity agentIdentity, payload messages.TunnelRegister) (*registry.Session, error) {
 	subdomain := payload.RequestedSubdomain
 	if err := names.ValidateSubdomain(subdomain); err != nil {
 		message := fmt.Sprintf("invalid requested subdomain %q: %s", subdomain, err)
@@ -409,7 +528,7 @@ func (s *Server) registerRequestedSubdomain(ctx context.Context, conn *websocket
 		return nil, errors.New(message)
 	}
 
-	tunnel, err := s.newTunnelSession(payload, subdomain)
+	tunnel, err := s.newTunnelSession(payload, identity, subdomain)
 	if err != nil {
 		_ = writeTunnelError(ctx, conn, "registration_failed", "failed to create tunnel session")
 		return nil, err
@@ -428,7 +547,7 @@ func (s *Server) registerRequestedSubdomain(ctx context.Context, conn *websocket
 	return tunnel, nil
 }
 
-func (s *Server) registerRandomSubdomain(ctx context.Context, conn *websocket.Conn, payload messages.TunnelRegister) (*registry.Session, error) {
+func (s *Server) registerRandomSubdomain(ctx context.Context, conn *websocket.Conn, identity agentIdentity, payload messages.TunnelRegister) (*registry.Session, error) {
 	var lastErr error
 	for attempt := 0; attempt < randomSubdomainAttempts; attempt++ {
 		subdomain, err := s.generateSubdomain(randomSubdomainLength)
@@ -441,7 +560,7 @@ func (s *Server) registerRandomSubdomain(ctx context.Context, conn *websocket.Co
 			continue
 		}
 
-		tunnel, err := s.newTunnelSession(payload, subdomain)
+		tunnel, err := s.newTunnelSession(payload, identity, subdomain)
 		if err != nil {
 			_ = writeTunnelError(ctx, conn, "registration_failed", "failed to create tunnel session")
 			return nil, err
@@ -467,19 +586,21 @@ func (s *Server) registerRandomSubdomain(ctx context.Context, conn *websocket.Co
 	return nil, errors.New(message)
 }
 
-func (s *Server) newTunnelSession(payload messages.TunnelRegister, subdomain string) (*registry.Session, error) {
+func (s *Server) newTunnelSession(payload messages.TunnelRegister, identity agentIdentity, subdomain string) (*registry.Session, error) {
 	tunnelID, err := s.generateTunnelID()
 	if err != nil {
 		return nil, err
 	}
 
 	return &registry.Session{
-		TunnelID:    tunnelID,
-		Subdomain:   subdomain,
-		PublicURL:   s.publicURLForSubdomain(subdomain),
-		LocalTarget: payload.LocalTarget,
-		Protocol:    payload.Protocol,
-		CreatedAt:   time.Now().UTC(),
+		TunnelID:        tunnelID,
+		Subdomain:       subdomain,
+		PublicURL:       s.publicURLForSubdomain(subdomain),
+		LocalTarget:     payload.LocalTarget,
+		Protocol:        payload.Protocol,
+		AgentVersion:    identity.AgentVersion,
+		ProtocolVersion: identity.ProtocolVersion,
+		CreatedAt:       time.Now().UTC(),
 	}, nil
 }
 
@@ -1016,6 +1137,13 @@ func (s *Server) sessionBySubdomain(subdomain string) (*agentSession, bool) {
 	s.sessionsMu.RLock()
 	defer s.sessionsMu.RUnlock()
 	session, ok := s.sessions[tunnel.TunnelID]
+	return session, ok
+}
+
+func (s *Server) sessionByTunnelID(tunnelID string) (*agentSession, bool) {
+	s.sessionsMu.RLock()
+	defer s.sessionsMu.RUnlock()
+	session, ok := s.sessions[tunnelID]
 	return session, ok
 }
 

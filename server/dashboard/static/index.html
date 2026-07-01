@@ -265,6 +265,7 @@
                     <th>Public URL</th>
                     <th>Protocol</th>
                     <th>Connected</th>
+                    <th class="right">Action</th>
                   </tr>
                 </thead>
                 <tbody id="tunnels-body"></tbody>
@@ -274,6 +275,17 @@
             <div class="empty-state" id="tunnels-empty-state" hidden>
               <h3>No active tunnels</h3>
               <p class="muted">Active gateway sessions appear after an agent connects.</p>
+            </div>
+
+            <div class="detail-panel" id="tunnel-detail-panel" hidden>
+              <div class="detail-heading">
+                <div>
+                  <h3 id="tunnel-detail-title">Tunnel details</h3>
+                  <p class="muted" id="tunnel-detail-meta">Select an active tunnel.</p>
+                </div>
+                <button class="secondary" id="tunnel-detail-close" type="button">Close</button>
+              </div>
+              <div class="detail-grid" id="tunnel-detail-grid"></div>
             </div>
           </div>
 

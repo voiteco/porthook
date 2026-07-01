@@ -553,6 +553,7 @@ Initial gateway status endpoint:
 
 ```text
 GET /api/v1/tunnels
+GET /api/v1/tunnels/{id}
 ```
 
 The tunnel transport endpoint:
