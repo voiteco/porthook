@@ -206,7 +206,7 @@ h3 {
 }
 
 .request-log-form {
-  grid-template-columns: minmax(180px, 0.8fr) minmax(120px, 0.45fr) minmax(180px, 0.8fr) minmax(110px, 0.4fr) auto;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(110px, 0.35fr) minmax(150px, 0.7fr) minmax(180px, 0.8fr) minmax(100px, 0.35fr) auto;
 }
 
 .policy-field[hidden] {
