@@ -43,6 +43,8 @@ porthook access create --control-plane http://localhost:8082 --admin-token "$POR
 porthook access list --control-plane http://localhost:8082 --admin-token "$PORTHOOK_CONTROL_ADMIN_TOKEN"
 porthook access update --control-plane http://localhost:8082 --admin-token "$PORTHOOK_CONTROL_ADMIN_TOKEN" ap_... --mode ip_allowlist --ip-allowlist 192.0.2.0/24
 porthook access delete --control-plane http://localhost:8082 --admin-token "$PORTHOOK_CONTROL_ADMIN_TOKEN" ap_...
+porthook tunnels list --gateway http://localhost:8080
+porthook tunnels show --gateway http://localhost:8080 tun_...
 ```
 
 ## Runtime Configuration
@@ -54,6 +56,7 @@ CLI flags take precedence for the command they configure. Environment variables 
 | `PORTHOOK_SERVER_URL` | `http://localhost:8081` | Gateway agent listener URL. |
 | `PORTHOOK_TOKEN` | `dev-token` | Static agent authentication token. |
 | `PORTHOOK_CONFIG_PATH` | OS config dir | Optional path for the JSON login config file. |
+| `PORTHOOK_GATEWAY_URL` | `http://localhost:8080` | Default gateway public URL for `porthook doctor` and `porthook tunnels` commands. |
 | `PORTHOOK_CONTROL_PLANE_URL` | empty | Default control-plane API URL for `porthook tokens`, `porthook reserved`, `porthook domains`, and `porthook access` commands. |
 | `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Default admin token for `porthook tokens`, `porthook reserved`, `porthook domains`, and `porthook access` commands. Prefer `--admin-token-stdin` for shell history safety. |
 | `PORTHOOK_HANDSHAKE_TIMEOUT` | `10s` | WebSocket dial, authentication, and tunnel registration timeout. |

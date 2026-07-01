@@ -595,7 +595,8 @@ porthook tokens list --control-plane <url>
 porthook tokens revoke --control-plane <url> <token-id>
 porthook doctor --gateway <url>
 porthook doctor --gateway <url> --control-plane <url>
-porthook tunnels
+porthook tunnels list --gateway <url>
+porthook tunnels show --gateway <url> <tunnel-id>
 porthook version
 ```
 
