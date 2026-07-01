@@ -14,6 +14,7 @@ The current dashboard scope is self-hosted administration:
 - Active gateway tunnel visibility.
 - Active gateway tunnel detail view.
 - Browser-run diagnostics for control-plane and gateway API reachability.
+- Gateway runtime summary.
 - Operational overview charts.
 - Gateway request logs.
 - Control-plane readiness status.
@@ -36,9 +37,11 @@ Audit events are loaded from `GET /api/v1/events` with the configured admin toke
 
 Diagnostics run from the browser and check control-plane status/readiness, audit event API access, the configured gateway tunnel API, and the configured gateway request log API.
 
+The gateway runtime view reads `GET /api/v1/runtime` from the configured gateway URL and renders safe uptime, stream, request-log, counter, limit, and timeout metadata. It does not expose local target URLs, tokens, or control-plane URLs.
+
 Custom domain management maps a fully qualified hostname to a reserved subdomain. DNS and TLS for that hostname are handled outside the dashboard.
 
-The operational overview, active tunnels, tunnel detail, and request logs views read `GET /api/v1/tunnels`, `GET /api/v1/tunnels/{id}`, and `GET /api/v1/request-logs` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack. Request log filters are sent to the gateway with `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, `until`, and `limit`. Request log entries include path, `query_present`, and `request_id`, but not raw query strings. Tunnel detail omits local target URLs.
+The operational overview, active tunnels, tunnel detail, gateway runtime, and request logs views read `GET /api/v1/tunnels`, `GET /api/v1/tunnels/{id}`, `GET /api/v1/runtime`, and `GET /api/v1/request-logs` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack. Request log filters are sent to the gateway with `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, `until`, and `limit`. Request log entries include path, `query_present`, and `request_id`, but not raw query strings. Tunnel detail omits local target URLs.
 
 Future dashboard scope:
 

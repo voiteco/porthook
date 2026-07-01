@@ -153,6 +153,7 @@ func (s *Server) PublicHandler() http.Handler {
 	})
 	mux.HandleFunc("/api/v1/tunnels/", s.handleTunnelDetail)
 	mux.HandleFunc("/api/v1/tunnels", s.handleTunnelList)
+	mux.HandleFunc("/api/v1/runtime", s.handleRuntimeSummary)
 	mux.HandleFunc("/api/v1/request-logs", s.handleRequestLogs)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/", s.handlePublicRequest)
@@ -258,6 +259,69 @@ type tunnelRequestSummary struct {
 	CustomDomains []string   `json:"custom_domains,omitempty"`
 }
 
+type runtimeSummaryResponse struct {
+	Runtime runtimeSummary `json:"runtime"`
+}
+
+type runtimeSummary struct {
+	StartedAt              time.Time       `json:"started_at"`
+	UptimeSeconds          int64           `json:"uptime_seconds"`
+	RootDomain             string          `json:"root_domain"`
+	PublicURL              string          `json:"public_url"`
+	ControlPlaneConfigured bool            `json:"control_plane_configured"`
+	ActiveTunnels          int             `json:"active_tunnels"`
+	ActiveStreams          int             `json:"active_streams"`
+	StreamCapacity         int             `json:"stream_capacity"`
+	RequestLogEntries      int             `json:"request_log_entries"`
+	RequestLogCapacity     int             `json:"request_log_capacity"`
+	Limits                 runtimeLimits   `json:"limits"`
+	Timeouts               runtimeTimeouts `json:"timeouts"`
+	Counters               runtimeCounters `json:"counters"`
+}
+
+type runtimeLimits struct {
+	MaxBodyBytes               int64 `json:"max_body_bytes"`
+	MaxConcurrentStreams       int   `json:"max_concurrent_streams"`
+	RateLimitRequestsPerSecond int   `json:"rate_limit_rps"`
+	RateLimitBurst             int   `json:"rate_limit_burst"`
+	StreamChunkBytes           int   `json:"stream_chunk_bytes"`
+}
+
+type runtimeTimeouts struct {
+	ControlPlaneTimeoutSeconds   int64 `json:"control_plane_timeout_seconds"`
+	ReadHeaderTimeoutSeconds     int64 `json:"read_header_timeout_seconds"`
+	ReadTimeoutSeconds           int64 `json:"read_timeout_seconds"`
+	WriteTimeoutSeconds          int64 `json:"write_timeout_seconds"`
+	IdleTimeoutSeconds           int64 `json:"idle_timeout_seconds"`
+	HandshakeTimeoutSeconds      int64 `json:"handshake_timeout_seconds"`
+	StreamTimeoutSeconds         int64 `json:"stream_timeout_seconds"`
+	WebSocketWriteTimeoutSeconds int64 `json:"websocket_write_timeout_seconds"`
+	WebSocketPingIntervalSeconds int64 `json:"websocket_ping_interval_seconds"`
+	WebSocketPongTimeoutSeconds  int64 `json:"websocket_pong_timeout_seconds"`
+	ShutdownTimeoutSeconds       int64 `json:"shutdown_timeout_seconds"`
+}
+
+type runtimeCounters struct {
+	PublicRequestsTotal                  uint64 `json:"public_requests_total"`
+	PublicRequestErrorsTotal             uint64 `json:"public_request_errors_total"`
+	PublicRequestRateLimitedTotal        uint64 `json:"public_request_rate_limited_total"`
+	PublicRequestTimeoutsTotal           uint64 `json:"public_request_timeouts_total"`
+	PublicRequestBodyTooLargeTotal       uint64 `json:"public_request_body_too_large_total"`
+	PublicRequestClientCanceledTotal     uint64 `json:"public_request_client_canceled_total"`
+	PublicRequestNoActiveSessionTotal    uint64 `json:"public_request_no_active_session_total"`
+	PublicRequestAccessDeniedTotal       uint64 `json:"public_request_access_denied_total"`
+	PublicRequestAccessPolicyErrorsTotal uint64 `json:"public_request_access_policy_errors_total"`
+	CustomDomainLookupsTotal             uint64 `json:"custom_domain_lookups_total"`
+	CustomDomainLookupHitsTotal          uint64 `json:"custom_domain_lookup_hits_total"`
+	CustomDomainLookupMissesTotal        uint64 `json:"custom_domain_lookup_misses_total"`
+	CustomDomainLookupErrorsTotal        uint64 `json:"custom_domain_lookup_errors_total"`
+	TokenValidationsTotal                uint64 `json:"token_validations_total"`
+	TokenValidationErrorsTotal           uint64 `json:"token_validation_errors_total"`
+	AuthFailuresTotal                    uint64 `json:"auth_failures_total"`
+	TunnelRegistrationsTotal             uint64 `json:"tunnel_registrations_total"`
+	TunnelRegistrationFailuresTotal      uint64 `json:"tunnel_registration_failures_total"`
+}
+
 func (s *Server) handleTunnelList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -312,6 +376,22 @@ func (s *Server) handleTunnelDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tunnelDetailResponse{Tunnel: s.tunnelDetail(session)})
 }
 
+func (s *Server) handleRuntimeSummary(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, "GET, OPTIONS")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, runtimeSummaryResponse{Runtime: s.runtimeSummary()})
+}
+
 func (s *Server) handleRequestLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
@@ -332,6 +412,62 @@ func (s *Server) handleRequestLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, requestLogsResponse{RequestLogs: s.requestLogs.listFiltered(limit, filter)})
+}
+
+func (s *Server) runtimeSummary() runtimeSummary {
+	activeStreams, streamCapacity := s.streamStats()
+	return runtimeSummary{
+		StartedAt:              s.startedAt,
+		UptimeSeconds:          int64(time.Since(s.startedAt).Seconds()),
+		RootDomain:             s.cfg.RootDomain,
+		PublicURL:              s.cfg.PublicURL,
+		ControlPlaneConfigured: s.cfg.ControlPlaneURL != "",
+		ActiveTunnels:          s.registry.Count(),
+		ActiveStreams:          activeStreams,
+		StreamCapacity:         streamCapacity,
+		RequestLogEntries:      s.requestLogs.count(),
+		RequestLogCapacity:     s.requestLogs.capacity(),
+		Limits: runtimeLimits{
+			MaxBodyBytes:               s.cfg.MaxBodyBytes,
+			MaxConcurrentStreams:       s.cfg.MaxConcurrentStreams,
+			RateLimitRequestsPerSecond: s.cfg.RateLimitRequestsPerSecond,
+			RateLimitBurst:             s.cfg.RateLimitBurst,
+			StreamChunkBytes:           s.cfg.StreamChunkBytes,
+		},
+		Timeouts: runtimeTimeouts{
+			ControlPlaneTimeoutSeconds:   int64(s.cfg.ControlPlaneTimeout.Seconds()),
+			ReadHeaderTimeoutSeconds:     int64(s.cfg.ReadHeaderTimeout.Seconds()),
+			ReadTimeoutSeconds:           int64(s.cfg.ReadTimeout.Seconds()),
+			WriteTimeoutSeconds:          int64(s.cfg.WriteTimeout.Seconds()),
+			IdleTimeoutSeconds:           int64(s.cfg.IdleTimeout.Seconds()),
+			HandshakeTimeoutSeconds:      int64(s.cfg.HandshakeTimeout.Seconds()),
+			StreamTimeoutSeconds:         int64(s.cfg.StreamTimeout.Seconds()),
+			WebSocketWriteTimeoutSeconds: int64(s.cfg.WebSocketWriteTimeout.Seconds()),
+			WebSocketPingIntervalSeconds: int64(s.cfg.WebSocketPingInterval.Seconds()),
+			WebSocketPongTimeoutSeconds:  int64(s.cfg.WebSocketPongTimeout.Seconds()),
+			ShutdownTimeoutSeconds:       int64(s.cfg.ShutdownTimeout.Seconds()),
+		},
+		Counters: runtimeCounters{
+			PublicRequestsTotal:                  s.metrics.publicRequestsTotal.Load(),
+			PublicRequestErrorsTotal:             s.metrics.publicRequestErrorsTotal.Load(),
+			PublicRequestRateLimitedTotal:        s.metrics.publicRequestRateLimitedTotal.Load(),
+			PublicRequestTimeoutsTotal:           s.metrics.publicRequestTimeoutsTotal.Load(),
+			PublicRequestBodyTooLargeTotal:       s.metrics.publicRequestBodyTooLargeTotal.Load(),
+			PublicRequestClientCanceledTotal:     s.metrics.publicRequestClientCanceledTotal.Load(),
+			PublicRequestNoActiveSessionTotal:    s.metrics.publicRequestNoActiveSessionTotal.Load(),
+			PublicRequestAccessDeniedTotal:       s.metrics.publicRequestAccessDeniedTotal.Load(),
+			PublicRequestAccessPolicyErrorsTotal: s.metrics.publicRequestAccessPolicyErrorsTotal.Load(),
+			CustomDomainLookupsTotal:             s.metrics.customDomainLookupsTotal.Load(),
+			CustomDomainLookupHitsTotal:          s.metrics.customDomainLookupHitsTotal.Load(),
+			CustomDomainLookupMissesTotal:        s.metrics.customDomainLookupMissesTotal.Load(),
+			CustomDomainLookupErrorsTotal:        s.metrics.customDomainLookupErrorsTotal.Load(),
+			TokenValidationsTotal:                s.metrics.tokenValidationsTotal.Load(),
+			TokenValidationErrorsTotal:           s.metrics.tokenValidationErrorsTotal.Load(),
+			AuthFailuresTotal:                    s.metrics.authFailuresTotal.Load(),
+			TunnelRegistrationsTotal:             s.metrics.tunnelRegistrationsTotal.Load(),
+			TunnelRegistrationFailuresTotal:      s.metrics.tunnelRegistrationFailuresTotal.Load(),
+		},
+	}
 }
 
 func (s *Server) tunnelDetail(session *agentSession) tunnelDetail {
@@ -1150,6 +1286,16 @@ func (s *Server) sessionByTunnelID(tunnelID string) (*agentSession, bool) {
 	defer s.sessionsMu.RUnlock()
 	session, ok := s.sessions[tunnelID]
 	return session, ok
+}
+
+func (s *Server) streamStats() (activeStreams, streamCapacity int) {
+	s.sessionsMu.RLock()
+	defer s.sessionsMu.RUnlock()
+	for _, session := range s.sessions {
+		activeStreams += session.activeStreams()
+		streamCapacity += session.streamCapacity()
+	}
+	return activeStreams, streamCapacity
 }
 
 func (s *Server) addSession(session *agentSession) {

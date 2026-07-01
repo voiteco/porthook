@@ -25,7 +25,7 @@ The public gateway listener is designed for internet traffic. The control-plane 
 
 The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token. Always use HTTPS and avoid exposing the dashboard on a public hostname without an additional boundary.
 
-Gateway operational APIs such as `GET /api/v1/tunnels` and `GET /api/v1/request-logs` are served on the gateway public listener for self-hosted dashboard visibility. Request log responses omit raw query strings and authorization values, but they still include operational metadata such as paths, statuses, outcomes, and remote IPs. Protect or route these endpoints externally if that metadata should not be public in your deployment.
+Gateway operational APIs such as `GET /api/v1/tunnels`, `GET /api/v1/runtime`, and `GET /api/v1/request-logs` are served on the gateway public listener for self-hosted dashboard visibility. Request log responses omit raw query strings and authorization values, and runtime responses omit tokens, local targets, and control-plane URLs, but these endpoints still include operational metadata such as paths, statuses, outcomes, counters, limits, and remote IPs. Protect or route these endpoints externally if that metadata should not be public in your deployment.
 
 ## Production Compose
 
