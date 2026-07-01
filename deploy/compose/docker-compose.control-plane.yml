@@ -39,6 +39,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/porthook-control-plane", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
 
   gateway:
     build:
@@ -47,7 +53,7 @@ services:
     image: porthook-gateway:dev
     depends_on:
       control-plane:
-        condition: service_started
+        condition: service_healthy
     environment:
       PORTHOOK_ADDR: ":8080"
       PORTHOOK_AGENT_ADDR: ":8081"
@@ -74,6 +80,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/porthook-gateway", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
 
 volumes:
   postgres-data:

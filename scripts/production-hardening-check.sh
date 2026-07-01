@@ -62,6 +62,25 @@ def require_hardened_service(service, name):
         fail(f"{name} must set no-new-privileges")
 
 
+def require_healthcheck(service, name, expected_test):
+    healthcheck = service.get("healthcheck")
+    if not healthcheck:
+        fail(f"{name} must define a container healthcheck")
+    if healthcheck.get("test") != expected_test:
+        fail(f"{name} healthcheck command is unexpected: {healthcheck.get('test')}")
+    if healthcheck.get("disable") is True:
+        fail(f"{name} healthcheck must not be disabled")
+
+
+def require_depends_on_healthy(service, name, dependency):
+    depends_on = service.get("depends_on", {})
+    dependency_config = depends_on.get(dependency)
+    if dependency_config is None:
+        fail(f"{name} must depend on {dependency}")
+    if dependency_config.get("condition") != "service_healthy":
+        fail(f"{name} must wait for {dependency} to be healthy")
+
+
 def volume_source_for(service, target):
     for volume in service.get("volumes", []):
         if volume.get("target") == target:
@@ -84,6 +103,11 @@ require_exposes(gateway, "porthook-gateway", {"8080", "8081"})
 require_exposes(control, "porthook-control-plane", {"8082"})
 require_hardened_service(gateway, "porthook-gateway")
 require_hardened_service(control, "porthook-control-plane")
+require_healthcheck(gateway, "porthook-gateway", ["CMD", "/porthook-gateway", "healthcheck"])
+require_healthcheck(control, "porthook-control-plane", ["CMD", "/porthook-control-plane", "healthcheck"])
+require_depends_on_healthy(gateway, "porthook-gateway", "porthook-control-plane")
+require_depends_on_healthy(proxy, "reverse-proxy", "porthook-gateway")
+require_depends_on_healthy(proxy, "reverse-proxy", "porthook-control-plane")
 
 ports = {(str(port.get("published")), int(port.get("target", 0))) for port in proxy.get("ports", [])}
 if ports != {("80", 80), ("443", 443)}:
@@ -118,4 +142,3 @@ if gateway_env.get("PORTHOOK_PUBLIC_URL") != "https://tunnels.example.com":
 
 print("production hardening checks passed")
 PY
-

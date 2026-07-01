@@ -46,6 +46,8 @@ The dashboard can list, create, and revoke agent tokens, reserve subdomains for 
 | `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Bearer token required for token creation, listing, and revocation. If empty, those requests return `401 Unauthorized`. |
 | `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | empty | Bearer token required for token validation requests from the gateway. If empty, validation returns `401 Unauthorized`. |
 | `PORTHOOK_DATABASE_URL` | empty | Postgres connection URL. If empty, the process uses in-memory storage for development. |
+| `PORTHOOK_HEALTHCHECK_URL` | derived from `PORTHOOK_CONTROL_ADDR` | Optional explicit URL used by `porthook-control-plane healthcheck`. |
+| `PORTHOOK_HEALTHCHECK_TIMEOUT` | `2s` | HTTP timeout used by `porthook-control-plane healthcheck`. |
 | `PORTHOOK_OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing. |
 | `PORTHOOK_OTEL_EXPORTER` | `none` | Trace exporter: `otlp`, `otlp-http`, `otlp-grpc`, `stdout`, `console`, or `none`. |
 | `PORTHOOK_OTEL_PROTOCOL` | `http/protobuf` | OTLP protocol when using `PORTHOOK_OTEL_EXPORTER=otlp`: `http/protobuf` or `grpc`. |
@@ -168,6 +170,8 @@ printf '%s' 'admin-secret' | porthook domains delete \
 `/api/v1/events` returns recent in-memory audit events for admin users. Events are newest-first, support `?limit=N`, and omit plaintext tokens and access policy secrets.
 
 `porthook doctor` checks gateway and control-plane operational endpoints, including `/api/v1/events` when an admin token is provided, and prints response request IDs for log correlation.
+
+The container image includes `porthook-control-plane healthcheck`, which calls `/readyz` through the local control-plane listener. Set `PORTHOOK_HEALTHCHECK_URL` only when the listener cannot be reached through the derived localhost URL.
 
 Control-plane logs are structured text logs written to stdout. Audit-relevant logs include an `event` field such as `control_plane.auth_failed`, `control_plane.token_created`, `control_plane.token_validated`, `control_plane.token_revoked`, `control_plane.reservation_created`, `control_plane.reservation_authorized`, `control_plane.custom_domain_created`, `control_plane.custom_domain_lookup`, `control_plane.access_policy_created`, and `control_plane.access_policy_evaluated`. Logs include method, path, remote IP, optional `request_id` from `X-Request-ID` or `X-Correlation-ID`, token IDs where available, subdomains, custom domain IDs, policy IDs, outcomes, and denial reasons. Authorization headers, plaintext token values, and access policy secrets are not logged.
 

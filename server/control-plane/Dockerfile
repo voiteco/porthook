@@ -28,4 +28,6 @@ USER 65532:65532
 
 EXPOSE 8082
 
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD ["/porthook-control-plane", "healthcheck"]
+
 ENTRYPOINT ["/porthook-control-plane"]

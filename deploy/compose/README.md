@@ -89,6 +89,7 @@ The stack listens on:
 - dashboard: `http://localhost:8082/dashboard/`
 
 Postgres is available only inside the Compose network as `postgres:5432`.
+The gateway and control-plane containers define readiness healthchecks, and the gateway waits for a healthy control plane before starting.
 
 ## Production Stack
 
@@ -151,6 +152,7 @@ The stack listens externally on:
 - control-plane API and dashboard: `https://<PORTHOOK_CONTROL_DOMAIN>`
 
 The gateway, control plane, and Postgres are only reachable inside the Compose network.
+The gateway and control-plane services expose container healthchecks, and the reverse proxy waits for both services to become healthy.
 
 ## Dashboard
 
@@ -236,6 +238,8 @@ The Compose stack exposes:
 Gateway metrics include active tunnels, public request counts, custom domain lookup results, token validation attempts, auth failures, and successful tunnel registrations. The gateway active-tunnels JSON endpoint is read-only and omits local target URLs. Control-plane metrics include token admin operations, token validation results, reserved subdomain operations, custom domain operations, auth failures, and readiness failures.
 
 The control-plane `/readyz` endpoint checks the token, reservation, access policy, and custom domain stores. In this Compose stack, that means it pings Postgres.
+
+The gateway and control-plane images include built-in `healthcheck` subcommands, so the Compose healthchecks work in the scratch runtime images without adding curl or a shell. Use `docker compose ps` to inspect container health and `porthook doctor` for an external operator-facing check.
 
 ## Internet-Facing Notes
 

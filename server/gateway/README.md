@@ -55,6 +55,8 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_WS_PONG_TIMEOUT` | `5s` | WebSocket keepalive pong timeout. |
 | `PORTHOOK_SHUTDOWN_TIMEOUT` | `5s` | Graceful shutdown timeout. |
 | `PORTHOOK_REQUEST_LOG_LIMIT` | `500` | Number of recent public request log entries kept in memory. Set `0` to disable the in-memory request log endpoint. |
+| `PORTHOOK_HEALTHCHECK_URL` | derived from `PORTHOOK_ADDR` | Optional explicit URL used by `porthook-gateway healthcheck`. |
+| `PORTHOOK_HEALTHCHECK_TIMEOUT` | `2s` | HTTP timeout used by `porthook-gateway healthcheck`. |
 | `PORTHOOK_OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing. |
 | `PORTHOOK_OTEL_EXPORTER` | `none` | Trace exporter: `otlp`, `otlp-http`, `otlp-grpc`, `stdout`, `console`, or `none`. |
 | `PORTHOOK_OTEL_PROTOCOL` | `http/protobuf` | OTLP protocol when using `PORTHOOK_OTEL_EXPORTER=otlp`: `http/protobuf` or `grpc`. |
@@ -74,6 +76,8 @@ The public listener exposes:
 Metrics use Prometheus text format and include active tunnels, process uptime, public request totals, selected public request outcome counters, custom domain lookup results, access policy denials/errors, token validation attempts, authentication failures, and tunnel registration successes/failures. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs.
 
 Use `porthook doctor --gateway http://localhost:8080` to check gateway health, readiness, and tunnel API reachability from the CLI. Add `--control-plane` and an admin token to include control-plane checks.
+
+The container image includes `porthook-gateway healthcheck`, which calls `/readyz` through the local public listener. Set `PORTHOOK_HEALTHCHECK_URL` only when the listener cannot be reached through the derived localhost URL.
 
 `GET /api/v1/request-logs` returns recent public request summaries from the in-memory ring buffer. The response is newest-first and supports `?limit=N`. Entries include method, host, path, query presence, remote IP, request ID, subdomain, tunnel ID, stream ID, status, outcome, byte counts, duration, and an optional error string. Raw query strings and authorization values are not returned.
 
