@@ -8,7 +8,9 @@ The current dashboard scope is self-hosted administration:
 
 - Token management.
 - Reserved subdomain management.
+- Access policy management.
 - Active gateway tunnel visibility.
+- Gateway request logs.
 - Control-plane readiness status.
 
 The dashboard is embedded in the control-plane binary and served at:
@@ -23,9 +25,10 @@ The dashboard displays plaintext agent tokens only from the token create respons
 
 Token tables include `last_used_at` metadata, updated when the gateway successfully validates an agent token through the control plane.
 
-The active tunnels view reads `GET /api/v1/tunnels` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack.
+Access policy tables show policy modes and non-secret settings. Plaintext policy secrets are accepted only in create/update form submissions and are never returned by list responses.
+
+The active tunnels and request logs views read `GET /api/v1/tunnels` and `GET /api/v1/request-logs` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack. Request log entries include path and `query_present`, but not raw query strings.
 
 Future dashboard scope:
 
-- Request logs.
 - Self-hosted instance settings.

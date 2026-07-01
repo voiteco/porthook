@@ -87,6 +87,8 @@ Useful log events:
 | `control_plane.auth_failed` | Admin or validator bearer authorization failed. Check access boundary and token configuration. |
 | `control_plane.token_validated` | Gateway token validation request completed. Check `valid` and `token_id`. |
 | `control_plane.reservation_authorized` | Requested-subdomain authorization completed. Check `allowed`, `reason`, and `subdomain`. |
+| `control_plane.access_policy_created` | Admin created an access policy for a reserved subdomain. |
+| `control_plane.access_policy_evaluated` | Gateway access policy evaluation completed. Check `allowed`, `mode`, `reason`, and `subdomain`. |
 
 Common symptoms:
 
@@ -95,10 +97,13 @@ Common symptoms:
 | Agent cannot log in | `PORTHOOK_AGENT_DOMAIN` DNS, reverse proxy route to `porthook-gateway:8081`, `gateway.agent_auth_failed`, control-plane validator token. |
 | Tunnel URL returns 404 | Wildcard DNS, `PORTHOOK_ROOT_DOMAIN`, active `gateway.tunnel_registered` event for that subdomain. |
 | Tunnel URL returns 429 | Per-tunnel rate limit settings on the gateway. |
+| Tunnel URL returns 401 | Basic or bearer access policy requires valid public credentials. |
+| Tunnel URL returns 403 | IP allowlist or another access policy denied the public request. |
 | Tunnel URL returns 503 | Concurrent stream limit, disconnected agent, or overloaded local service. |
 | Tunnel URL returns 504 | `PORTHOOK_STREAM_TIMEOUT`, slow local service, or broken WebSocket path. |
 | Dashboard login fails | Control-plane admin token, access boundary, browser session storage, `/api/v1/status`. |
 | Requested subdomain rejected | Reservation ownership for the token used by the agent. |
+| Protected tunnel unexpectedly public | Missing access policy for the reserved subdomain or gateway not configured with `PORTHOOK_CONTROL_PLANE_URL`. |
 
 Useful metrics:
 
@@ -107,12 +112,16 @@ Useful metrics:
 | `porthook_gateway_active_tunnels` | Current gateway tunnel sessions. |
 | `porthook_gateway_public_request_errors_total` | Public requests that returned `5xx`. |
 | `porthook_gateway_public_request_rate_limited_total` | Per-tunnel rate limit pressure. |
+| `porthook_gateway_public_request_access_denied_total` | Public requests rejected by tunnel access policy. |
+| `porthook_gateway_public_request_access_policy_errors_total` | Gateway could not evaluate a tunnel access policy. |
 | `porthook_gateway_public_request_timeouts_total` | Tunnel round-trip timeout pressure. |
 | `porthook_gateway_tunnel_registration_failures_total` | Agent registration failures after authentication. |
 | `porthook_control_plane_ready` | Control-plane readiness as `1` or `0`. |
 | `porthook_control_plane_tokens` | Current token records. |
 | `porthook_control_plane_tokens_revoked` | Current revoked token records. |
 | `porthook_control_plane_reserved_subdomains` | Current reserved subdomain records. |
+| `porthook_control_plane_access_policies` | Current access policy records. |
+| `porthook_control_plane_access_policy_evaluation_denied_total` | Access policy evaluations that denied public traffic. |
 
 ## Postgres Backup
 
@@ -126,7 +135,7 @@ docker compose \
   exec -T postgres pg_dump -U porthook -d porthook > "${backup_file}"
 ```
 
-The backup contains token hashes and reserved subdomain ownership metadata. Treat it as sensitive operational data.
+The backup contains token hashes, reserved subdomain ownership metadata, and access policy secret hashes. Treat it as sensitive operational data.
 
 Verify that the backup is not empty:
 

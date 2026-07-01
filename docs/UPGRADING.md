@@ -2,6 +2,27 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.7.x to 0.8.x
+
+Version 0.8.x adds reserved-subdomain access policies, gateway enforcement for those policies, CLI/dashboard access policy management, and gateway request log visibility.
+
+Before upgrading a Postgres-backed control plane:
+
+1. Back up the Postgres volume or database.
+2. Stop the old `porthook-control-plane` and `porthook-gateway` processes or Compose stack.
+3. Deploy the new control-plane, gateway, dashboard assets, and CLI binaries or images together.
+4. Start the control plane and check `GET /readyz`.
+5. Start the gateway and check `GET /readyz` and `GET /api/v1/request-logs`.
+6. Use `porthook access create` or the dashboard to add access policies for reserved subdomains that should not remain public.
+7. Run a protected-tunnel check and confirm unauthenticated public requests are denied before traffic reaches the local service.
+
+The 0.8.x migration is additive:
+
+- create `access_policies` if it does not exist
+- create the reserved-subdomain access policy index if it does not exist
+
+Rollback to 0.7.x should not require removing the `access_policies` table, but a 0.7.x gateway will not enforce access policies and a 0.7.x dashboard will not display them. Treat rollback as making protected reserved subdomains public unless an external reverse proxy or upstream service also enforces access.
+
 ## Upgrade from 0.5.x to 0.6.x
 
 Version 0.6.x adds reserved subdomain ownership for requested tunnel names. In control-plane-backed gateway deployments, agents that pass `--subdomain NAME` must use a token that owns a matching reservation. Agents that omit `--subdomain` continue to receive random subdomains without a reservation.

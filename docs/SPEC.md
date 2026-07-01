@@ -215,6 +215,7 @@ Responsibilities:
 - Issue and validate API tokens.
 - Store users and tunnel metadata.
 - Track reserved subdomains.
+- Track access policies.
 - Enforce account and tunnel limits.
 
 Initial storage: Postgres.
@@ -229,6 +230,7 @@ Responsibilities:
 - Manage tokens.
 - Show basic request logs.
 - Reserve subdomains.
+- Manage access policies.
 - Manage self-hosted instance settings.
 
 The dashboard is useful, but not required for the first tunnel MVP.
@@ -398,14 +400,17 @@ Gateway routing must bind every public request to exactly one active tunnel sess
 
 ### 12.3 Public Access Control
 
-The first MVP may expose tunnels publicly.
-
-The next security milestone should add optional access control before traffic reaches the local service:
+Self-hosted deployments can attach optional access policies to reserved subdomains before traffic reaches the local service:
 
 - Basic auth.
 - Static bearer token.
-- OAuth/OIDC later.
 - IP allowlist.
+
+If no access policy exists for a reserved subdomain, the tunnel remains public. Basic and bearer credentials are evaluated by the gateway and are not forwarded to the local service.
+
+Future:
+
+- OAuth/OIDC.
 
 ### 12.4 Operator Safety
 
@@ -414,6 +419,7 @@ The open-source version should include basic controls for self-hosted operators:
 - Request size limits.
 - Connection limits.
 - Rate limits.
+- Public access policies.
 - Clear operator configuration.
 - Structured logs for incident review.
 
@@ -430,6 +436,7 @@ Minimum:
 - Request count.
 - Error count.
 - Prometheus text metrics.
+- In-memory gateway request logs for recent public requests.
 
 Future:
 
@@ -444,6 +451,7 @@ Initial persistent entities:
 - API token.
 - Tunnel session.
 - Reserved subdomain.
+- Access policy.
 
 Possible schema sketch:
 
@@ -468,6 +476,16 @@ reserved_subdomains
   owner_user_id
   name
   created_at
+
+access_policies
+  id
+  reserved_subdomain_id
+  mode
+  basic_username
+  secret_hash
+  ip_allowlist_json
+  created_at
+  updated_at
 
 tunnel_sessions
   id
@@ -494,6 +512,12 @@ GET  /api/v1/reserved-subdomains
 POST /api/v1/reserved-subdomains
 POST /api/v1/reserved-subdomains/authorize
 DELETE /api/v1/reserved-subdomains/{id}
+GET  /api/v1/access-policies
+POST /api/v1/access-policies
+GET  /api/v1/access-policies/{id}
+PUT  /api/v1/access-policies/{id}
+DELETE /api/v1/access-policies/{id}
+POST /api/v1/access-policies/evaluate
 GET  /healthz
 GET  /readyz
 GET  /metrics

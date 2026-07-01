@@ -410,6 +410,10 @@ porthook tokens revoke --control-plane <url> <token-id>
 porthook reserved create --control-plane <url> --name <name> --token-id <token-id>
 porthook reserved list --control-plane <url>
 porthook reserved delete --control-plane <url> <id-or-name>
+porthook access create --control-plane <url> --reserved-subdomain-id <id> --mode <mode>
+porthook access list --control-plane <url>
+porthook access update --control-plane <url> <policy-id> --mode <mode>
+porthook access delete --control-plane <url> <policy-id>
 porthook version
 ```
 
@@ -421,7 +425,11 @@ The control plane exposes `GET /api/v1/status` for dashboard and automation chec
 
 The gateway exposes `GET /api/v1/tunnels` for dashboard active-tunnel visibility. The endpoint returns active tunnel summaries and omits local target URLs.
 
+The gateway exposes `GET /api/v1/request-logs` for dashboard request-log visibility. The endpoint returns recent public request summaries from an in-memory ring buffer, newest first. It includes path and `query_present`, but never raw query strings.
+
 When the gateway is configured with `PORTHOOK_CONTROL_PLANE_URL`, requested subdomains are authorized through `POST /api/v1/reserved-subdomains/authorize`. Random subdomains do not require reservations.
+
+When the gateway is configured with `PORTHOOK_CONTROL_PLANE_URL`, reserved subdomains can also be protected by access policies evaluated through `POST /api/v1/access-policies/evaluate`. Supported modes are `public`, `basic_auth`, `bearer_token`, and `ip_allowlist`.
 
 Future commands:
 
