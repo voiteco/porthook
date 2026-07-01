@@ -428,7 +428,7 @@ The control plane exposes `GET /api/v1/status` for dashboard and automation chec
 
 The gateway exposes `GET /api/v1/tunnels` for dashboard active-tunnel visibility. The endpoint returns active tunnel summaries and omits local target URLs.
 
-The gateway exposes `GET /api/v1/request-logs` for dashboard request-log visibility. The endpoint returns recent public request summaries from an in-memory ring buffer, newest first. It includes path and `query_present`, but never raw query strings.
+The gateway exposes `GET /api/v1/request-logs` for dashboard request-log visibility. The endpoint returns recent public request summaries from an in-memory ring buffer, newest first. It supports `limit`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`; `since` and `until` use RFC3339 timestamps, and `limit` is applied after filtering. It includes path and `query_present`, but never raw query strings.
 
 When the gateway is configured with `PORTHOOK_CONTROL_PLANE_URL`, requested subdomains are authorized through `POST /api/v1/reserved-subdomains/authorize`. Random subdomains do not require reservations.
 

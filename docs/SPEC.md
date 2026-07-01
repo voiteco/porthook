@@ -554,7 +554,10 @@ Initial gateway status endpoint:
 ```text
 GET /api/v1/tunnels
 GET /api/v1/tunnels/{id}
+GET /api/v1/request-logs
 ```
+
+`GET /api/v1/request-logs` returns newest-first in-memory public request summaries. It supports `limit`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`. Time filters use RFC3339 timestamps, and raw query strings are not returned.
 
 The tunnel transport endpoint:
 

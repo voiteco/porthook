@@ -3,8 +3,10 @@
 package gateway
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,6 +33,19 @@ type requestLogEntry struct {
 
 type requestLogsResponse struct {
 	RequestLogs []requestLogEntry `json:"request_logs"`
+}
+
+type requestLogFilter struct {
+	Subdomain string
+	Status    int
+	Outcome   string
+	RequestID string
+	Host      string
+	Method    string
+	Path      string
+	TunnelID  string
+	Since     time.Time
+	Until     time.Time
 }
 
 type requestLogBuffer struct {
@@ -62,6 +77,10 @@ func (b *requestLogBuffer) add(entry requestLogEntry) {
 }
 
 func (b *requestLogBuffer) list(limit int) []requestLogEntry {
+	return b.listFiltered(limit, requestLogFilter{})
+}
+
+func (b *requestLogBuffer) listFiltered(limit int, filter requestLogFilter) []requestLogEntry {
 	if b == nil || len(b.entries) == 0 {
 		return nil
 	}
@@ -76,7 +95,7 @@ func (b *requestLogBuffer) list(limit int) []requestLogEntry {
 		limit = count
 	}
 	out := make([]requestLogEntry, 0, limit)
-	for i := 0; i < limit; i++ {
+	for i := 0; i < count && len(out) < limit; i++ {
 		index := b.next - 1 - i
 		if index < 0 {
 			index += len(b.entries)
@@ -84,7 +103,10 @@ func (b *requestLogBuffer) list(limit int) []requestLogEntry {
 		if !b.full && index >= b.next {
 			break
 		}
-		out = append(out, b.entries[index])
+		entry := b.entries[index]
+		if filter.matches(entry) {
+			out = append(out, entry)
+		}
 	}
 	return out
 }
@@ -124,4 +146,89 @@ func requestLogLimit(r *http.Request, fallback int) int {
 		return fallback
 	}
 	return limit
+}
+
+func requestLogFilterFromRequest(r *http.Request) (requestLogFilter, error) {
+	query := r.URL.Query()
+	filter := requestLogFilter{
+		Subdomain: strings.ToLower(strings.TrimSpace(query.Get("subdomain"))),
+		Outcome:   strings.ToLower(strings.TrimSpace(query.Get("outcome"))),
+		RequestID: strings.ToLower(strings.TrimSpace(query.Get("request_id"))),
+		Host:      strings.ToLower(strings.TrimSpace(query.Get("host"))),
+		Method:    strings.ToUpper(strings.TrimSpace(query.Get("method"))),
+		Path:      strings.ToLower(strings.TrimSpace(query.Get("path"))),
+		TunnelID:  strings.ToLower(strings.TrimSpace(query.Get("tunnel_id"))),
+	}
+
+	rawStatus := strings.TrimSpace(query.Get("status"))
+	if rawStatus != "" {
+		status, err := strconv.Atoi(rawStatus)
+		if err != nil || status < 100 || status > 599 {
+			return requestLogFilter{}, fmt.Errorf("status must be an HTTP status code between 100 and 599")
+		}
+		filter.Status = status
+	}
+
+	since, err := requestLogTimeFilter(query.Get("since"), "since")
+	if err != nil {
+		return requestLogFilter{}, err
+	}
+	filter.Since = since
+
+	until, err := requestLogTimeFilter(query.Get("until"), "until")
+	if err != nil {
+		return requestLogFilter{}, err
+	}
+	filter.Until = until
+	if !filter.Since.IsZero() && !filter.Until.IsZero() && filter.Since.After(filter.Until) {
+		return requestLogFilter{}, fmt.Errorf("since must be before until")
+	}
+
+	return filter, nil
+}
+
+func requestLogTimeFilter(raw, name string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	value, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must be an RFC3339 timestamp", name)
+	}
+	return value, nil
+}
+
+func (f requestLogFilter) matches(entry requestLogEntry) bool {
+	if f.Subdomain != "" && strings.ToLower(entry.Subdomain) != f.Subdomain {
+		return false
+	}
+	if f.Status != 0 && entry.Status != f.Status {
+		return false
+	}
+	if f.Outcome != "" && !strings.Contains(strings.ToLower(entry.Outcome), f.Outcome) {
+		return false
+	}
+	if f.RequestID != "" && !strings.Contains(strings.ToLower(entry.RequestID), f.RequestID) {
+		return false
+	}
+	if f.Host != "" && !strings.Contains(strings.ToLower(entry.Host), f.Host) {
+		return false
+	}
+	if f.Method != "" && strings.ToUpper(entry.Method) != f.Method {
+		return false
+	}
+	if f.Path != "" && !strings.Contains(strings.ToLower(entry.Path), f.Path) {
+		return false
+	}
+	if f.TunnelID != "" && !strings.Contains(strings.ToLower(entry.TunnelID), f.TunnelID) {
+		return false
+	}
+	if !f.Since.IsZero() && entry.Time.Before(f.Since) {
+		return false
+	}
+	if !f.Until.IsZero() && entry.Time.After(f.Until) {
+		return false
+	}
+	return true
 }
