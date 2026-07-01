@@ -60,6 +60,9 @@ const elements = {
   diagnosticsBody: document.querySelector("#diagnostics-body"),
   diagnosticsEmptyState: document.querySelector("#diagnostics-empty-state"),
   diagnosticsCount: document.querySelector("#diagnostics-count"),
+  gatewayRuntimeGrid: document.querySelector("#gateway-runtime-grid"),
+  gatewayRuntimeEmptyState: document.querySelector("#gateway-runtime-empty-state"),
+  gatewayRuntimeCount: document.querySelector("#gateway-runtime-count"),
   gatewayForm: document.querySelector("#gateway-form"),
   gatewayURL: document.querySelector("#gateway-url"),
   tunnelsBody: document.querySelector("#tunnels-body"),
@@ -103,6 +106,7 @@ let currentCustomDomains = [];
 let currentAccessPolicies = [];
 let currentAuditEvents = [];
 let currentDiagnostics = [];
+let currentGatewayRuntime = null;
 let currentTunnels = [];
 let currentRequestLogs = [];
 let editingAccessPolicyID = "";
@@ -122,6 +126,7 @@ function setAuthenticated(authenticated) {
     currentAccessPolicies = [];
     currentAuditEvents = [];
     currentDiagnostics = [];
+    currentGatewayRuntime = null;
     currentTunnels = [];
     currentRequestLogs = [];
     editingAccessPolicyID = "";
@@ -132,6 +137,7 @@ function setAuthenticated(authenticated) {
     elements.accessPoliciesBody.replaceChildren();
     elements.auditEventsBody.replaceChildren();
     elements.diagnosticsBody.replaceChildren();
+    elements.gatewayRuntimeGrid.replaceChildren();
     elements.tunnelsBody.replaceChildren();
     elements.requestLogsBody.replaceChildren();
     elements.emptyState.hidden = true;
@@ -140,6 +146,7 @@ function setAuthenticated(authenticated) {
     elements.accessPoliciesEmptyState.hidden = true;
     elements.auditEventsEmptyState.hidden = true;
     elements.diagnosticsEmptyState.hidden = true;
+    elements.gatewayRuntimeEmptyState.hidden = true;
     elements.tunnelsEmptyState.hidden = true;
     elements.requestLogsEmptyState.hidden = true;
     elements.tokenCount.textContent = "No tokens loaded";
@@ -148,6 +155,7 @@ function setAuthenticated(authenticated) {
     elements.accessPolicyCount.textContent = "No access policies loaded";
     elements.auditEventCount.textContent = "No audit events loaded";
     elements.diagnosticsCount.textContent = "No diagnostics run";
+    elements.gatewayRuntimeCount.textContent = "No gateway runtime loaded";
     elements.tunnelCount.textContent = "No tunnels loaded";
     elements.requestLogCount.textContent = "No request logs loaded";
     clearTunnelDetail();
@@ -224,7 +232,7 @@ async function refreshStatus() {
 async function refreshApp() {
   showNotice("");
   clearCreatedToken();
-  await Promise.all([loadTokens(), loadAuditEvents(), refreshStatus(), loadTunnels({ silent: true }), loadRequestLogs({ silent: true })]);
+  await Promise.all([loadTokens(), loadAuditEvents(), refreshStatus(), loadTunnels({ silent: true }), loadGatewayRuntime({ silent: true }), loadRequestLogs({ silent: true })]);
   await loadReservations();
   await loadCustomDomains();
   await loadAccessPolicies();
@@ -597,6 +605,11 @@ async function runDiagnostics() {
       run: checkGatewayTunnelAPI,
     },
     {
+      name: "Gateway runtime API",
+      target: "gateway /api/v1/runtime",
+      run: checkGatewayRuntimeAPI,
+    },
+    {
       name: "Gateway request logs API",
       target: "gateway /api/v1/request-logs",
       run: checkGatewayRequestLogsAPI,
@@ -690,6 +703,12 @@ async function checkGatewayTunnelAPI() {
   return `${count} active tunnel${count === 1 ? "" : "s"}`;
 }
 
+async function checkGatewayRuntimeAPI() {
+  const payload = await gatewayJSON("/api/v1/runtime");
+  const runtime = payload.runtime || {};
+  return `uptime ${formatDuration((runtime.uptime_seconds || 0) * 1000)}`;
+}
+
 async function checkGatewayRequestLogsAPI() {
   const payload = await gatewayJSON("/api/v1/request-logs?limit=1");
   const count = (payload.request_logs || []).length;
@@ -754,6 +773,71 @@ async function loadTunnels({ silent = false } = {}) {
       showNotice(error.message, "error");
     }
   }
+}
+
+async function loadGatewayRuntime({ silent = false } = {}) {
+  const baseURL = normalizedGatewayURL();
+  if (!baseURL) {
+    currentGatewayRuntime = null;
+    elements.gatewayRuntimeCount.textContent = "Gateway URL required";
+    elements.gatewayRuntimeGrid.replaceChildren();
+    elements.gatewayRuntimeEmptyState.hidden = false;
+    return;
+  }
+
+  elements.gatewayRuntimeCount.textContent = "Loading gateway runtime";
+  elements.gatewayRuntimeGrid.replaceChildren();
+  elements.gatewayRuntimeEmptyState.hidden = true;
+
+  try {
+    const response = await fetch(`${baseURL}/api/v1/runtime`, { cache: "no-store" });
+    const payload = await readPayload(response);
+    if (!response.ok) {
+      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
+    }
+    currentGatewayRuntime = payload.runtime || null;
+    renderGatewayRuntime(currentGatewayRuntime);
+  } catch (error) {
+    currentGatewayRuntime = null;
+    elements.gatewayRuntimeCount.textContent = "Gateway runtime unavailable";
+    elements.gatewayRuntimeGrid.replaceChildren();
+    elements.gatewayRuntimeEmptyState.hidden = false;
+    if (!silent) {
+      showNotice(error.message, "error");
+    }
+  }
+}
+
+function renderGatewayRuntime(runtime) {
+  if (!runtime) {
+    elements.gatewayRuntimeGrid.replaceChildren();
+    elements.gatewayRuntimeEmptyState.hidden = false;
+    elements.gatewayRuntimeCount.textContent = "No gateway runtime loaded";
+    return;
+  }
+  const counters = runtime.counters || {};
+  const limits = runtime.limits || {};
+  const timeouts = runtime.timeouts || {};
+  elements.gatewayRuntimeEmptyState.hidden = true;
+  elements.gatewayRuntimeCount.textContent = `Uptime ${formatDuration((runtime.uptime_seconds || 0) * 1000)}`;
+  elements.gatewayRuntimeGrid.replaceChildren(
+    detailItem("Started", formatTime(runtime.started_at)),
+    detailItem("Public URL", runtime.public_url || "-"),
+    detailItem("Root domain", runtime.root_domain || "-"),
+    detailItem("Control plane", runtime.control_plane_configured ? "configured" : "standalone"),
+    detailItem("Active tunnels", String(runtime.active_tunnels || 0)),
+    detailItem("Streams", `${runtime.active_streams || 0}/${runtime.stream_capacity || 0}`),
+    detailItem("Request logs", `${runtime.request_log_entries || 0}/${runtime.request_log_capacity || 0}`),
+    detailItem("Public requests", String(counters.public_requests_total || 0)),
+    detailItem("Request errors", String(counters.public_request_errors_total || 0)),
+    detailItem("Rate limited", String(counters.public_request_rate_limited_total || 0)),
+    detailItem("Timeouts", String(counters.public_request_timeouts_total || 0)),
+    detailItem("No session", String(counters.public_request_no_active_session_total || 0)),
+    detailItem("Max body", `${limits.max_body_bytes || 0} bytes`),
+    detailItem("Rate limit", `${limits.rate_limit_rps || 0}/${limits.rate_limit_burst || 0}`),
+    detailItem("Stream timeout", `${timeouts.stream_timeout_seconds || 0} s`),
+    detailItem("WS keepalive", `${timeouts.websocket_ping_interval_seconds || 0}/${timeouts.websocket_pong_timeout_seconds || 0} s`),
+  );
 }
 
 function renderTunnels(tunnels) {
@@ -1556,7 +1640,7 @@ elements.gatewayForm.addEventListener("submit", async (event) => {
   const gatewayURL = normalizedGatewayURL();
   sessionStorage.setItem(gatewayStorageKey, gatewayURL);
   elements.gatewayURL.value = gatewayURL;
-  await Promise.all([loadTunnels(), loadRequestLogs()]);
+  await Promise.all([loadTunnels(), loadGatewayRuntime(), loadRequestLogs()]);
 });
 elements.requestLogForm.addEventListener("submit", async (event) => {
   event.preventDefault();

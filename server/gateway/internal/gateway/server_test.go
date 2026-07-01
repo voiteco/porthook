@@ -2133,6 +2133,81 @@ func TestPublicHandlerTunnelDetailNotFound(t *testing.T) {
 	}
 }
 
+func TestPublicHandlerShowsRuntimeSummary(t *testing.T) {
+	cfg := testConfig()
+	cfg.ControlPlaneURL = "http://control-plane.internal"
+	cfg.ControlPlaneToken = "control-secret"
+	cfg.RequestLogLimit = 3
+	cfg.MaxConcurrentStreams = 2
+	cfg.RateLimitRequestsPerSecond = 11
+	cfg.RateLimitBurst = 22
+	server := NewServer(cfg, slog.Default())
+	tunnel := &registry.Session{
+		TunnelID:    "tun_runtime",
+		Subdomain:   "runtime",
+		PublicURL:   "http://runtime.localhost:8080",
+		LocalTarget: "http://localhost:3000",
+		Protocol:    "http",
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := server.registry.Register(tunnel); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	server.addSession(newAgentSession(nil, tunnel, time.Second, cfg.MaxConcurrentStreams, cfg.RateLimitRequestsPerSecond, cfg.RateLimitBurst))
+	server.requestLogs.add(requestLogEntry{
+		Time:      time.Now().UTC(),
+		Method:    http.MethodGet,
+		Host:      "runtime.localhost",
+		Path:      "/",
+		Subdomain: "runtime",
+		TunnelID:  "tun_runtime",
+		Status:    http.StatusOK,
+		Outcome:   "completed",
+	})
+	server.metrics.publicRequestsTotal.Add(3)
+	server.metrics.publicRequestErrorsTotal.Add(1)
+	server.metrics.tokenValidationsTotal.Add(2)
+
+	httpServer := httptest.NewServer(server.PublicHandler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/runtime")
+	if err != nil {
+		t.Fatalf("GET runtime returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %q", resp.StatusCode, body)
+	}
+	for _, secret := range []string{"control-secret", "control-plane.internal", "localhost:3000"} {
+		if strings.Contains(string(body), secret) {
+			t.Fatalf("runtime body leaked %q: %q", secret, body)
+		}
+	}
+
+	var payload runtimeSummaryResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode runtime returned error: %v", err)
+	}
+	runtime := payload.Runtime
+	if runtime.ActiveTunnels != 1 || runtime.ActiveStreams != 0 || runtime.StreamCapacity != cfg.MaxConcurrentStreams {
+		t.Fatalf("runtime stream stats = %+v, want one tunnel with stream capacity", runtime)
+	}
+	if !runtime.ControlPlaneConfigured || runtime.RequestLogEntries != 1 || runtime.RequestLogCapacity != cfg.RequestLogLimit {
+		t.Fatalf("runtime = %+v, want configured control plane and request log usage", runtime)
+	}
+	if runtime.Limits.RateLimitRequestsPerSecond != 11 || runtime.Limits.RateLimitBurst != 22 {
+		t.Fatalf("limits = %+v, want configured rate limits", runtime.Limits)
+	}
+	if runtime.Counters.PublicRequestsTotal != 3 || runtime.Counters.PublicRequestErrorsTotal != 1 || runtime.Counters.TokenValidationsTotal != 2 {
+		t.Fatalf("counters = %+v, want metric counters", runtime.Counters)
+	}
+}
+
 func TestPublicHandlerMetricsEndpoint(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	httpServer := httptest.NewServer(server.PublicHandler())

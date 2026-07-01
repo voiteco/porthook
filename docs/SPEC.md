@@ -232,6 +232,7 @@ Responsibilities:
 - Manage access policies.
 - Show control-plane audit events.
 - Run browser diagnostics for self-hosted API reachability.
+- Show gateway runtime summary.
 - Manage self-hosted instance settings.
 
 The dashboard is useful, but not required for the first tunnel MVP.
@@ -450,6 +451,7 @@ Minimum:
 - Dashboard operational overview charts.
 - Dashboard control-plane audit event view.
 - Dashboard diagnostics view.
+- Dashboard gateway runtime summary.
 
 Future:
 
@@ -558,10 +560,13 @@ Initial gateway status endpoint:
 ```text
 GET /api/v1/tunnels
 GET /api/v1/tunnels/{id}
+GET /api/v1/runtime
 GET /api/v1/request-logs
 ```
 
 `GET /api/v1/request-logs` returns newest-first in-memory public request summaries. It supports `limit`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`. Time filters use RFC3339 timestamps, and raw query strings are not returned.
+
+`GET /api/v1/runtime` returns safe gateway runtime metadata, limits, timeouts, request-log buffer usage, stream totals, and counters without local target URLs, tokens, or control-plane URLs.
 
 The tunnel transport endpoint:
 

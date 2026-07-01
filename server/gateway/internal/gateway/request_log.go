@@ -80,6 +80,25 @@ func (b *requestLogBuffer) list(limit int) []requestLogEntry {
 	return b.listFiltered(limit, requestLogFilter{})
 }
 
+func (b *requestLogBuffer) count() int {
+	if b == nil || len(b.entries) == 0 {
+		return 0
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.full {
+		return len(b.entries)
+	}
+	return b.next
+}
+
+func (b *requestLogBuffer) capacity() int {
+	if b == nil {
+		return 0
+	}
+	return len(b.entries)
+}
+
 func (b *requestLogBuffer) listFiltered(limit int, filter requestLogFilter) []requestLogEntry {
 	if b == nil || len(b.entries) == 0 {
 		return nil
