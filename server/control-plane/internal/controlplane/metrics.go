@@ -32,6 +32,13 @@ type metrics struct {
 	accessPolicyEvaluationAllowedTotal   atomic.Uint64
 	accessPolicyEvaluationDeniedTotal    atomic.Uint64
 	accessPolicyEvaluationErrorsTotal    atomic.Uint64
+	customDomainAdminCreatesTotal        atomic.Uint64
+	customDomainAdminListsTotal          atomic.Uint64
+	customDomainAdminDeletesTotal        atomic.Uint64
+	customDomainLookupsTotal             atomic.Uint64
+	customDomainLookupHitsTotal          atomic.Uint64
+	customDomainLookupMissesTotal        atomic.Uint64
+	customDomainLookupErrorsTotal        atomic.Uint64
 	authFailuresTotal                    atomic.Uint64
 	readinessFailuresTotal               atomic.Uint64
 }
@@ -67,6 +74,13 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetric(w, "porthook_control_plane_access_policy_evaluation_allowed_total", "Access policy evaluation requests that returned allowed=true.", "counter", s.metrics.accessPolicyEvaluationAllowedTotal.Load())
 	writeMetric(w, "porthook_control_plane_access_policy_evaluation_denied_total", "Access policy evaluation requests that returned allowed=false.", "counter", s.metrics.accessPolicyEvaluationDeniedTotal.Load())
 	writeMetric(w, "porthook_control_plane_access_policy_evaluation_errors_total", "Access policy evaluation requests that failed before producing a result.", "counter", s.metrics.accessPolicyEvaluationErrorsTotal.Load())
+	writeMetric(w, "porthook_control_plane_custom_domain_admin_creates_total", "Successful custom domain create operations.", "counter", s.metrics.customDomainAdminCreatesTotal.Load())
+	writeMetric(w, "porthook_control_plane_custom_domain_admin_lists_total", "Successful custom domain list operations.", "counter", s.metrics.customDomainAdminListsTotal.Load())
+	writeMetric(w, "porthook_control_plane_custom_domain_admin_deletes_total", "Successful custom domain delete operations.", "counter", s.metrics.customDomainAdminDeletesTotal.Load())
+	writeMetric(w, "porthook_control_plane_custom_domain_lookups_total", "Custom domain lookup requests handled by the control plane.", "counter", s.metrics.customDomainLookupsTotal.Load())
+	writeMetric(w, "porthook_control_plane_custom_domain_lookup_hits_total", "Custom domain lookup requests that found a domain mapping.", "counter", s.metrics.customDomainLookupHitsTotal.Load())
+	writeMetric(w, "porthook_control_plane_custom_domain_lookup_misses_total", "Custom domain lookup requests that did not find a domain mapping.", "counter", s.metrics.customDomainLookupMissesTotal.Load())
+	writeMetric(w, "porthook_control_plane_custom_domain_lookup_errors_total", "Custom domain lookup requests that failed before producing a result.", "counter", s.metrics.customDomainLookupErrorsTotal.Load())
 	writeMetric(w, "porthook_control_plane_auth_failures_total", "Bearer authorization failures on control-plane endpoints.", "counter", s.metrics.authFailuresTotal.Load())
 	writeMetric(w, "porthook_control_plane_readiness_failures_total", "Readiness checks that failed.", "counter", s.metrics.readinessFailuresTotal.Load())
 }
@@ -101,6 +115,11 @@ func (s *Server) writeInventoryMetrics(w http.ResponseWriter, r *http.Request) {
 	listedAccessPolicies, err := s.accessPolicies.ListPolicies(r.Context())
 	if err == nil {
 		writeMetric(w, "porthook_control_plane_access_policies", "Current access policy records in the control plane.", "gauge", uint64(len(listedAccessPolicies.AccessPolicies)))
+	}
+
+	listedCustomDomains, err := s.customDomains.ListDomains(r.Context())
+	if err == nil {
+		writeMetric(w, "porthook_control_plane_custom_domains", "Current custom domain records in the control plane.", "gauge", uint64(len(listedCustomDomains.CustomDomains)))
 	}
 }
 

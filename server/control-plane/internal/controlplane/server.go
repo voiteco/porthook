@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/voiteco/porthook/server/control-plane/internal/access"
+	"github.com/voiteco/porthook/server/control-plane/internal/customdomains"
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 	"github.com/voiteco/porthook/server/dashboard"
@@ -27,6 +28,7 @@ type Server struct {
 	service        *tokens.Service
 	reservations   *reserved.Service
 	accessPolicies *access.Service
+	customDomains  *customdomains.Service
 	logger         *slog.Logger
 	metrics        metrics
 	startedAt      time.Time
@@ -56,6 +58,20 @@ type evaluateAccessPolicyResponse struct {
 	Reason  string            `json:"reason,omitempty"`
 }
 
+type lookupCustomDomainRequest struct {
+	Hostname string `json:"hostname"`
+}
+
+type lookupCustomDomainResponse struct {
+	Found               bool                       `json:"found"`
+	Reason              string                     `json:"reason,omitempty"`
+	Hostname            string                     `json:"hostname,omitempty"`
+	CustomDomainID      string                     `json:"custom_domain_id,omitempty"`
+	ReservedSubdomainID string                     `json:"reserved_subdomain_id,omitempty"`
+	Subdomain           string                     `json:"subdomain,omitempty"`
+	Status              customdomains.DomainStatus `json:"status,omitempty"`
+}
+
 type statusResponse struct {
 	Status  string `json:"status"`
 	Ready   bool   `json:"ready"`
@@ -76,6 +92,10 @@ func NewServer(cfg Config, service *tokens.Service, reservationServices ...*rese
 }
 
 func NewServerWithAccessPolicies(cfg Config, service *tokens.Service, reservationService *reserved.Service, accessPolicyService *access.Service) *Server {
+	return NewServerWithCustomDomains(cfg, service, reservationService, accessPolicyService, nil)
+}
+
+func NewServerWithCustomDomains(cfg Config, service *tokens.Service, reservationService *reserved.Service, accessPolicyService *access.Service, customDomainService *customdomains.Service) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
 	}
@@ -91,11 +111,15 @@ func NewServerWithAccessPolicies(cfg Config, service *tokens.Service, reservatio
 	if accessPolicyService == nil {
 		accessPolicyService = access.NewService(access.NewMemoryStore())
 	}
+	if customDomainService == nil {
+		customDomainService = customdomains.NewService(customdomains.NewMemoryStore())
+	}
 	return &Server{
 		cfg:            cfg,
 		service:        service,
 		reservations:   reservationService,
 		accessPolicies: accessPolicyService,
+		customDomains:  customDomainService,
 		logger:         slog.Default(),
 		startedAt:      time.Now().UTC(),
 	}
@@ -144,6 +168,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/access-policies", s.handleAccessPolicies)
 	mux.HandleFunc("/api/v1/access-policies/", s.handleAccessPolicyByID)
 	mux.HandleFunc("/api/v1/access-policies/evaluate", s.handleEvaluateAccessPolicy)
+	mux.HandleFunc("/api/v1/custom-domains", s.handleCustomDomains)
+	mux.HandleFunc("/api/v1/custom-domains/", s.handleCustomDomainByID)
+	mux.HandleFunc("/api/v1/custom-domains/lookup", s.handleLookupCustomDomain)
 	mux.HandleFunc("/api/v1/reserved-subdomains", s.handleReservedSubdomains)
 	mux.HandleFunc("/api/v1/reserved-subdomains/", s.handleReservedSubdomainByID)
 	mux.HandleFunc("/api/v1/reserved-subdomains/authorize", s.handleAuthorizeReservedSubdomain)
@@ -616,6 +643,205 @@ func (s *Server) handleEvaluateAccessPolicy(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+func (s *Server) handleCustomDomains(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/v1/custom-domains" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		methodNotAllowed(w, "GET, POST")
+		return
+	}
+	if !s.authorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.Bool("token_configured", s.cfg.AdminToken != ""),
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method == http.MethodGet {
+		listed, err := s.customDomains.ListDomains(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.metrics.customDomainAdminListsTotal.Add(1)
+		s.logAudit(r, slog.LevelInfo, "control-plane custom domains listed", "control_plane.custom_domains_listed", slog.Int("count", len(listed.CustomDomains)))
+		writeJSON(w, http.StatusOK, listed)
+		return
+	}
+
+	var req customdomains.CreateDomainRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, ok, err := s.reservations.GetReservation(r.Context(), req.ReservedSubdomainID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	} else if !ok {
+		http.Error(w, "reserved_subdomain_id was not found", http.StatusBadRequest)
+		return
+	}
+	created, err := s.customDomains.CreateDomain(r.Context(), req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, customdomains.ErrDomainAlreadyExists):
+			status = http.StatusConflict
+		case isCustomDomainRequestError(err):
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	s.metrics.customDomainAdminCreatesTotal.Add(1)
+	s.logAudit(r, slog.LevelInfo, "control-plane custom domain created", "control_plane.custom_domain_created",
+		slog.String("custom_domain_id", created.ID),
+		slog.String("hostname", created.Hostname),
+		slog.String("reserved_subdomain_id", created.ReservedSubdomainID),
+		slog.String("status", string(created.Status)),
+	)
+	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleCustomDomainByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodDelete {
+		methodNotAllowed(w, "GET, DELETE")
+		return
+	}
+	if !s.authorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.Bool("token_configured", s.cfg.AdminToken != ""),
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/custom-domains/")
+	if id == "" || id == "lookup" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		domain, ok, err := s.customDomains.GetDomain(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			http.Error(w, customdomains.ErrDomainNotFound.Error(), http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, domain)
+	case http.MethodDelete:
+		if err := s.customDomains.DeleteDomain(r.Context(), id); err != nil {
+			if errors.Is(err, customdomains.ErrDomainNotFound) {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.metrics.customDomainAdminDeletesTotal.Add(1)
+		s.logAudit(r, slog.LevelInfo, "control-plane custom domain deleted", "control_plane.custom_domain_deleted", slog.String("custom_domain_id", id))
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (s *Server) handleLookupCustomDomain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w, "POST")
+		return
+	}
+	if !s.validatorAuthorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "validator"),
+			slog.Bool("token_configured", s.cfg.ValidatorToken != ""),
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req lookupCustomDomainRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.metrics.customDomainLookupsTotal.Add(1)
+	result, err := s.lookupCustomDomain(r.Context(), req.Hostname)
+	if err != nil {
+		s.metrics.customDomainLookupErrorsTotal.Add(1)
+		status := http.StatusInternalServerError
+		if isCustomDomainRequestError(err) {
+			status = http.StatusBadRequest
+		}
+		s.logAudit(r, slog.LevelWarn, "control-plane custom domain lookup failed", "control_plane.custom_domain_lookup_failed",
+			slog.String("hostname", req.Hostname),
+			slog.Int("status", status),
+			slog.Any("error", err),
+		)
+		http.Error(w, err.Error(), status)
+		return
+	}
+	if result.Found {
+		s.metrics.customDomainLookupHitsTotal.Add(1)
+	} else {
+		s.metrics.customDomainLookupMissesTotal.Add(1)
+	}
+	s.logAudit(r, slog.LevelInfo, "control-plane custom domain looked up", "control_plane.custom_domain_lookup",
+		slog.String("hostname", req.Hostname),
+		slog.Bool("found", result.Found),
+		slog.String("reason", result.Reason),
+		slog.String("custom_domain_id", result.CustomDomainID),
+		slog.String("subdomain", result.Subdomain),
+	)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) lookupCustomDomain(ctx context.Context, hostname string) (lookupCustomDomainResponse, error) {
+	domain, ok, err := s.customDomains.GetDomainByHostname(ctx, hostname)
+	if err != nil {
+		return lookupCustomDomainResponse{}, err
+	}
+	if !ok {
+		normalized, normalizeErr := customdomains.NormalizeHostname(hostname)
+		if normalizeErr != nil {
+			return lookupCustomDomainResponse{}, normalizeErr
+		}
+		return lookupCustomDomainResponse{Found: false, Hostname: normalized, Reason: "not_found"}, nil
+	}
+	reservation, ok, err := s.reservations.GetReservation(ctx, domain.ReservedSubdomainID)
+	if err != nil {
+		return lookupCustomDomainResponse{}, err
+	}
+	if !ok {
+		return lookupCustomDomainResponse{
+			Found:               false,
+			Reason:              "reservation_not_found",
+			Hostname:            domain.Hostname,
+			CustomDomainID:      domain.ID,
+			ReservedSubdomainID: domain.ReservedSubdomainID,
+			Status:              domain.Status,
+		}, nil
+	}
+	return lookupCustomDomainResponse{
+		Found:               true,
+		Hostname:            domain.Hostname,
+		CustomDomainID:      domain.ID,
+		ReservedSubdomainID: domain.ReservedSubdomainID,
+		Subdomain:           reservation.Name,
+		Status:              domain.Status,
+	}, nil
+}
+
 func (s *Server) evaluateAccessPolicy(ctx context.Context, req evaluateAccessPolicyRequest) (access.CheckPolicyResult, reserved.ReservationSummary, error) {
 	reservation, ok, err := s.reservations.GetReservationByName(ctx, req.Subdomain)
 	if err != nil {
@@ -723,7 +949,10 @@ func (s *Server) ready(ctx context.Context) error {
 	if err := s.reservations.Ready(ctx); err != nil {
 		return err
 	}
-	return s.accessPolicies.Ready(ctx)
+	if err := s.accessPolicies.Ready(ctx); err != nil {
+		return err
+	}
+	return s.customDomains.Ready(ctx)
 }
 
 func secretEqual(got, want string) bool {
@@ -821,4 +1050,10 @@ func isAccessPolicyRequestError(err error) bool {
 		errors.Is(err, access.ErrPolicyBasicUsernameRequired) ||
 		errors.Is(err, access.ErrPolicyIPAllowlistRequired) ||
 		strings.Contains(err.Error(), "invalid ip allowlist")
+}
+
+func isCustomDomainRequestError(err error) bool {
+	return errors.Is(err, customdomains.ErrDomainHostnameRequired) ||
+		errors.Is(err, customdomains.ErrDomainReservedSubdomainIDRequired) ||
+		errors.Is(err, customdomains.ErrDomainInvalidHostname)
 }

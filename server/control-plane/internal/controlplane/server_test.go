@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/voiteco/porthook/server/control-plane/internal/access"
+	"github.com/voiteco/porthook/server/control-plane/internal/customdomains"
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 )
@@ -181,6 +182,7 @@ func TestMetricsEndpoint(t *testing.T) {
 		"porthook_control_plane_tokens 1",
 		"porthook_control_plane_tokens_revoked 0",
 		"porthook_control_plane_reserved_subdomains 0",
+		"porthook_control_plane_custom_domains 0",
 		"porthook_control_plane_token_admin_creates_total 1",
 		"porthook_control_plane_token_validations_total 1",
 		"porthook_control_plane_token_validation_valid_total 1",
@@ -874,6 +876,171 @@ func TestAccessPolicyLifecycleAndEvaluation(t *testing.T) {
 	}
 	if strings.Contains(logOutput, "basic_password") || strings.Contains(logOutput, `"secret"`) {
 		t.Fatalf("logs leaked secret: %q", logOutput)
+	}
+}
+
+func TestCustomDomainLifecycle(t *testing.T) {
+	var logs bytes.Buffer
+	server := NewServer(Config{
+		AdminToken:     "admin-secret",
+		ValidatorToken: "validator-secret",
+	}, tokens.NewService(tokens.NewMemoryStore()))
+	server.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	createTokenResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens", "admin-secret", map[string]any{
+		"name": "agent",
+	})
+	defer createTokenResp.Body.Close()
+	if createTokenResp.StatusCode != http.StatusCreated {
+		t.Fatalf("token create status = %d, want 201", createTokenResp.StatusCode)
+	}
+	var createdToken tokens.CreatedToken
+	if err := json.NewDecoder(createTokenResp.Body).Decode(&createdToken); err != nil {
+		t.Fatalf("decode token returned error: %v", err)
+	}
+
+	createReservationResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/reserved-subdomains", "admin-secret", map[string]any{
+		"name":     "demo",
+		"token_id": createdToken.ID,
+	})
+	defer createReservationResp.Body.Close()
+	if createReservationResp.StatusCode != http.StatusCreated {
+		t.Fatalf("reservation create status = %d, want 201", createReservationResp.StatusCode)
+	}
+	var createdReservation reserved.CreatedReservation
+	if err := json.NewDecoder(createReservationResp.Body).Decode(&createdReservation); err != nil {
+		t.Fatalf("decode reservation returned error: %v", err)
+	}
+
+	createDomainResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/custom-domains", "admin-secret", map[string]any{
+		"hostname":              "Preview.Example.Test.",
+		"reserved_subdomain_id": createdReservation.ID,
+	})
+	defer createDomainResp.Body.Close()
+	if createDomainResp.StatusCode != http.StatusCreated {
+		body := readResponseBody(t, createDomainResp)
+		t.Fatalf("custom domain create status = %d, want 201; body = %q", createDomainResp.StatusCode, body)
+	}
+	var createdDomain customdomains.CreatedDomain
+	if err := json.NewDecoder(createDomainResp.Body).Decode(&createdDomain); err != nil {
+		t.Fatalf("decode custom domain returned error: %v", err)
+	}
+	if createdDomain.Hostname != "preview.example.test" || createdDomain.ReservedSubdomainID != createdReservation.ID || createdDomain.Status != customdomains.StatusActive {
+		t.Fatalf("created custom domain = %+v, want normalized active mapping", createdDomain)
+	}
+
+	listReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/custom-domains", nil)
+	if err != nil {
+		t.Fatalf("NewRequest list returned error: %v", err)
+	}
+	listReq.Header.Set("Authorization", "Bearer admin-secret")
+	listResp, err := httpServer.Client().Do(listReq)
+	if err != nil {
+		t.Fatalf("list returned error: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listResp.StatusCode)
+	}
+	var listed customdomains.ListDomainsResponse
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list returned error: %v", err)
+	}
+	if len(listed.CustomDomains) != 1 || listed.CustomDomains[0].ID != createdDomain.ID {
+		t.Fatalf("listed custom domains = %+v, want created domain", listed.CustomDomains)
+	}
+
+	getReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/custom-domains/"+createdDomain.ID, nil)
+	if err != nil {
+		t.Fatalf("NewRequest get returned error: %v", err)
+	}
+	getReq.Header.Set("Authorization", "Bearer admin-secret")
+	getResp, err := httpServer.Client().Do(getReq)
+	if err != nil {
+		t.Fatalf("get returned error: %v", err)
+	}
+	getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("get status = %d, want 200", getResp.StatusCode)
+	}
+
+	lookupResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/custom-domains/lookup", "validator-secret", map[string]any{
+		"hostname": "preview.example.test",
+	})
+	defer lookupResp.Body.Close()
+	if lookupResp.StatusCode != http.StatusOK {
+		body := readResponseBody(t, lookupResp)
+		t.Fatalf("lookup status = %d, want 200; body = %q", lookupResp.StatusCode, body)
+	}
+	var lookup lookupCustomDomainResponse
+	if err := json.NewDecoder(lookupResp.Body).Decode(&lookup); err != nil {
+		t.Fatalf("decode lookup returned error: %v", err)
+	}
+	if !lookup.Found || lookup.Subdomain != "demo" || lookup.CustomDomainID != createdDomain.ID {
+		t.Fatalf("lookup = %+v, want found demo custom domain", lookup)
+	}
+
+	missingLookupResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/custom-domains/lookup", "validator-secret", map[string]any{
+		"hostname": "missing.example.test",
+	})
+	defer missingLookupResp.Body.Close()
+	if missingLookupResp.StatusCode != http.StatusOK {
+		t.Fatalf("missing lookup status = %d, want 200", missingLookupResp.StatusCode)
+	}
+	var missing lookupCustomDomainResponse
+	if err := json.NewDecoder(missingLookupResp.Body).Decode(&missing); err != nil {
+		t.Fatalf("decode missing lookup returned error: %v", err)
+	}
+	if missing.Found || missing.Reason != "not_found" {
+		t.Fatalf("missing lookup = %+v, want not_found", missing)
+	}
+
+	deleteReq, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, httpServer.URL+"/api/v1/custom-domains/"+createdDomain.ID, nil)
+	if err != nil {
+		t.Fatalf("NewRequest delete returned error: %v", err)
+	}
+	deleteReq.Header.Set("Authorization", "Bearer admin-secret")
+	deleteResp, err := httpServer.Client().Do(deleteReq)
+	if err != nil {
+		t.Fatalf("delete returned error: %v", err)
+	}
+	deleteResp.Body.Close()
+	if deleteResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204", deleteResp.StatusCode)
+	}
+
+	for _, want := range []string{"control_plane.custom_domain_created", "hostname=preview.example.test", "control_plane.custom_domain_lookup", "control_plane.custom_domain_deleted"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("logs = %q, want %q", logs.String(), want)
+		}
+	}
+}
+
+func TestCustomDomainEndpointsRequireAuthorization(t *testing.T) {
+	server := NewServer(Config{
+		AdminToken:     "admin-secret",
+		ValidatorToken: "validator-secret",
+	}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/custom-domains")
+	if err != nil {
+		t.Fatalf("GET custom domains returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("list status = %d, want 401", resp.StatusCode)
+	}
+
+	lookupResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/custom-domains/lookup", "", map[string]any{
+		"hostname": "preview.example.test",
+	})
+	defer lookupResp.Body.Close()
+	if lookupResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("lookup status = %d, want 401", lookupResp.StatusCode)
 	}
 }
 
