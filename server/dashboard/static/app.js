@@ -63,6 +63,9 @@ const elements = {
   gatewayRuntimeGrid: document.querySelector("#gateway-runtime-grid"),
   gatewayRuntimeEmptyState: document.querySelector("#gateway-runtime-empty-state"),
   gatewayRuntimeCount: document.querySelector("#gateway-runtime-count"),
+  metricsBody: document.querySelector("#metrics-body"),
+  metricsEmptyState: document.querySelector("#metrics-empty-state"),
+  metricsCount: document.querySelector("#metrics-count"),
   gatewayForm: document.querySelector("#gateway-form"),
   gatewayURL: document.querySelector("#gateway-url"),
   tunnelsBody: document.querySelector("#tunnels-body"),
@@ -107,6 +110,7 @@ let currentAccessPolicies = [];
 let currentAuditEvents = [];
 let currentDiagnostics = [];
 let currentGatewayRuntime = null;
+let currentMetrics = [];
 let currentTunnels = [];
 let currentRequestLogs = [];
 let editingAccessPolicyID = "";
@@ -127,6 +131,7 @@ function setAuthenticated(authenticated) {
     currentAuditEvents = [];
     currentDiagnostics = [];
     currentGatewayRuntime = null;
+    currentMetrics = [];
     currentTunnels = [];
     currentRequestLogs = [];
     editingAccessPolicyID = "";
@@ -138,6 +143,7 @@ function setAuthenticated(authenticated) {
     elements.auditEventsBody.replaceChildren();
     elements.diagnosticsBody.replaceChildren();
     elements.gatewayRuntimeGrid.replaceChildren();
+    elements.metricsBody.replaceChildren();
     elements.tunnelsBody.replaceChildren();
     elements.requestLogsBody.replaceChildren();
     elements.emptyState.hidden = true;
@@ -147,6 +153,7 @@ function setAuthenticated(authenticated) {
     elements.auditEventsEmptyState.hidden = true;
     elements.diagnosticsEmptyState.hidden = true;
     elements.gatewayRuntimeEmptyState.hidden = true;
+    elements.metricsEmptyState.hidden = true;
     elements.tunnelsEmptyState.hidden = true;
     elements.requestLogsEmptyState.hidden = true;
     elements.tokenCount.textContent = "No tokens loaded";
@@ -156,6 +163,7 @@ function setAuthenticated(authenticated) {
     elements.auditEventCount.textContent = "No audit events loaded";
     elements.diagnosticsCount.textContent = "No diagnostics run";
     elements.gatewayRuntimeCount.textContent = "No gateway runtime loaded";
+    elements.metricsCount.textContent = "No metrics loaded";
     elements.tunnelCount.textContent = "No tunnels loaded";
     elements.requestLogCount.textContent = "No request logs loaded";
     clearTunnelDetail();
@@ -232,7 +240,7 @@ async function refreshStatus() {
 async function refreshApp() {
   showNotice("");
   clearCreatedToken();
-  await Promise.all([loadTokens(), loadAuditEvents(), refreshStatus(), loadTunnels({ silent: true }), loadGatewayRuntime({ silent: true }), loadRequestLogs({ silent: true })]);
+  await Promise.all([loadTokens(), loadAuditEvents(), refreshStatus(), loadTunnels({ silent: true }), loadGatewayRuntime({ silent: true }), loadGatewayMetrics({ silent: true }), loadRequestLogs({ silent: true })]);
   await loadReservations();
   await loadCustomDomains();
   await loadAccessPolicies();
@@ -610,6 +618,11 @@ async function runDiagnostics() {
       run: checkGatewayRuntimeAPI,
     },
     {
+      name: "Gateway metrics API",
+      target: "gateway /metrics",
+      run: checkGatewayMetricsAPI,
+    },
+    {
       name: "Gateway request logs API",
       target: "gateway /api/v1/request-logs",
       run: checkGatewayRequestLogsAPI,
@@ -709,6 +722,12 @@ async function checkGatewayRuntimeAPI() {
   return `uptime ${formatDuration((runtime.uptime_seconds || 0) * 1000)}`;
 }
 
+async function checkGatewayMetricsAPI() {
+  const metrics = await gatewayText("/metrics");
+  const parsed = parsePrometheusMetrics(metrics);
+  return `${parsed.length} metric${parsed.length === 1 ? "" : "s"}`;
+}
+
 async function checkGatewayRequestLogsAPI() {
   const payload = await gatewayJSON("/api/v1/request-logs?limit=1");
   const count = (payload.request_logs || []).length;
@@ -726,6 +745,19 @@ async function gatewayJSON(path) {
     throw new Error(responseDetail(payload, response.status));
   }
   return payload || {};
+}
+
+async function gatewayText(path) {
+  const baseURL = normalizedGatewayURL();
+  if (!baseURL) {
+    throw new Error("gateway URL is required");
+  }
+  const response = await fetch(`${baseURL}${path}`, { cache: "no-store" });
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    throw new Error(responseDetail(payload, response.status));
+  }
+  return typeof payload === "string" ? payload : "";
 }
 
 function responseDetail(payload, status) {
@@ -838,6 +870,104 @@ function renderGatewayRuntime(runtime) {
     detailItem("Stream timeout", `${timeouts.stream_timeout_seconds || 0} s`),
     detailItem("WS keepalive", `${timeouts.websocket_ping_interval_seconds || 0}/${timeouts.websocket_pong_timeout_seconds || 0} s`),
   );
+}
+
+async function loadGatewayMetrics({ silent = false } = {}) {
+  const baseURL = normalizedGatewayURL();
+  if (!baseURL) {
+    currentMetrics = [];
+    elements.metricsCount.textContent = "Gateway URL required";
+    elements.metricsBody.replaceChildren();
+    elements.metricsEmptyState.hidden = false;
+    return;
+  }
+
+  elements.metricsCount.textContent = "Loading metrics";
+  elements.metricsBody.replaceChildren();
+  elements.metricsEmptyState.hidden = true;
+
+  try {
+    const response = await fetch(`${baseURL}/metrics`, { cache: "no-store" });
+    const payload = await readPayload(response);
+    if (!response.ok) {
+      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
+    }
+    currentMetrics = parsePrometheusMetrics(typeof payload === "string" ? payload : "");
+    renderMetrics(currentMetrics);
+  } catch (error) {
+    currentMetrics = [];
+    elements.metricsCount.textContent = "Metrics unavailable";
+    elements.metricsBody.replaceChildren();
+    elements.metricsEmptyState.hidden = false;
+    if (!silent) {
+      showNotice(error.message, "error");
+    }
+  }
+}
+
+function renderMetrics(metrics) {
+  elements.metricsBody.replaceChildren(...metrics.map(renderMetricRow));
+  elements.metricsEmptyState.hidden = metrics.length !== 0;
+  elements.metricsCount.textContent = `${metrics.length} metric${metrics.length === 1 ? "" : "s"}`;
+}
+
+function renderMetricRow(metric) {
+  const row = document.createElement("tr");
+  row.append(
+    monoCell(metric.name),
+    cell(metric.type || "-"),
+    monoCell(metric.value),
+    cell(metric.help || "-"),
+  );
+  return row;
+}
+
+function parsePrometheusMetrics(text) {
+  const metadata = new Map();
+  const metrics = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (trimmed.startsWith("# HELP ")) {
+      const rest = trimmed.slice("# HELP ".length);
+      const firstSpace = rest.indexOf(" ");
+      if (firstSpace > 0) {
+        const name = rest.slice(0, firstSpace);
+        const meta = metadata.get(name) || {};
+        meta.help = rest.slice(firstSpace + 1);
+        metadata.set(name, meta);
+      }
+      continue;
+    }
+    if (trimmed.startsWith("# TYPE ")) {
+      const rest = trimmed.slice("# TYPE ".length);
+      const [name, metricType] = rest.split(/\s+/, 2);
+      if (name) {
+        const meta = metadata.get(name) || {};
+        meta.type = metricType || "";
+        metadata.set(name, meta);
+      }
+      continue;
+    }
+    if (trimmed.startsWith("#")) {
+      continue;
+    }
+    const [sample, value] = trimmed.split(/\s+/, 2);
+    if (!sample || value === undefined) {
+      continue;
+    }
+    const name = sample.split("{", 1)[0];
+    const meta = metadata.get(name) || {};
+    metrics.push({
+      name: sample,
+      type: meta.type || "",
+      value,
+      help: meta.help || "",
+    });
+  }
+  return metrics;
 }
 
 function renderTunnels(tunnels) {
@@ -1640,7 +1770,7 @@ elements.gatewayForm.addEventListener("submit", async (event) => {
   const gatewayURL = normalizedGatewayURL();
   sessionStorage.setItem(gatewayStorageKey, gatewayURL);
   elements.gatewayURL.value = gatewayURL;
-  await Promise.all([loadTunnels(), loadGatewayRuntime(), loadRequestLogs()]);
+  await Promise.all([loadTunnels(), loadGatewayRuntime(), loadGatewayMetrics(), loadRequestLogs()]);
 });
 elements.requestLogForm.addEventListener("submit", async (event) => {
   event.preventDefault();

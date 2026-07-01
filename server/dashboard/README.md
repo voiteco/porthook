@@ -15,6 +15,7 @@ The current dashboard scope is self-hosted administration:
 - Active gateway tunnel detail view.
 - Browser-run diagnostics for control-plane and gateway API reachability.
 - Gateway runtime summary.
+- Gateway metrics drilldown.
 - Operational overview charts.
 - Gateway request logs.
 - Control-plane readiness status.
@@ -38,6 +39,8 @@ Audit events are loaded from `GET /api/v1/events` with the configured admin toke
 Diagnostics run from the browser and check control-plane status/readiness, audit event API access, the configured gateway tunnel API, and the configured gateway request log API.
 
 The gateway runtime view reads `GET /api/v1/runtime` from the configured gateway URL and renders safe uptime, stream, request-log, counter, limit, and timeout metadata. It does not expose local target URLs, tokens, or control-plane URLs.
+
+The metrics drilldown reads Prometheus text from `GET /metrics` on the configured gateway URL and renders metric names, types, values, and help text.
 
 Custom domain management maps a fully qualified hostname to a reserved subdomain. DNS and TLS for that hostname are handled outside the dashboard.
 
