@@ -184,6 +184,15 @@ http://localhost:8082/dashboard/
 
 Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, manage custom domains and access policies, show active gateway tunnels, and inspect recent gateway request logs.
 
+Check the local gateway and control-plane operational endpoints:
+
+```sh
+printf '%s' '<admin-token>' | porthook doctor \
+  --gateway http://localhost:8080 \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin
+```
+
 Create an agent token:
 
 ```sh
@@ -265,7 +274,7 @@ curl -i -u demo:'<gateway-password>' -H 'Host: demo.localhost' http://localhost:
 curl -i -u demo:'<gateway-password>' -H 'Host: demo.example.test' http://localhost:8080/
 ```
 
-The gateway public listener and control plane both expose `GET /healthz`, `GET /readyz`, and `GET /metrics` for local operations checks. See [deploy/compose/README.md](./deploy/compose/README.md) for the full Compose guide.
+The gateway public listener and control plane both expose `GET /healthz`, `GET /readyz`, and `GET /metrics` for local operations checks. `porthook doctor` runs the common gateway and control-plane checks and includes response request IDs for log correlation. See [deploy/compose/README.md](./deploy/compose/README.md) for the full Compose guide.
 
 For internet-facing self-hosted deployments, see [docs/DOMAINS_TLS.md](./docs/DOMAINS_TLS.md) for wildcard DNS, custom root domain, and TLS guidance. See [docs/ACCESS_BOUNDARY.md](./docs/ACCESS_BOUNDARY.md) before exposing the control-plane API or dashboard.
 

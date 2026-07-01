@@ -578,6 +578,8 @@ porthook http <port> --server <url>
 porthook tokens create --control-plane <url> --name <name>
 porthook tokens list --control-plane <url>
 porthook tokens revoke --control-plane <url> <token-id>
+porthook doctor --gateway <url>
+porthook doctor --gateway <url> --control-plane <url>
 porthook tunnels
 porthook version
 ```
@@ -588,9 +590,11 @@ Useful flags:
 --server
 --token
 --subdomain
+--gateway
 --control-plane
 --admin-token
 --admin-token-stdin
+--timeout
 --json
 --host-header
 --basic-auth
