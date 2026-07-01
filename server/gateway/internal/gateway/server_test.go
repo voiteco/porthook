@@ -1187,6 +1187,7 @@ func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
 	req.Host = "missing.localhost"
+	req.Header.Set("X-Request-ID", "req_logs")
 	resp, err := publicServer.Client().Do(req)
 	if err != nil {
 		t.Fatalf("public request returned error: %v", err)
@@ -1220,7 +1221,7 @@ func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
 		t.Fatalf("request_logs = %d, want 1", len(payload.RequestLogs))
 	}
 	entry := payload.RequestLogs[0]
-	if entry.Host != "missing.localhost" || entry.Path != "/missing" || !entry.QueryPresent {
+	if entry.Host != "missing.localhost" || entry.Path != "/missing" || !entry.QueryPresent || entry.RequestID != "req_logs" {
 		t.Fatalf("entry = %+v, want host/path/query_present", entry)
 	}
 	if entry.Status != http.StatusNotFound || entry.Outcome != "no_active_session" {
@@ -1952,6 +1953,7 @@ func TestPublicRequestLogsMissingTunnel(t *testing.T) {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
 	req.Host = "demo.localhost"
+	req.Header.Set("X-Request-ID", "req_public_log")
 
 	resp, err := httpServer.Client().Do(req)
 	if err != nil {
@@ -1970,6 +1972,7 @@ func TestPublicRequestLogsMissingTunnel(t *testing.T) {
 		"host=demo.localhost",
 		"status=404",
 		"outcome=no_active_session",
+		"request_id=req_public_log",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("logs = %q, want %q", got, want)

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/voiteco/porthook/server/internal/requestid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -95,7 +96,12 @@ func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error)
 }
 
 func HTTPHandler(handler http.Handler, operation string) http.Handler {
-	return otelhttp.NewHandler(handler, operation)
+	return otelhttp.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id := requestid.FromRequest(r); id != "" {
+			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("porthook.request_id", id))
+		}
+		handler.ServeHTTP(w, r)
+	}), operation)
 }
 
 func HTTPTransport(base http.RoundTripper) http.RoundTripper {
@@ -114,6 +120,9 @@ func RecordSpan(ctx context.Context, status int, outcome string, err error, attr
 		attribute.Int("http.response.status_code", status),
 		attribute.String("porthook.outcome", outcome),
 	)
+	if id := requestid.FromContext(ctx); id != "" {
+		attrs = append(attrs, attribute.String("porthook.request_id", id))
+	}
 	span.SetAttributes(attrs...)
 	if err != nil {
 		span.RecordError(err)

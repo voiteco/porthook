@@ -73,7 +73,7 @@ The public listener exposes:
 
 Metrics use Prometheus text format and include active tunnels, process uptime, public request totals, selected public request outcome counters, custom domain lookup results, access policy denials/errors, token validation attempts, authentication failures, and tunnel registration successes/failures. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs.
 
-`GET /api/v1/request-logs` returns recent public request summaries from the in-memory ring buffer. The response is newest-first and supports `?limit=N`. Entries include method, host, path, query presence, remote IP, subdomain, tunnel ID, stream ID, status, outcome, byte counts, duration, and an optional error string. Raw query strings and authorization values are not returned.
+`GET /api/v1/request-logs` returns recent public request summaries from the in-memory ring buffer. The response is newest-first and supports `?limit=N`. Entries include method, host, path, query presence, remote IP, request ID, subdomain, tunnel ID, stream ID, status, outcome, byte counts, duration, and an optional error string. Raw query strings and authorization values are not returned.
 
 Gateway logs are structured text logs written to stdout. Operational logs include an `event` field such as `gateway.public_request`, `gateway.tunnel_registered`, `gateway.agent_auth_failed`, and `gateway.agent_keepalive_failed`.
 
