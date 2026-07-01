@@ -426,6 +426,8 @@ Postgres-backed control-plane token storage uses embedded versioned SQL migratio
 
 The control plane exposes `GET /api/v1/status` for dashboard and automation checks. It returns JSON with readiness state and the binary version.
 
+The control plane exposes `GET /api/v1/events` for dashboard audit visibility. The endpoint returns recent in-memory audit events, newest first, and omits plaintext tokens and access policy secrets.
+
 The gateway exposes `GET /api/v1/tunnels` for dashboard active-tunnel visibility. The endpoint returns active tunnel summaries and omits local target URLs.
 
 The gateway exposes `GET /api/v1/request-logs` for dashboard request-log visibility. The endpoint returns recent public request summaries from an in-memory ring buffer, newest first. It supports `limit`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`; `since` and `until` use RFC3339 timestamps, and `limit` is applied after filtering. It includes path and `query_present`, but never raw query strings.
