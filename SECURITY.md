@@ -6,9 +6,9 @@ Porthook is pre-1.0. Security fixes target the latest minor release line and the
 
 | Version | Supported |
 | --- | --- |
-| `0.9.x` | Best effort |
+| `0.10.x` | Best effort |
 | `main` | Best effort |
-| `0.8.x` and older | No |
+| `0.9.x` and older | No |
 
 ## Reporting a Vulnerability
 

@@ -4,6 +4,24 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-01
+
+### Added
+- Added DNS TXT verification lifecycle for custom domains, including verification tokens, `POST /api/v1/custom-domains/{id}/verify`, `porthook domains verify`, dashboard verification actions, and self-hosting documentation.
+- Added request ID propagation across the gateway and control plane, including generated `X-Request-ID` values, public error response request IDs, access/request log fields, and OpenTelemetry span attributes.
+- Added a control-plane audit events endpoint at `GET /api/v1/events` for recent in-memory admin and validator events without plaintext tokens or access policy secrets.
+- Added `porthook doctor` for operator diagnostics across gateway health, gateway readiness, active tunnel API reachability, control-plane status, and audit event access.
+- Added built-in `healthcheck` subcommands for `porthook-gateway` and `porthook-control-plane`, Docker image healthcheck metadata, and Compose healthchecks for self-hosted stacks.
+
+### Changed
+- Hardened custom-domain gateway routing with separate hit and miss cache TTLs, root-domain bypasses, control-plane returned-subdomain validation, and clearer request outcomes for pending, failed, missing, and lookup-error states.
+- Updated dashboard request logs with request ID display and filtering.
+- Updated production Compose dependencies so the gateway and reverse proxy wait for healthy upstream services.
+- Extended production hardening checks to enforce container healthchecks and `service_healthy` dependencies.
+
+### Fixed
+- Stabilized gateway large-body request tests by waiting for tunnel session registration before public requests.
+
 ## [0.9.0] - 2026-07-01
 
 ### Added

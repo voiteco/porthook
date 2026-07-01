@@ -2,6 +2,31 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.9.x to 0.10.x
+
+Version 0.10.x adds custom domain TXT verification, request ID correlation, control-plane audit events, CLI diagnostics, and container healthchecks for self-hosted deployments.
+
+Before upgrading a Postgres-backed control plane:
+
+1. Back up the Postgres volume or database.
+2. Stop the old `porthook-control-plane` and `porthook-gateway` processes or Compose stack.
+3. Deploy the new control-plane, gateway, dashboard assets, CLI binaries, and images together.
+4. Start the control plane and check `GET /readyz`.
+5. Start the gateway and check `GET /readyz`, `GET /api/v1/tunnels`, and `GET /api/v1/request-logs`.
+6. Run `porthook doctor --gateway <gateway-url> --control-plane <control-plane-url>` and include `--admin-token-stdin` when checking audit event access.
+7. For newly added custom domains, create the required `_porthook.<hostname>` TXT record and run `porthook domains verify` or use the dashboard verification action before routing traffic.
+8. For Compose deployments, confirm `docker compose ps` shows healthy gateway and control-plane containers.
+
+The 0.10.x migration is additive:
+
+- add `custom_domains.verification_token`
+- add `custom_domains.verified_at`
+- expand the `custom_domains.status` check to include `pending_verification` and `verification_failed`
+- create `custom_domains_status_idx`
+- keep existing 0.9.x custom domains active with legacy verification tokens
+
+Rollback to 0.9.x should not require removing the additive columns or status index, but a 0.9.x gateway and dashboard will not enforce or display custom-domain verification states, request IDs in dashboard request logs, audit events, CLI diagnostics, or container healthchecks.
+
 ## Upgrade from 0.8.x to 0.9.x
 
 Version 0.9.x adds custom domain mappings for control-plane-backed self-hosted deployments. Custom domains map a fully qualified hostname to a reserved subdomain, and gateway access policies continue to apply through that reservation.
