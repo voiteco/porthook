@@ -24,6 +24,8 @@ import (
 	"github.com/voiteco/porthook/protocol/names"
 	"github.com/voiteco/porthook/protocol/wswire"
 	"github.com/voiteco/porthook/server/gateway/internal/registry"
+	"github.com/voiteco/porthook/server/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const agentWebSocketPath = "/agent/connect"
@@ -151,13 +153,13 @@ func (s *Server) PublicHandler() http.Handler {
 	mux.HandleFunc("/api/v1/request-logs", s.handleRequestLogs)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/", s.handlePublicRequest)
-	return mux
+	return telemetry.HTTPHandler(mux, "gateway.public")
 }
 
 func (s *Server) AgentHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(agentWebSocketPath, s.handleAgentWebSocket)
-	return mux
+	return telemetry.HTTPHandler(mux, "gateway.agent")
 }
 
 func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -564,6 +566,14 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		s.logPublicRequest(r, entry)
 		s.requestLogs.add(requestLogEntryFromPublicRequest(r, entry))
 		s.recordPublicRequestMetrics(status, outcome)
+		telemetry.RecordSpan(r.Context(), status, outcome, requestErr,
+			attribute.String("porthook.subdomain", subdomain),
+			attribute.String("porthook.custom_domain", customDomain),
+			attribute.String("porthook.tunnel_id", tunnelID),
+			attribute.String("porthook.stream_id", streamID),
+			attribute.Int64("porthook.request_bytes", requestBytes),
+			attribute.Int64("porthook.response_bytes", responseBytes),
+		)
 	}()
 
 	route, ok, err := s.routeForHost(r.Context(), r.Host)

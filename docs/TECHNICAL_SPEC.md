@@ -584,6 +584,8 @@ duration_ms
 error
 ```
 
+Gateway and control-plane binaries should support optional OpenTelemetry tracing. The current trace MVP covers inbound HTTP server spans, gateway outbound control-plane HTTP client spans, W3C trace context propagation, and Porthook route/result attributes on public gateway request spans.
+
 ## 17. Security Baseline
 
 MVP requirements:

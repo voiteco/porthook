@@ -60,12 +60,13 @@ Before using the Compose control-plane stack beyond local testing:
 - Treat `/dashboard/` as part of the control-plane API surface and protect it with the same access boundary.
 - Persist and back up the Postgres volume before relying on issued tokens.
 - Back up Postgres before upgrades. The control plane applies pending embedded migrations at startup.
-- Scrape `/metrics` and alert on readiness failures, auth failures, and unexpected token validation errors.
+- Scrape `/metrics` and alert on readiness failures, auth failures, and unexpected token validation errors. Enable OpenTelemetry tracing only when an OTLP collector or stdout trace debugging is intentionally configured.
 - Rotate admin and validator tokens periodically, then update gateway and control-plane configuration together.
 - Revoke unused agent tokens with `porthook tokens revoke`.
 - Review reserved subdomains with `porthook reserved list` and delete unused names with `porthook reserved delete`.
 - Run `make smoke-control-plane` after configuration changes that affect token validation or tunnel routing.
 - Review [../docs/OPERATIONS.md](../docs/OPERATIONS.md) before upgrades, restores, and token rotation.
+- Review [../docs/OBSERVABILITY.md](../docs/OBSERVABILITY.md) before enabling tracing.
 
 Compose is still the first supported deployment path for this pre-1.0 repository. Review the reverse proxy, TLS, wildcard DNS, and access-boundary notes before using it for internet-facing traffic.
 

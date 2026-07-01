@@ -44,6 +44,7 @@ The first product shape is intentionally narrow:
 - Optional control-plane token validation for self-hosted deployments.
 - Reserved subdomains, access policies, and custom domain mappings for control-plane-backed deployments.
 - Health, readiness, and Prometheus text metrics endpoints.
+- Optional OpenTelemetry traces for gateway and control-plane HTTP paths.
 - Basic request logs for local debugging.
 - Agent reconnects for transient gateway disconnects.
 - A self-hosted dashboard for control-plane administration.
@@ -145,11 +146,11 @@ Completed foundations:
 10. Per-tunnel public access policies for reserved subdomains.
 11. Gateway request log visibility.
 12. Per-tunnel custom domain mappings for self-hosted deployments.
+13. OpenTelemetry trace export for gateway and control-plane HTTP paths.
 
 Next major public work:
 
-1. OpenTelemetry traces.
-2. Dashboard charts and deeper operational views.
+1. Dashboard charts and deeper operational views.
 
 ## Self-Hosted Quick Start
 
@@ -255,6 +256,8 @@ The gateway public listener and control plane both expose `GET /healthz`, `GET /
 For internet-facing self-hosted deployments, see [docs/DOMAINS_TLS.md](./docs/DOMAINS_TLS.md) for wildcard DNS, custom root domain, and TLS guidance. See [docs/ACCESS_BOUNDARY.md](./docs/ACCESS_BOUNDARY.md) before exposing the control-plane API or dashboard.
 
 Operational runbooks for deployment, backups, token rotation, upgrades, rollback, and incident response live in [docs/OPERATIONS.md](./docs/OPERATIONS.md).
+
+Metrics and OpenTelemetry tracing configuration are documented in [docs/OBSERVABILITY.md](./docs/OBSERVABILITY.md).
 
 ## Specification
 

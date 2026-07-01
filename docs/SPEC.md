@@ -444,10 +444,10 @@ Minimum:
 - Error count.
 - Prometheus text metrics.
 - In-memory gateway request logs for recent public requests.
+- OpenTelemetry traces for gateway/control-plane HTTP paths.
 
 Future:
 
-- OpenTelemetry traces.
 - Dashboard charts.
 
 ## 14. Data Model Draft
@@ -458,6 +458,7 @@ Initial persistent entities:
 - API token.
 - Tunnel session.
 - Reserved subdomain.
+- Custom domain.
 - Access policy.
 
 Possible schema sketch:
@@ -494,6 +495,14 @@ access_policies
   created_at
   updated_at
 
+custom_domains
+  id
+  hostname
+  reserved_subdomain_id
+  status
+  created_at
+  updated_at
+
 tunnel_sessions
   id
   owner_user_id
@@ -525,6 +534,11 @@ GET  /api/v1/access-policies/{id}
 PUT  /api/v1/access-policies/{id}
 DELETE /api/v1/access-policies/{id}
 POST /api/v1/access-policies/evaluate
+GET  /api/v1/custom-domains
+POST /api/v1/custom-domains
+GET  /api/v1/custom-domains/{id}
+DELETE /api/v1/custom-domains/{id}
+POST /api/v1/custom-domains/lookup
 GET  /healthz
 GET  /readyz
 GET  /metrics

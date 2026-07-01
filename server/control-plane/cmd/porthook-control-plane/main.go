@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/voiteco/porthook/server/control-plane/internal/access"
@@ -17,6 +18,7 @@ import (
 	"github.com/voiteco/porthook/server/control-plane/internal/customdomains"
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
+	"github.com/voiteco/porthook/server/internal/telemetry"
 )
 
 var version = "dev"
@@ -41,6 +43,16 @@ func run(args []string, stdout io.Writer) error {
 
 	cfg := controlplane.ConfigFromEnv()
 	cfg.Version = version
+	shutdownTelemetry, err := telemetry.Setup(context.Background(), telemetry.ConfigFromEnv("porthook-control-plane", version))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTelemetry(shutdownCtx)
+	}()
+
 	tokenStore, reservationStore, accessStore, customDomainStore, err := stores(context.Background(), cfg)
 	if err != nil {
 		return err
