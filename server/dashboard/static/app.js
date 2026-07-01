@@ -51,6 +51,11 @@ const elements = {
   tunnelsBody: document.querySelector("#tunnels-body"),
   tunnelsEmptyState: document.querySelector("#tunnels-empty-state"),
   tunnelCount: document.querySelector("#tunnel-count"),
+  tunnelDetailPanel: document.querySelector("#tunnel-detail-panel"),
+  tunnelDetailTitle: document.querySelector("#tunnel-detail-title"),
+  tunnelDetailMeta: document.querySelector("#tunnel-detail-meta"),
+  tunnelDetailGrid: document.querySelector("#tunnel-detail-grid"),
+  tunnelDetailClose: document.querySelector("#tunnel-detail-close"),
   overviewCount: document.querySelector("#overview-count"),
   overviewActiveTunnels: document.querySelector("#overview-active-tunnels"),
   overviewRecentRequests: document.querySelector("#overview-recent-requests"),
@@ -79,6 +84,7 @@ let currentAccessPolicies = [];
 let currentTunnels = [];
 let currentRequestLogs = [];
 let editingAccessPolicyID = "";
+let selectedTunnelID = "";
 
 elements.gatewayURL.value = sessionStorage.getItem(gatewayStorageKey) || defaultGatewayURL();
 
@@ -95,6 +101,7 @@ function setAuthenticated(authenticated) {
     currentTunnels = [];
     currentRequestLogs = [];
     editingAccessPolicyID = "";
+    selectedTunnelID = "";
     elements.tokensBody.replaceChildren();
     elements.reservationsBody.replaceChildren();
     elements.customDomainsBody.replaceChildren();
@@ -113,6 +120,7 @@ function setAuthenticated(authenticated) {
     elements.accessPolicyCount.textContent = "No access policies loaded";
     elements.tunnelCount.textContent = "No tunnels loaded";
     elements.requestLogCount.textContent = "No request logs loaded";
+    clearTunnelDetail();
     renderOperationalOverview();
     renderReservationTokenOptions();
     renderCustomDomainReservationOptions();
@@ -492,6 +500,9 @@ async function loadTunnels({ silent = false } = {}) {
     }
     currentTunnels = payload.tunnels || [];
     renderTunnels(currentTunnels);
+    if (selectedTunnelID && !currentTunnels.some((tunnel) => tunnel.tunnel_id === selectedTunnelID)) {
+      clearTunnelDetail();
+    }
     renderOperationalOverview();
   } catch (error) {
     currentTunnels = [];
@@ -513,14 +524,88 @@ function renderTunnels(tunnels) {
 
 function renderTunnelRow(tunnel) {
   const row = document.createElement("tr");
+  if (tunnel.tunnel_id === selectedTunnelID) {
+    row.classList.add("selected");
+  }
   row.append(
     cell(tunnel.subdomain),
     monoCell(tunnel.tunnel_id),
     linkCell(tunnel.public_url),
     cell(tunnel.protocol || "http"),
     cell(formatTime(tunnel.connected_at)),
+    tunnelActionCell(tunnel),
   );
   return row;
+}
+
+function tunnelActionCell(tunnel) {
+  const item = document.createElement("td");
+  item.classList.add("right");
+  const button = document.createElement("button");
+  button.className = "secondary";
+  button.type = "button";
+  button.textContent = "Details";
+  button.addEventListener("click", () => loadTunnelDetail(tunnel));
+  item.append(button);
+  return item;
+}
+
+async function loadTunnelDetail(tunnel) {
+  const baseURL = normalizedGatewayURL();
+  if (!baseURL) {
+    showNotice("Gateway URL is required.", "error");
+    return;
+  }
+  selectedTunnelID = tunnel.tunnel_id;
+  elements.tunnelDetailTitle.textContent = tunnel.subdomain || tunnel.tunnel_id;
+  elements.tunnelDetailMeta.textContent = "Loading tunnel detail";
+  elements.tunnelDetailGrid.replaceChildren();
+  elements.tunnelDetailPanel.hidden = false;
+  renderTunnels(currentTunnels);
+
+  try {
+    const response = await fetch(`${baseURL}/api/v1/tunnels/${encodeURIComponent(tunnel.tunnel_id)}`, { cache: "no-store" });
+    const payload = await readPayload(response);
+    if (!response.ok) {
+      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
+    }
+    renderTunnelDetail(payload.tunnel || {});
+  } catch (error) {
+    elements.tunnelDetailMeta.textContent = "Tunnel detail unavailable";
+    elements.tunnelDetailGrid.replaceChildren(detailItem("Error", error.message));
+    showNotice(error.message, "error");
+  }
+}
+
+function renderTunnelDetail(tunnel) {
+  const requests = tunnel.recent_requests || {};
+  elements.tunnelDetailTitle.textContent = tunnel.subdomain || tunnel.tunnel_id || "Tunnel details";
+  elements.tunnelDetailMeta.textContent = `${tunnel.tunnel_id || "-"} connected ${formatDuration((tunnel.connected_seconds || 0) * 1000)}`;
+  elements.tunnelDetailGrid.replaceChildren(
+    detailItem("Public URL", tunnel.public_url || "-"),
+    detailItem("Protocol", tunnel.protocol || "http"),
+    detailItem("Agent version", tunnel.agent_version || "-"),
+    detailItem("Protocol version", tunnel.protocol_version || "-"),
+    detailItem("Connected", formatTime(tunnel.connected_at)),
+    detailItem("Streams", `${tunnel.active_streams || 0}/${tunnel.stream_capacity || 0}`),
+    detailItem("Recent requests", String(requests.count || 0)),
+    detailItem("Recent errors", String(requests.error_count || 0)),
+    detailItem("Last status", requests.last_status ? String(requests.last_status) : "-"),
+    detailItem("Last outcome", requests.last_outcome || "-"),
+    detailItem("Last request ID", requests.last_request_id || "-", true),
+    detailItem("Custom domains", (requests.custom_domains || []).join(", ") || "-"),
+  );
+}
+
+function clearTunnelDetail() {
+  selectedTunnelID = "";
+  elements.tunnelDetailPanel.hidden = true;
+  elements.tunnelDetailTitle.textContent = "Tunnel details";
+  elements.tunnelDetailMeta.textContent = "Select an active tunnel.";
+  elements.tunnelDetailGrid.replaceChildren();
+  if (currentTunnels.length > 0) {
+    renderTunnels(currentTunnels);
+  }
 }
 
 async function loadRequestLogs({ silent = false } = {}) {
@@ -740,6 +825,20 @@ function linkCell(href) {
   link.textContent = href;
   link.rel = "noreferrer";
   item.append(link);
+  return item;
+}
+
+function detailItem(label, value, mono = false) {
+  const item = document.createElement("div");
+  item.className = "detail-item";
+  const labelEl = document.createElement("span");
+  labelEl.textContent = label;
+  const valueEl = document.createElement("strong");
+  valueEl.textContent = value;
+  if (mono) {
+    valueEl.classList.add("mono");
+  }
+  item.append(labelEl, valueEl);
   return item;
 }
 
@@ -1118,6 +1217,7 @@ elements.requestLogForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await loadRequestLogs();
 });
+elements.tunnelDetailClose.addEventListener("click", clearTunnelDetail);
 for (const input of [elements.requestLogSubdomain, elements.requestLogStatus, elements.requestLogOutcome, elements.requestLogRequestID]) {
   input.addEventListener("input", () => renderRequestLogs(currentRequestLogs));
 }

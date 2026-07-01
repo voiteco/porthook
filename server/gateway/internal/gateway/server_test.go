@@ -1913,6 +1913,121 @@ func TestPublicHandlerListsActiveTunnels(t *testing.T) {
 	}
 }
 
+func TestPublicHandlerShowsTunnelDetail(t *testing.T) {
+	cfg := testConfig()
+	cfg.RequestLogLimit = 10
+	server := NewServer(cfg, slog.Default())
+	connectedAt := time.Now().UTC().Add(-2 * time.Minute)
+	tunnel := &registry.Session{
+		TunnelID:        "tun_active",
+		Subdomain:       "demo",
+		PublicURL:       "http://demo.localhost:8080",
+		LocalTarget:     "http://localhost:3000",
+		Protocol:        "http",
+		AgentVersion:    "test-agent",
+		ProtocolVersion: messages.ProtocolVersion,
+		CreatedAt:       connectedAt,
+	}
+	if err := server.registry.Register(tunnel); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	server.addSession(newAgentSession(nil, tunnel, time.Second, 4, 60, 120))
+	requestAt := time.Now().UTC()
+	server.requestLogs.add(requestLogEntry{
+		Time:         requestAt,
+		Method:       http.MethodGet,
+		Host:         "preview.example.test",
+		Path:         "/demo",
+		RequestID:    "req_tunnel",
+		Subdomain:    "demo",
+		CustomDomain: "preview.example.test",
+		TunnelID:     "tun_active",
+		Status:       http.StatusOK,
+		Outcome:      "proxied",
+	})
+
+	httpServer := httptest.NewServer(server.PublicHandler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/tunnels/tun_active")
+	if err != nil {
+		t.Fatalf("GET tunnel detail returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var detail tunnelDetailResponse
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if detail.Tunnel.TunnelID != "tun_active" || detail.Tunnel.Subdomain != "demo" || detail.Tunnel.AgentVersion != "test-agent" {
+		t.Fatalf("detail = %+v, want active tunnel metadata", detail.Tunnel)
+	}
+	if detail.Tunnel.ProtocolVersion != messages.ProtocolVersion {
+		t.Fatalf("protocol version = %q, want %q", detail.Tunnel.ProtocolVersion, messages.ProtocolVersion)
+	}
+	if detail.Tunnel.ActiveStreams != 0 || detail.Tunnel.StreamCapacity != 4 {
+		t.Fatalf("stream stats = %d/%d, want 0/4", detail.Tunnel.ActiveStreams, detail.Tunnel.StreamCapacity)
+	}
+	if detail.Tunnel.ConnectedSeconds < 1 {
+		t.Fatalf("connected seconds = %d, want positive uptime", detail.Tunnel.ConnectedSeconds)
+	}
+	if detail.Tunnel.RecentRequests.Count != 1 || detail.Tunnel.RecentRequests.LastStatus != http.StatusOK || detail.Tunnel.RecentRequests.LastRequestID != "req_tunnel" {
+		t.Fatalf("request summary = %+v, want last request metadata", detail.Tunnel.RecentRequests)
+	}
+	if len(detail.Tunnel.RecentRequests.CustomDomains) != 1 || detail.Tunnel.RecentRequests.CustomDomains[0] != "preview.example.test" {
+		t.Fatalf("custom domains = %+v, want preview.example.test", detail.Tunnel.RecentRequests.CustomDomains)
+	}
+}
+
+func TestPublicHandlerTunnelDetailDoesNotExposeLocalTarget(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	tunnel := &registry.Session{
+		TunnelID:    "tun_secret",
+		Subdomain:   "demo",
+		PublicURL:   "http://demo.localhost:8080",
+		LocalTarget: "http://localhost:3000/private",
+		Protocol:    "http",
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := server.registry.Register(tunnel); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+	server.addSession(newAgentSession(nil, tunnel, time.Second, 4, 60, 120))
+
+	httpServer := httptest.NewServer(server.PublicHandler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/tunnels/tun_secret")
+	if err != nil {
+		t.Fatalf("GET tunnel detail returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if strings.Contains(string(body), "localhost:3000") || strings.Contains(string(body), "local_target") {
+		t.Fatalf("body = %q, want no local target", string(body))
+	}
+}
+
+func TestPublicHandlerTunnelDetailNotFound(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	httpServer := httptest.NewServer(server.PublicHandler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/tunnels/missing")
+	if err != nil {
+		t.Fatalf("GET tunnel detail returned error: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
 func TestPublicHandlerMetricsEndpoint(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	httpServer := httptest.NewServer(server.PublicHandler())

@@ -338,6 +338,20 @@ func (s *agentSession) releaseStream() {
 	}
 }
 
+func (s *agentSession) activeStreams() int {
+	if s.streams == nil {
+		return 0
+	}
+	return len(s.streams)
+}
+
+func (s *agentSession) streamCapacity() int {
+	if s.streams == nil {
+		return 0
+	}
+	return cap(s.streams)
+}
+
 func (s *agentSession) cancelStream(ctx context.Context, streamID, reason string) error {
 	env, err := messages.NewStream(messages.TypeHTTPStreamCancel, streamID, s.tunnel.TunnelID, messages.StreamCancel{
 		Reason: reason,

@@ -27,7 +27,7 @@ func TestHandlerServesDashboardIndex(t *testing.T) {
 	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'self' http: https:") {
 		t.Fatalf("Content-Security-Policy = %q, want gateway-capable connect-src", got)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Request logs") || !strings.Contains(body, "Request ID") {
+	if body := rec.Body.String(); !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Request logs") || !strings.Contains(body, "Request ID") || !strings.Contains(body, "Tunnel details") {
 		t.Fatalf("dashboard index body = %q, want dashboard shell", body)
 	}
 }
@@ -73,6 +73,9 @@ func TestHandlerServesAssets(t *testing.T) {
 	}
 	if !strings.Contains(body, "/api/v1/tunnels") {
 		t.Fatalf("asset body = %q, want gateway tunnel API client", body)
+	}
+	if !strings.Contains(body, "loadTunnelDetail") {
+		t.Fatalf("asset body = %q, want tunnel detail renderer", body)
 	}
 	if !strings.Contains(body, "/api/v1/request-logs") {
 		t.Fatalf("asset body = %q, want request logs API client", body)
