@@ -445,10 +445,11 @@ Minimum:
 - Prometheus text metrics.
 - In-memory gateway request logs for recent public requests.
 - OpenTelemetry traces for gateway/control-plane HTTP paths.
+- Dashboard operational overview charts.
 
 Future:
 
-- Dashboard charts.
+- Deeper dashboard operational views.
 
 ## 14. Data Model Draft
 

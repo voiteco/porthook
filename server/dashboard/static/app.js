@@ -51,6 +51,15 @@ const elements = {
   tunnelsBody: document.querySelector("#tunnels-body"),
   tunnelsEmptyState: document.querySelector("#tunnels-empty-state"),
   tunnelCount: document.querySelector("#tunnel-count"),
+  overviewCount: document.querySelector("#overview-count"),
+  overviewActiveTunnels: document.querySelector("#overview-active-tunnels"),
+  overviewRecentRequests: document.querySelector("#overview-recent-requests"),
+  overviewErrorRate: document.querySelector("#overview-error-rate"),
+  overviewP95Latency: document.querySelector("#overview-p95-latency"),
+  overviewOutcomeCount: document.querySelector("#overview-outcome-count"),
+  overviewOutcomeChart: document.querySelector("#overview-outcome-chart"),
+  overviewStatusCount: document.querySelector("#overview-status-count"),
+  overviewStatusChart: document.querySelector("#overview-status-chart"),
   requestLogForm: document.querySelector("#request-log-form"),
   requestLogSubdomain: document.querySelector("#request-log-subdomain"),
   requestLogStatus: document.querySelector("#request-log-status"),
@@ -66,6 +75,7 @@ let currentTokens = [];
 let currentReservations = [];
 let currentCustomDomains = [];
 let currentAccessPolicies = [];
+let currentTunnels = [];
 let currentRequestLogs = [];
 let editingAccessPolicyID = "";
 
@@ -81,6 +91,7 @@ function setAuthenticated(authenticated) {
     currentReservations = [];
     currentCustomDomains = [];
     currentAccessPolicies = [];
+    currentTunnels = [];
     currentRequestLogs = [];
     editingAccessPolicyID = "";
     elements.tokensBody.replaceChildren();
@@ -101,6 +112,7 @@ function setAuthenticated(authenticated) {
     elements.accessPolicyCount.textContent = "No access policies loaded";
     elements.tunnelCount.textContent = "No tunnels loaded";
     elements.requestLogCount.textContent = "No request logs loaded";
+    renderOperationalOverview();
     renderReservationTokenOptions();
     renderCustomDomainReservationOptions();
     renderAccessReservationOptions();
@@ -426,8 +438,10 @@ async function loadTunnels({ silent = false } = {}) {
   const baseURL = normalizedGatewayURL();
   if (!baseURL) {
     elements.tunnelCount.textContent = "Gateway URL required";
+    currentTunnels = [];
     elements.tunnelsBody.replaceChildren();
     elements.tunnelsEmptyState.hidden = false;
+    renderOperationalOverview();
     return;
   }
 
@@ -441,11 +455,15 @@ async function loadTunnels({ silent = false } = {}) {
     if (!response.ok) {
       throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
     }
-    renderTunnels(payload.tunnels || []);
+    currentTunnels = payload.tunnels || [];
+    renderTunnels(currentTunnels);
+    renderOperationalOverview();
   } catch (error) {
+    currentTunnels = [];
     elements.tunnelCount.textContent = "Gateway unavailable";
     elements.tunnelsBody.replaceChildren();
     elements.tunnelsEmptyState.hidden = false;
+    renderOperationalOverview();
     if (!silent) {
       showNotice(error.message, "error");
     }
@@ -476,6 +494,7 @@ async function loadRequestLogs({ silent = false } = {}) {
     elements.requestLogCount.textContent = "Gateway URL required";
     currentRequestLogs = [];
     renderRequestLogs([]);
+    renderOperationalOverview();
     return;
   }
 
@@ -492,11 +511,13 @@ async function loadRequestLogs({ silent = false } = {}) {
     }
     currentRequestLogs = payload.request_logs || [];
     renderRequestLogs(currentRequestLogs);
+    renderOperationalOverview();
   } catch (error) {
     currentRequestLogs = [];
     elements.requestLogCount.textContent = "Request logs unavailable";
     elements.requestLogsBody.replaceChildren();
     elements.requestLogsEmptyState.hidden = false;
+    renderOperationalOverview();
     if (!silent) {
       showNotice(error.message, "error");
     }
@@ -543,6 +564,109 @@ function filterRequestLogs(logs) {
     }
     return true;
   });
+}
+
+function renderOperationalOverview() {
+  const totalRequests = currentRequestLogs.length;
+  const errorRequests = currentRequestLogs.filter((entry) => Number(entry.status || 0) >= 500).length;
+  const errorRate = totalRequests === 0 ? 0 : Math.round((errorRequests / totalRequests) * 100);
+  const p95Latency = percentile(
+    currentRequestLogs
+      .map((entry) => Number(entry.duration_ms || 0))
+      .filter((duration) => Number.isFinite(duration) && duration >= 0),
+    0.95,
+  );
+
+  elements.overviewActiveTunnels.textContent = String(currentTunnels.length);
+  elements.overviewRecentRequests.textContent = String(totalRequests);
+  elements.overviewErrorRate.textContent = `${errorRate}%`;
+  elements.overviewP95Latency.textContent = formatDuration(p95Latency);
+  elements.overviewCount.textContent = `${currentTunnels.length} active tunnel${currentTunnels.length === 1 ? "" : "s"}, ${totalRequests} recent request${totalRequests === 1 ? "" : "s"}`;
+
+  const outcomes = countBy(currentRequestLogs, (entry) => entry.outcome || "unknown");
+  const statusClasses = countStatusClasses(currentRequestLogs);
+  elements.overviewOutcomeCount.textContent = `${outcomes.length} outcome${outcomes.length === 1 ? "" : "s"}`;
+  elements.overviewStatusCount.textContent = `${statusClasses.length} status class${statusClasses.length === 1 ? "" : "es"}`;
+  renderBarChart(elements.overviewOutcomeChart, outcomes);
+  renderBarChart(elements.overviewStatusChart, statusClasses);
+}
+
+function countBy(items, keyFunc) {
+  const counts = new Map();
+  for (const item of items) {
+    const key = keyFunc(item);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 6);
+}
+
+function countStatusClasses(logs) {
+  return countBy(logs, (entry) => {
+    const status = Number(entry.status || 0);
+    if (status >= 200 && status < 300) {
+      return "2xx";
+    }
+    if (status >= 300 && status < 400) {
+      return "3xx";
+    }
+    if (status >= 400 && status < 500) {
+      return "4xx";
+    }
+    if (status >= 500 && status < 600) {
+      return "5xx";
+    }
+    return "other";
+  });
+}
+
+function renderBarChart(container, rows) {
+  container.replaceChildren();
+  if (rows.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "muted chart-empty";
+    empty.textContent = "No request logs loaded";
+    container.append(empty);
+    return;
+  }
+
+  const max = Math.max(...rows.map((row) => row.count), 1);
+  for (const row of rows) {
+    const item = document.createElement("div");
+    item.className = "bar-row";
+    const label = document.createElement("span");
+    label.className = "bar-label";
+    label.textContent = row.label;
+    const track = document.createElement("span");
+    track.className = "bar-track";
+    const fill = document.createElement("span");
+    fill.className = "bar-fill";
+    fill.style.width = `${Math.max((row.count / max) * 100, 4)}%`;
+    track.append(fill);
+    const count = document.createElement("span");
+    count.className = "bar-count mono";
+    count.textContent = String(row.count);
+    item.append(label, track, count);
+    container.append(item);
+  }
+}
+
+function percentile(values, percentileValue) {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * percentileValue) - 1));
+  return sorted[index];
+}
+
+function formatDuration(milliseconds) {
+  if (milliseconds >= 1000) {
+    return `${(milliseconds / 1000).toFixed(1)} s`;
+  }
+  return `${Math.round(milliseconds)} ms`;
 }
 
 function normalizedRequestLogLimit() {
