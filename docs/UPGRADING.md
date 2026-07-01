@@ -2,6 +2,25 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.10.x to 0.11.x
+
+Version 0.11.x adds deeper self-hosted operational visibility: dashboard tunnel details, request-log filters, audit events, diagnostics, gateway runtime, metrics drilldown, `porthook tunnels`, and operational JSON export.
+
+Before upgrading a self-hosted deployment:
+
+1. Back up the Postgres volume or database.
+2. Stop the old `porthook-control-plane` and `porthook-gateway` processes or Compose stack.
+3. Deploy the new control-plane, gateway, dashboard assets, CLI binaries, and images together.
+4. Start the control plane and check `GET /readyz` and `GET /api/v1/status`.
+5. Start the gateway and check `GET /readyz`, `GET /api/v1/tunnels`, `GET /api/v1/runtime`, and `GET /api/v1/request-logs`.
+6. Run `porthook doctor --gateway <gateway-url> --control-plane <control-plane-url>` and include `--admin-token-stdin` when checking audit event access.
+7. Run `porthook export --gateway <gateway-url> --control-plane <control-plane-url> --admin-token-stdin --output porthook-operational-export.json` and confirm the export has no unexpected `errors`.
+8. Open `/dashboard/`, log in, and confirm active tunnels, diagnostics, runtime, metrics, request logs, and operational export work against the configured gateway URL.
+
+The 0.11.x migration does not add Postgres schema changes.
+
+Rollback to 0.10.x should not require database changes, but a 0.10.x CLI and dashboard will not show tunnel details, request-log filters, diagnostics, gateway runtime, metrics drilldown, `porthook tunnels`, or operational export.
+
 ## Upgrade from 0.9.x to 0.10.x
 
 Version 0.10.x adds custom domain TXT verification, request ID correlation, control-plane audit events, CLI diagnostics, and container healthchecks for self-hosted deployments.
