@@ -695,6 +695,7 @@ func TestPublicRequestRoundTrip(t *testing.T) {
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	registerAgent(t, ctx, conn, "demo")
+	waitForSession(t, ctx, server, "demo")
 
 	agentErr := make(chan error, 1)
 	go func() {
@@ -1373,6 +1374,7 @@ func TestPublicRequestTimesOutWaitingForAgent(t *testing.T) {
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	registerAgent(t, ctx, conn, "demo")
+	waitForSession(t, ctx, server, "demo")
 
 	agentErr := make(chan error, 1)
 	go func() {
@@ -1428,6 +1430,7 @@ func TestPublicRequestTimeoutSendsStreamCancel(t *testing.T) {
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	registerAgent(t, ctx, conn, "demo")
+	waitForSession(t, ctx, server, "demo")
 
 	agentErr := make(chan error, 1)
 	go func() {
