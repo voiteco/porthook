@@ -29,8 +29,14 @@ func TestServiceCreatesAndListsDomain(t *testing.T) {
 	if created.Hostname != "preview.example.test" {
 		t.Fatalf("hostname = %q, want preview.example.test", created.Hostname)
 	}
-	if created.ReservedSubdomainID != "rs_123" || created.Status != StatusActive {
-		t.Fatalf("created domain = %+v, want rs_123 active", created)
+	if created.ReservedSubdomainID != "rs_123" || created.Status != StatusPendingVerification {
+		t.Fatalf("created domain = %+v, want rs_123 pending verification", created)
+	}
+	if created.VerificationToken == "" {
+		t.Fatal("verification token is empty")
+	}
+	if created.VerificationName != "_porthook.preview.example.test" {
+		t.Fatalf("verification name = %q, want _porthook.preview.example.test", created.VerificationName)
 	}
 	if !created.CreatedAt.Equal(now) || !created.UpdatedAt.Equal(now) {
 		t.Fatalf("created timestamps = %s/%s, want %s", created.CreatedAt, created.UpdatedAt, now)
@@ -45,6 +51,67 @@ func TestServiceCreatesAndListsDomain(t *testing.T) {
 	}
 	if listed.CustomDomains[0].Hostname != "preview.example.test" {
 		t.Fatalf("listed domain = %+v, want preview.example.test", listed.CustomDomains[0])
+	}
+	if listed.CustomDomains[0].VerificationToken != created.VerificationToken {
+		t.Fatalf("listed verification token = %q, want %q", listed.CustomDomains[0].VerificationToken, created.VerificationToken)
+	}
+}
+
+func TestServiceVerifiesDomainWithMatchingTXT(t *testing.T) {
+	ctx := context.Background()
+	resolver := fakeTXTResolver{values: map[string][]string{}}
+	service := NewServiceWithResolver(NewMemoryStore(), resolver)
+	createdAt := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	verifiedAt := time.Date(2026, 7, 1, 10, 5, 0, 0, time.UTC)
+	service.now = func() time.Time { return createdAt }
+
+	created, err := service.CreateDomain(ctx, CreateDomainRequest{
+		Hostname:            "demo.example.test",
+		ReservedSubdomainID: "rs_123",
+	})
+	if err != nil {
+		t.Fatalf("CreateDomain returned error: %v", err)
+	}
+	resolver.values[created.VerificationName] = []string{"porthook-domain-verification=" + created.VerificationToken}
+	service.now = func() time.Time { return verifiedAt }
+
+	verified, err := service.VerifyDomain(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("VerifyDomain returned error: %v", err)
+	}
+	if verified.Status != StatusActive {
+		t.Fatalf("verified status = %q, want active", verified.Status)
+	}
+	if verified.VerifiedAt == nil || !verified.VerifiedAt.Equal(verifiedAt) {
+		t.Fatalf("verified_at = %v, want %s", verified.VerifiedAt, verifiedAt)
+	}
+	if !verified.UpdatedAt.Equal(verifiedAt) {
+		t.Fatalf("updated_at = %s, want %s", verified.UpdatedAt, verifiedAt)
+	}
+}
+
+func TestServiceMarksVerificationFailedWithoutMatchingTXT(t *testing.T) {
+	ctx := context.Background()
+	resolver := fakeTXTResolver{values: map[string][]string{}}
+	service := NewServiceWithResolver(NewMemoryStore(), resolver)
+	created, err := service.CreateDomain(ctx, CreateDomainRequest{
+		Hostname:            "demo.example.test",
+		ReservedSubdomainID: "rs_123",
+	})
+	if err != nil {
+		t.Fatalf("CreateDomain returned error: %v", err)
+	}
+	resolver.values[created.VerificationName] = []string{"wrong-token"}
+
+	verified, err := service.VerifyDomain(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("VerifyDomain returned error: %v", err)
+	}
+	if verified.Status != StatusVerificationFailed {
+		t.Fatalf("verified status = %q, want verification_failed", verified.Status)
+	}
+	if verified.VerifiedAt != nil {
+		t.Fatalf("verified_at = %v, want nil", verified.VerifiedAt)
 	}
 }
 
@@ -149,4 +216,16 @@ func TestNormalizeHostnameGuidance(t *testing.T) {
 	if !strings.Contains(err.Error(), "lowercase ASCII") {
 		t.Fatalf("error = %q, want hostname validation guidance", err.Error())
 	}
+}
+
+type fakeTXTResolver struct {
+	values map[string][]string
+	err    error
+}
+
+func (r fakeTXTResolver) LookupTXT(_ context.Context, name string) ([]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.values[name], nil
 }

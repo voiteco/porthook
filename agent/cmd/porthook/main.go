@@ -27,7 +27,7 @@ const usageText = `usage: porthook login --server URL [--token TOKEN | --token-s
        porthook tokens <create|list|revoke> [options]
        porthook reserved <create|list|delete> [options]
        porthook access <create|list|update|delete> [options]
-       porthook domains <create|list|delete> [options]
+       porthook domains <create|list|verify|delete> [options]
        porthook version
        porthook help`
 

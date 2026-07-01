@@ -501,6 +501,8 @@ custom_domains
   hostname
   reserved_subdomain_id
   status
+  verification_token
+  verified_at
   created_at
   updated_at
 
@@ -538,6 +540,7 @@ POST /api/v1/access-policies/evaluate
 GET  /api/v1/custom-domains
 POST /api/v1/custom-domains
 GET  /api/v1/custom-domains/{id}
+POST /api/v1/custom-domains/{id}/verify
 DELETE /api/v1/custom-domains/{id}
 POST /api/v1/custom-domains/lookup
 GET  /healthz

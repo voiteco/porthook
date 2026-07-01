@@ -211,11 +211,24 @@ reservation_id="$(printf '%s' "${reservation_json}" | python3 -c 'import json,sy
 Optionally map a custom hostname to that reserved subdomain:
 
 ```sh
-printf '%s' '<admin-token>' | porthook domains create \
+domain_json="$(printf '%s' '<admin-token>' | porthook domains create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --hostname demo.example.test \
-  --reserved-subdomain-id "${reservation_id}"
+  --reserved-subdomain-id "${reservation_id}" \
+  --json)"
+domain_id="$(printf '%s' "${domain_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+verification_name="$(printf '%s' "${domain_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["verification_name"])')"
+verification_token="$(printf '%s' "${domain_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["verification_token"])')"
+```
+
+Create a TXT record named `${verification_name}` with value `porthook-domain-verification=${verification_token}`, then activate the mapping:
+
+```sh
+printf '%s' '<admin-token>' | porthook domains verify \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  "${domain_id}"
 ```
 
 Optionally protect that reserved subdomain before exposing it publicly:

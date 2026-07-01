@@ -144,18 +144,33 @@ The required flow is:
 1. Create an agent token.
 2. Reserve a subdomain for that token.
 3. Create a custom domain mapping for the reservation.
-4. Point the custom hostname DNS record at the gateway edge.
-5. Ensure the reverse proxy presents a certificate for the custom hostname and forwards the original `Host` header.
-6. Start the agent with the reserved subdomain.
+4. Add the returned `_porthook.<hostname>` TXT verification record.
+5. Verify the mapping through the control plane.
+6. Point the custom hostname DNS record at the gateway edge.
+7. Ensure the reverse proxy presents a certificate for the custom hostname and forwards the original `Host` header.
+8. Start the agent with the reserved subdomain.
 
 Create the mapping with the CLI:
 
 ```sh
-printf '%s' '<admin-token>' | porthook domains create \
+domain_json="$(printf '%s' '<admin-token>' | porthook domains create \
   --control-plane https://control.example.com \
   --admin-token-stdin \
   --hostname preview.customer.com \
-  --reserved-subdomain-id rs_...
+  --reserved-subdomain-id rs_... \
+  --json)"
+domain_id="$(printf '%s' "${domain_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+verification_name="$(printf '%s' "${domain_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["verification_name"])')"
+verification_token="$(printf '%s' "${domain_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["verification_token"])')"
+```
+
+Create a TXT record named `${verification_name}` with value `porthook-domain-verification=${verification_token}`, then check verification:
+
+```sh
+printf '%s' '<admin-token>' | porthook domains verify \
+  --control-plane https://control.example.com \
+  --admin-token-stdin \
+  "${domain_id}"
 ```
 
 List and delete mappings:
@@ -171,12 +186,12 @@ printf '%s' '<admin-token>' | porthook domains delete \
   preview.customer.com
 ```
 
-The dashboard exposes the same custom domain create/list/delete operations from `/dashboard/`.
+The dashboard exposes the same custom domain create/list/verify/delete operations from `/dashboard/`.
 
 Operational behavior:
 
 - Hostnames are normalized to lowercase and must be fully qualified hostnames. Wildcards, ports, and single-label names are rejected.
-- Custom domains are currently active immediately after creation. DNS and TLS verification are operator responsibilities.
+- Custom domains are created as `pending_verification`. The gateway only routes mappings that have been activated by TXT verification.
 - The agent still registers the reserved subdomain, for example `porthook http 3000 --subdomain demo`.
 - Access policies are attached to the reserved subdomain and apply to both `demo.tunnels.example.com` and any custom domains mapped to that reservation.
 - Gateway request logs include the original host and mark custom-domain routes.
@@ -208,7 +223,7 @@ curl -i https://demo.tunnels.example.com/
 
 For control-plane-backed deployments, reserve `demo` for that token before starting the requested-subdomain tunnel.
 
-Verify a custom domain after DNS and TLS are in place:
+Verify a custom domain after TXT verification, DNS routing, and TLS are in place:
 
 ```sh
 curl -i https://preview.customer.com/

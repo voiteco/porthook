@@ -15,8 +15,8 @@ func TestNewPostgresStoreRejectsNilDB(t *testing.T) {
 
 func TestPostgresMigrationsAreVersioned(t *testing.T) {
 	migrations := PostgresMigrations()
-	if len(migrations) != 1 {
-		t.Fatalf("migrations = %d, want 1", len(migrations))
+	if len(migrations) != 2 {
+		t.Fatalf("migrations = %d, want 2", len(migrations))
 	}
 	if migrations[0].Version != 6 {
 		t.Fatalf("migration version = %d, want 6", migrations[0].Version)
@@ -26,6 +26,15 @@ func TestPostgresMigrationsAreVersioned(t *testing.T) {
 	}
 	if !strings.Contains(migrations[0].SQL, "custom_domains") {
 		t.Fatalf("migration SQL = %q, want custom_domains", migrations[0].SQL)
+	}
+	if migrations[1].Version != 7 {
+		t.Fatalf("migration version = %d, want 7", migrations[1].Version)
+	}
+	if migrations[1].Name != "add_custom_domain_verification" {
+		t.Fatalf("migration name = %q, want add_custom_domain_verification", migrations[1].Name)
+	}
+	if !strings.Contains(migrations[1].SQL, "verification_token") {
+		t.Fatalf("migration SQL = %q, want verification_token", migrations[1].SQL)
 	}
 }
 

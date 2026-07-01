@@ -415,6 +415,16 @@ tr.revoked {
   justify-content: flex-end;
 }
 
+.verification-cell {
+  display: grid;
+  gap: 4px;
+  max-width: 360px;
+}
+
+.verification-cell code {
+  overflow-wrap: anywhere;
+}
+
 .badge,
 .status-pill,
 .version-pill {

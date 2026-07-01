@@ -709,8 +709,8 @@ func (s *Server) handleCustomDomains(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCustomDomainByID(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodDelete {
-		methodNotAllowed(w, "GET, DELETE")
+	if r.Method != http.MethodGet && r.Method != http.MethodDelete && r.Method != http.MethodPost {
+		methodNotAllowed(w, "GET, DELETE, POST")
 		return
 	}
 	if !s.authorized(r) {
@@ -724,6 +724,38 @@ func (s *Server) handleCustomDomainByID(w http.ResponseWriter, r *http.Request) 
 	}
 
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/custom-domains/")
+	if strings.HasSuffix(id, "/verify") {
+		id = strings.TrimSuffix(id, "/verify")
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, "POST")
+			return
+		}
+		if id == "" || id == "lookup" || strings.Contains(id, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		verified, err := s.customDomains.VerifyDomain(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, customdomains.ErrDomainNotFound) {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.logAudit(r, slog.LevelInfo, "control-plane custom domain verification checked", "control_plane.custom_domain_verification_checked",
+			slog.String("custom_domain_id", verified.ID),
+			slog.String("hostname", verified.Hostname),
+			slog.String("status", string(verified.Status)),
+		)
+		writeJSON(w, http.StatusOK, verified)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		methodNotAllowed(w, "GET, DELETE")
+		return
+	}
 	if id == "" || id == "lookup" || strings.Contains(id, "/") {
 		http.NotFound(w, r)
 		return
@@ -818,6 +850,20 @@ func (s *Server) lookupCustomDomain(ctx context.Context, hostname string) (looku
 			return lookupCustomDomainResponse{}, normalizeErr
 		}
 		return lookupCustomDomainResponse{Found: false, Hostname: normalized, Reason: "not_found"}, nil
+	}
+	if domain.Status != customdomains.StatusActive {
+		reason := "not_verified"
+		if domain.Status == customdomains.StatusVerificationFailed {
+			reason = "verification_failed"
+		}
+		return lookupCustomDomainResponse{
+			Found:               false,
+			Reason:              reason,
+			Hostname:            domain.Hostname,
+			CustomDomainID:      domain.ID,
+			ReservedSubdomainID: domain.ReservedSubdomainID,
+			Status:              domain.Status,
+		}, nil
 	}
 	reservation, ok, err := s.reservations.GetReservation(ctx, domain.ReservedSubdomainID)
 	if err != nil {
