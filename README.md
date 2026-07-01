@@ -148,6 +148,7 @@ Completed foundations:
 12. Per-tunnel custom domain mappings for self-hosted deployments.
 13. OpenTelemetry trace export for gateway and control-plane HTTP paths.
 14. Dashboard operational overview charts.
+15. Operational JSON export from the CLI and dashboard.
 
 Next major public work:
 
@@ -182,7 +183,7 @@ Open the self-hosted dashboard:
 http://localhost:8082/dashboard/
 ```
 
-Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, manage custom domains and access policies, show active gateway tunnels, runtime, and metrics, run diagnostics, inspect audit events, and inspect recent gateway request logs.
+Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, manage custom domains and access policies, show active gateway tunnels, runtime, and metrics, run diagnostics, inspect audit events, inspect recent gateway request logs, and download an operational JSON export.
 
 Check the local gateway and control-plane operational endpoints:
 
@@ -191,6 +192,16 @@ printf '%s' '<admin-token>' | porthook doctor \
   --gateway http://localhost:8080 \
   --control-plane http://localhost:8082 \
   --admin-token-stdin
+```
+
+Capture a best-effort operational JSON export:
+
+```sh
+printf '%s' '<admin-token>' | porthook export \
+  --gateway http://localhost:8080 \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --output porthook-operational-export.json
 ```
 
 Inspect active tunnels from the CLI:

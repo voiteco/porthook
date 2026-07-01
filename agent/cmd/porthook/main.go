@@ -29,6 +29,7 @@ const usageText = `usage: porthook login --server URL [--token TOKEN | --token-s
        porthook access <create|list|update|delete> [options]
        porthook domains <create|list|verify|delete> [options]
        porthook tunnels <list|show> [options]
+       porthook export [options]
        porthook doctor [options]
        porthook version
        porthook help`
@@ -94,6 +95,8 @@ func runWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Write
 		return runDomainsCommand(args[1:], stdin, stdout, stderr)
 	case "tunnels":
 		return runTunnelsCommand(args[1:], stdin, stdout, stderr)
+	case "export":
+		return runOperationalExportCommand(args[1:], stdin, stdout, stderr)
 	case "doctor":
 		if wantsHelp(args[1:]) {
 			printDoctorHelp(stdout)

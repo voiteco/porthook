@@ -597,6 +597,7 @@ porthook doctor --gateway <url>
 porthook doctor --gateway <url> --control-plane <url>
 porthook tunnels list --gateway <url>
 porthook tunnels show --gateway <url> <tunnel-id>
+porthook export --gateway <url> --control-plane <url>
 porthook version
 ```
 
