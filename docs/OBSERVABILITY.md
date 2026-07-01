@@ -20,6 +20,7 @@ The OpenTelemetry MVP records:
 
 Gateway public request spans include Porthook attributes for routing and result context:
 
+- `porthook.request_id`
 - `porthook.subdomain`
 - `porthook.custom_domain`
 - `porthook.tunnel_id`
@@ -29,6 +30,8 @@ Gateway public request spans include Porthook attributes for routing and result 
 - `porthook.outcome`
 
 Trace context is propagated with W3C tracecontext and baggage headers.
+
+HTTP server spans also include `porthook.request_id` when a request ID is available. Porthook preserves inbound `X-Request-ID` or `X-Correlation-ID` and generates `X-Request-ID` when neither header is present.
 
 ## Configuration
 

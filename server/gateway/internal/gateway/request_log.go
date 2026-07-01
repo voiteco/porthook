@@ -16,6 +16,7 @@ type requestLogEntry struct {
 	Path          string    `json:"path"`
 	QueryPresent  bool      `json:"query_present"`
 	RemoteIP      string    `json:"remote_ip"`
+	RequestID     string    `json:"request_id,omitempty"`
 	Subdomain     string    `json:"subdomain,omitempty"`
 	CustomDomain  string    `json:"custom_domain,omitempty"`
 	TunnelID      string    `json:"tunnel_id,omitempty"`
@@ -96,6 +97,7 @@ func requestLogEntryFromPublicRequest(r *http.Request, entry publicRequestLog) r
 		Path:          r.URL.Path,
 		QueryPresent:  r.URL.RawQuery != "",
 		RemoteIP:      remoteIP(r.RemoteAddr),
+		RequestID:     requestID(r),
 		Subdomain:     entry.Subdomain,
 		CustomDomain:  entry.CustomDomain,
 		TunnelID:      entry.TunnelID,
