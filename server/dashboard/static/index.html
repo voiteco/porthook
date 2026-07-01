@@ -347,6 +347,27 @@
                 <label for="request-log-subdomain">Subdomain</label>
                 <input id="request-log-subdomain" name="request-log-subdomain" type="text" maxlength="63">
               </div>
+              <div class="field compact">
+                <label for="request-log-method">Method</label>
+                <select id="request-log-method" name="request-log-method">
+                  <option value="">Any</option>
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="DELETE">DELETE</option>
+                  <option value="HEAD">HEAD</option>
+                  <option value="OPTIONS">OPTIONS</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="request-log-host">Host</label>
+                <input id="request-log-host" name="request-log-host" type="text">
+              </div>
+              <div class="field">
+                <label for="request-log-path">Path</label>
+                <input id="request-log-path" name="request-log-path" type="text">
+              </div>
               <div class="field">
                 <label for="request-log-status">Status</label>
                 <input id="request-log-status" name="request-log-status" type="number" min="100" max="599">
@@ -358,6 +379,18 @@
               <div class="field">
                 <label for="request-log-request-id">Request ID</label>
                 <input id="request-log-request-id" name="request-log-request-id" type="text">
+              </div>
+              <div class="field">
+                <label for="request-log-tunnel-id">Tunnel ID</label>
+                <input id="request-log-tunnel-id" name="request-log-tunnel-id" type="text">
+              </div>
+              <div class="field">
+                <label for="request-log-since">Since</label>
+                <input id="request-log-since" name="request-log-since" type="datetime-local">
+              </div>
+              <div class="field">
+                <label for="request-log-until">Until</label>
+                <input id="request-log-until" name="request-log-until" type="datetime-local">
               </div>
               <div class="field compact">
                 <label for="request-log-limit">Limit</label>
@@ -372,6 +405,7 @@
                   <tr>
                     <th>Time</th>
                     <th>Subdomain</th>
+                    <th>Host</th>
                     <th>Method</th>
                     <th>Path</th>
                     <th>Status</th>

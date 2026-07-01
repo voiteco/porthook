@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -1227,6 +1228,107 @@ func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
 	}
 	if entry.Status != http.StatusNotFound || entry.Outcome != "no_active_session" {
 		t.Fatalf("entry = %+v, want 404 no_active_session", entry)
+	}
+}
+
+func TestRequestLogsEndpointFiltersPublicRequests(t *testing.T) {
+	cfg := testConfig()
+	cfg.RequestLogLimit = 5
+	server := NewServer(cfg, slog.Default())
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	server.requestLogs.add(requestLogEntry{
+		Time:      now.Add(-time.Minute),
+		Method:    http.MethodGet,
+		Host:      "demo.localhost",
+		Path:      "/health",
+		RequestID: "req_old",
+		Subdomain: "demo",
+		TunnelID:  "tun_demo",
+		Status:    http.StatusOK,
+		Outcome:   "completed",
+	})
+	server.requestLogs.add(requestLogEntry{
+		Time:         now.Add(-30 * time.Second),
+		Method:       http.MethodPost,
+		Host:         "preview.example.test",
+		Path:         "/hooks/stripe",
+		RequestID:    "req_match",
+		Subdomain:    "api",
+		CustomDomain: "preview.example.test",
+		TunnelID:     "tun_match",
+		Status:       http.StatusBadGateway,
+		Outcome:      "tunnel_error",
+	})
+	server.requestLogs.add(requestLogEntry{
+		Time:      now,
+		Method:    http.MethodPost,
+		Host:      "other.example.test",
+		Path:      "/hooks/stripe",
+		RequestID: "req_newer",
+		Subdomain: "api",
+		TunnelID:  "tun_other",
+		Status:    http.StatusOK,
+		Outcome:   "completed",
+	})
+
+	query := url.Values{}
+	query.Set("limit", "1")
+	query.Set("subdomain", "api")
+	query.Set("method", "post")
+	query.Set("host", "preview")
+	query.Set("path", "hooks")
+	query.Set("status", "502")
+	query.Set("outcome", "tunnel")
+	query.Set("request_id", "match")
+	query.Set("tunnel_id", "tun_")
+	query.Set("since", now.Add(-45*time.Second).Format(time.RFC3339))
+	resp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?" + query.Encode())
+	if err != nil {
+		t.Fatalf("GET request logs returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var payload requestLogsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode request logs returned error: %v", err)
+	}
+	if len(payload.RequestLogs) != 1 {
+		t.Fatalf("request_logs = %d, want 1", len(payload.RequestLogs))
+	}
+	if payload.RequestLogs[0].RequestID != "req_match" {
+		t.Fatalf("request log = %+v, want req_match after filtering", payload.RequestLogs[0])
+	}
+}
+
+func TestRequestLogsEndpointRejectsInvalidFilters(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{name: "status", query: "status=abc"},
+		{name: "since", query: "since=not-a-time"},
+		{name: "time range", query: "since=2026-07-01T12%3A00%3A00Z&until=2026-07-01T11%3A00%3A00Z"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?" + tc.query)
+			if err != nil {
+				t.Fatalf("GET request logs returned error: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+		})
 	}
 }
 

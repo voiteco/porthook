@@ -67,9 +67,15 @@ const elements = {
   overviewStatusChart: document.querySelector("#overview-status-chart"),
   requestLogForm: document.querySelector("#request-log-form"),
   requestLogSubdomain: document.querySelector("#request-log-subdomain"),
+  requestLogMethod: document.querySelector("#request-log-method"),
+  requestLogHost: document.querySelector("#request-log-host"),
+  requestLogPath: document.querySelector("#request-log-path"),
   requestLogStatus: document.querySelector("#request-log-status"),
   requestLogOutcome: document.querySelector("#request-log-outcome"),
   requestLogRequestID: document.querySelector("#request-log-request-id"),
+  requestLogTunnelID: document.querySelector("#request-log-tunnel-id"),
+  requestLogSince: document.querySelector("#request-log-since"),
+  requestLogUntil: document.querySelector("#request-log-until"),
   requestLogLimit: document.querySelector("#request-log-limit"),
   requestLogsBody: document.querySelector("#request-logs-body"),
   requestLogsEmptyState: document.querySelector("#request-logs-empty-state"),
@@ -618,13 +624,22 @@ async function loadRequestLogs({ silent = false } = {}) {
     return;
   }
 
-  const limit = normalizedRequestLogLimit();
+  let query;
+  try {
+    query = requestLogQuery();
+  } catch (error) {
+    elements.requestLogCount.textContent = "Invalid request log filter";
+    if (!silent) {
+      showNotice(error.message, "error");
+    }
+    return;
+  }
   elements.requestLogCount.textContent = "Loading request logs";
   elements.requestLogsBody.replaceChildren();
   elements.requestLogsEmptyState.hidden = true;
 
   try {
-    const response = await fetch(`${baseURL}/api/v1/request-logs?limit=${encodeURIComponent(limit)}`, { cache: "no-store" });
+    const response = await fetch(`${baseURL}/api/v1/request-logs?${query}`, { cache: "no-store" });
     const payload = await readPayload(response);
     if (!response.ok) {
       throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
@@ -657,6 +672,7 @@ function renderRequestLogRow(entry) {
   row.append(
     cell(formatTime(entry.time)),
     cell(entry.subdomain || "-"),
+    cell(entry.host || "-"),
     cell(entry.method || "-"),
     cell(entry.path || "-"),
     cell(entry.status || "-"),
@@ -671,11 +687,26 @@ function renderRequestLogRow(entry) {
 
 function filterRequestLogs(logs) {
   const subdomain = elements.requestLogSubdomain.value.trim().toLowerCase();
+  const method = elements.requestLogMethod.value.trim().toUpperCase();
+  const host = elements.requestLogHost.value.trim().toLowerCase();
+  const path = elements.requestLogPath.value.trim().toLowerCase();
   const status = elements.requestLogStatus.value.trim();
   const outcome = elements.requestLogOutcome.value.trim().toLowerCase();
   const requestID = elements.requestLogRequestID.value.trim().toLowerCase();
+  const tunnelID = elements.requestLogTunnelID.value.trim().toLowerCase();
+  const since = requestLogFilterTime(elements.requestLogSince.value);
+  const until = requestLogFilterTime(elements.requestLogUntil.value);
   return logs.filter((entry) => {
     if (subdomain && String(entry.subdomain || "").toLowerCase() !== subdomain) {
+      return false;
+    }
+    if (method && String(entry.method || "").toUpperCase() !== method) {
+      return false;
+    }
+    if (host && !String(entry.host || "").toLowerCase().includes(host)) {
+      return false;
+    }
+    if (path && !String(entry.path || "").toLowerCase().includes(path)) {
       return false;
     }
     if (status && String(entry.status || "") !== status) {
@@ -687,8 +718,30 @@ function filterRequestLogs(logs) {
     if (requestID && !String(entry.request_id || "").toLowerCase().includes(requestID)) {
       return false;
     }
+    if (tunnelID && !String(entry.tunnel_id || "").toLowerCase().includes(tunnelID)) {
+      return false;
+    }
+    const entryTime = Date.parse(entry.time || "");
+    if (since && (!Number.isFinite(entryTime) || entryTime < since.getTime())) {
+      return false;
+    }
+    if (until && (!Number.isFinite(entryTime) || entryTime > until.getTime())) {
+      return false;
+    }
     return true;
   });
+}
+
+function requestLogFilterTime(value) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date;
 }
 
 function renderOperationalOverview() {
@@ -800,6 +853,41 @@ function normalizedRequestLogLimit() {
     return 100;
   }
   return Math.min(value, 1000);
+}
+
+function requestLogQuery() {
+  const query = new URLSearchParams();
+  query.set("limit", String(normalizedRequestLogLimit()));
+  appendRequestLogFilter(query, "subdomain", elements.requestLogSubdomain.value);
+  appendRequestLogFilter(query, "method", elements.requestLogMethod.value);
+  appendRequestLogFilter(query, "host", elements.requestLogHost.value);
+  appendRequestLogFilter(query, "path", elements.requestLogPath.value);
+  appendRequestLogFilter(query, "status", elements.requestLogStatus.value);
+  appendRequestLogFilter(query, "outcome", elements.requestLogOutcome.value);
+  appendRequestLogFilter(query, "request_id", elements.requestLogRequestID.value);
+  appendRequestLogFilter(query, "tunnel_id", elements.requestLogTunnelID.value);
+  appendRequestLogTimeFilter(query, "since", elements.requestLogSince.value);
+  appendRequestLogTimeFilter(query, "until", elements.requestLogUntil.value);
+  return query.toString();
+}
+
+function appendRequestLogFilter(query, name, value) {
+  const trimmed = value.trim();
+  if (trimmed) {
+    query.set(name, trimmed);
+  }
+}
+
+function appendRequestLogTimeFilter(query, name, value) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return;
+  }
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`${name} filter is not a valid date.`);
+  }
+  query.set(name, date.toISOString());
 }
 
 function cell(text) {
@@ -1218,7 +1306,18 @@ elements.requestLogForm.addEventListener("submit", async (event) => {
   await loadRequestLogs();
 });
 elements.tunnelDetailClose.addEventListener("click", clearTunnelDetail);
-for (const input of [elements.requestLogSubdomain, elements.requestLogStatus, elements.requestLogOutcome, elements.requestLogRequestID]) {
+for (const input of [
+  elements.requestLogSubdomain,
+  elements.requestLogMethod,
+  elements.requestLogHost,
+  elements.requestLogPath,
+  elements.requestLogStatus,
+  elements.requestLogOutcome,
+  elements.requestLogRequestID,
+  elements.requestLogTunnelID,
+  elements.requestLogSince,
+  elements.requestLogUntil,
+]) {
   input.addEventListener("input", () => renderRequestLogs(currentRequestLogs));
 }
 

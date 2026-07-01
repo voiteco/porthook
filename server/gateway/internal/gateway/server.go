@@ -326,7 +326,12 @@ func (s *Server) handleRequestLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limit := requestLogLimit(r, s.cfg.RequestLogLimit)
-	writeJSON(w, http.StatusOK, requestLogsResponse{RequestLogs: s.requestLogs.list(limit)})
+	filter, err := requestLogFilterFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestLogsResponse{RequestLogs: s.requestLogs.listFiltered(limit, filter)})
 }
 
 func (s *Server) tunnelDetail(session *agentSession) tunnelDetail {

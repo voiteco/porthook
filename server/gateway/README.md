@@ -80,7 +80,7 @@ Use `porthook doctor --gateway http://localhost:8080` to check gateway health, r
 
 The container image includes `porthook-gateway healthcheck`, which calls `/readyz` through the local public listener. Set `PORTHOOK_HEALTHCHECK_URL` only when the listener cannot be reached through the derived localhost URL.
 
-`GET /api/v1/request-logs` returns recent public request summaries from the in-memory ring buffer. The response is newest-first and supports `?limit=N`. Entries include method, host, path, query presence, remote IP, request ID, subdomain, tunnel ID, stream ID, status, outcome, byte counts, duration, and an optional error string. Raw query strings and authorization values are not returned.
+`GET /api/v1/request-logs` returns recent public request summaries from the in-memory ring buffer. The response is newest-first and supports `?limit=N`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`. Time filters use RFC3339 timestamps, and `limit` is applied after filtering. Entries include method, host, path, query presence, remote IP, request ID, subdomain, tunnel ID, stream ID, status, outcome, byte counts, duration, and an optional error string. Raw query strings and authorization values are not returned.
 
 Gateway logs are structured text logs written to stdout. Operational logs include an `event` field such as `gateway.public_request`, `gateway.tunnel_registered`, `gateway.agent_auth_failed`, and `gateway.agent_keepalive_failed`.
 
