@@ -9,7 +9,7 @@ The release workflow is intentionally conservative for the pre-1.0 stage: it run
 Use semantic version tags:
 
 ```sh
-v0.10.0
+v0.11.0
 ```
 
 The tag name is injected into the CLI, gateway, and control-plane binaries. After download, users can verify the embedded version:
@@ -28,13 +28,13 @@ Before pushing a tag, run:
 make fmt-check
 make test
 make vet
-make smoke-local VERSION=v0.10.0
-make smoke-control-plane VERSION=v0.10.0
-make release-build VERSION=v0.10.0
+make smoke-local VERSION=v0.11.0
+make smoke-control-plane VERSION=v0.11.0
+make release-build VERSION=v0.11.0
 make release-checksums
 make compose-config
 make production-hardening-check
-make docker-build VERSION=v0.10.0
+make docker-build VERSION=v0.11.0
 ```
 
 On Linux `amd64`, verify the release binaries directly:
@@ -58,14 +58,14 @@ On macOS, run the binary that matches the local architecture:
 Create and push an annotated tag:
 
 ```sh
-git tag -a v0.10.0 -m "v0.10.0"
-git push origin v0.10.0
+git tag -a v0.11.0 -m "v0.11.0"
+git push origin v0.11.0
 ```
 
 Before tagging, move the relevant `CHANGELOG.md` entries from `Unreleased` into a dated version section such as:
 
 ```md
-## [0.10.0] - 2026-07-01
+## [0.11.0] - 2026-07-01
 ```
 
 GitHub Actions will create a release and upload:

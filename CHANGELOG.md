@@ -4,6 +4,24 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-01
+
+### Added
+- Added a dashboard tunnel detail view backed by `GET /api/v1/tunnels/{id}` with public tunnel metadata, stream counts, uptime, recent request summaries, and custom-domain associations without local target URLs.
+- Added gateway request-log filters for subdomain, method, host, path, status, outcome, request ID, tunnel ID, and time windows, with matching dashboard filter controls.
+- Added a dashboard audit events view with filtering for control-plane event, level, request ID, remote IP, and event fields.
+- Added browser-run dashboard diagnostics for control-plane readiness and configured gateway tunnel, runtime, metrics, and request-log APIs.
+- Added `GET /api/v1/runtime` on the gateway and a dashboard runtime summary for safe uptime, limits, timeouts, stream, request-log, and counter metadata.
+- Added a dashboard Prometheus metrics drilldown for gateway metric names, types, values, and help text.
+- Added `porthook tunnels list` and `porthook tunnels show` for inspecting active gateway tunnels from the CLI without an admin token.
+- Added best-effort operational JSON export from `porthook export` and the dashboard, covering safe control-plane summaries, audit events, active tunnels, gateway runtime, metrics, request logs, and partial endpoint errors without plaintext tokens, policy secrets, or local target URLs.
+
+### Changed
+- Expanded self-hosted dashboard, operations, upgrade, release, and CLI documentation for the deeper operational visibility workflows.
+
+### Fixed
+- Stabilized gateway active-session tests by waiting for registered sessions before issuing public tunnel requests.
+
 ## [0.10.0] - 2026-07-01
 
 ### Added

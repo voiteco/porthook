@@ -128,7 +128,7 @@ The API layer for users, tokens, tunnel sessions, reserved names, custom domain 
 
 ### Dashboard
 
-A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login, token administration, reserved subdomain administration, custom domain management, access policy management, operational charts, active gateway tunnel visibility, and gateway request logs.
+A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login, token administration, reserved subdomain administration, custom domain management, access policy management, operational charts, active gateway tunnel visibility, diagnostics, audit events, runtime and metrics views, gateway request logs, and operational JSON export.
 
 ## Development Roadmap
 
