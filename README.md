@@ -127,7 +127,7 @@ The API layer for users, tokens, tunnel sessions, reserved names, and limits. Th
 
 ### Dashboard
 
-A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login, token administration, reserved subdomain administration, and active gateway tunnel visibility.
+A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login, token administration, reserved subdomain administration, access policy management, active gateway tunnel visibility, and gateway request logs.
 
 ## Development Roadmap
 
@@ -142,12 +142,14 @@ Completed foundations:
 7. Self-hosted control-plane token API and CLI token helpers.
 8. Self-hosted dashboard for token administration.
 9. Reserved subdomains for requested tunnel names.
+10. Per-tunnel public access policies for reserved subdomains.
+11. Gateway request log visibility.
 
 Next major public work:
 
-1. More complete operational guides.
-2. Per-tunnel custom domain support.
-3. Access control and audit-friendly operational logs.
+1. Per-tunnel custom domain support.
+2. OpenTelemetry traces.
+3. Dashboard charts and deeper operational views.
 
 ## Self-Hosted Quick Start
 
@@ -178,7 +180,7 @@ Open the self-hosted dashboard:
 http://localhost:8082/dashboard/
 ```
 
-Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, and show active gateway tunnels.
+Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, manage access policies, show active gateway tunnels, and inspect recent gateway request logs.
 
 Create an agent token:
 
@@ -195,11 +197,25 @@ agent_token="$(printf '%s' "${created_token_json}" | python3 -c 'import json,sys
 Reserve the requested subdomain for that token:
 
 ```sh
-printf '%s' '<admin-token>' | porthook reserved create \
+reservation_json="$(printf '%s' '<admin-token>' | porthook reserved create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --name demo \
-  --token-id "${agent_token_id}"
+  --token-id "${agent_token_id}" \
+  --json)"
+reservation_id="$(printf '%s' "${reservation_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+```
+
+Optionally protect that reserved subdomain before exposing it publicly:
+
+```sh
+printf '%s' '<admin-token>' | porthook access create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --reserved-subdomain-id "${reservation_id}" \
+  --mode basic_auth \
+  --basic-username demo \
+  --basic-password '<gateway-password>'
 ```
 
 Start a local service and tunnel it:
@@ -210,10 +226,16 @@ printf '%s' "${agent_token}" | porthook login --server http://localhost:8081 --t
 porthook http 3000 --subdomain demo
 ```
 
-Then request the public gateway:
+Then request the public gateway. Without an access policy, the plain request should reach the local service:
 
 ```sh
 curl -i -H 'Host: demo.localhost' http://localhost:8080/
+```
+
+With the optional basic-auth access policy above, use:
+
+```sh
+curl -i -u demo:'<gateway-password>' -H 'Host: demo.localhost' http://localhost:8080/
 ```
 
 The gateway public listener and control plane both expose `GET /healthz`, `GET /readyz`, and `GET /metrics` for local operations checks. See [deploy/compose/README.md](./deploy/compose/README.md) for the full Compose guide.

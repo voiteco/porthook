@@ -11,6 +11,7 @@ Responsibilities:
 - Maintain agent tunnel connections.
 - Forward requests and responses.
 - Enforce limits.
+- Enforce access policies for reserved subdomains when connected to a control plane.
 - Expose health and metrics endpoints.
 
 Default local listeners:
@@ -35,7 +36,7 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` | Static agent authentication token. |
 | `PORTHOOK_CONTROL_PLANE_URL` | empty | Optional control-plane base URL for token validation. Static token auth is used when empty. |
 | `PORTHOOK_CONTROL_PLANE_TOKEN` | empty | Bearer token used when calling control-plane validation and reserved-subdomain authorization endpoints. Required when `PORTHOOK_CONTROL_PLANE_URL` is set. |
-| `PORTHOOK_CONTROL_PLANE_TIMEOUT` | `5s` | Timeout for control-plane token validation and reserved-subdomain authorization requests. |
+| `PORTHOOK_CONTROL_PLANE_TIMEOUT` | `5s` | Timeout for control-plane token validation, reserved-subdomain authorization, and access policy evaluation requests. |
 | `PORTHOOK_MAX_BODY_BYTES` | `1048576` | Maximum public request body forwarded through a tunnel. |
 | `PORTHOOK_MAX_CONCURRENT_STREAMS` | `64` | Maximum concurrent public requests per tunnel. |
 | `PORTHOOK_RATE_LIMIT_RPS` | `60` | Maximum public requests per second per tunnel. |
@@ -51,6 +52,7 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_WS_PING_INTERVAL` | `15s` | WebSocket keepalive ping interval. |
 | `PORTHOOK_WS_PONG_TIMEOUT` | `5s` | WebSocket keepalive pong timeout. |
 | `PORTHOOK_SHUTDOWN_TIMEOUT` | `5s` | Graceful shutdown timeout. |
+| `PORTHOOK_REQUEST_LOG_LIMIT` | `500` | Number of recent public request log entries kept in memory. Set `0` to disable the in-memory request log endpoint. |
 
 Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
 
@@ -62,11 +64,16 @@ The public listener exposes:
 - `GET /readyz`
 - `GET /metrics`
 - `GET /api/v1/tunnels`
+- `GET /api/v1/request-logs`
 
-Metrics use Prometheus text format and include active tunnels, process uptime, public request totals, selected public request outcome counters, token validation attempts, authentication failures, and tunnel registration successes/failures. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs.
+Metrics use Prometheus text format and include active tunnels, process uptime, public request totals, selected public request outcome counters, access policy denials/errors, token validation attempts, authentication failures, and tunnel registration successes/failures. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs.
+
+`GET /api/v1/request-logs` returns recent public request summaries from the in-memory ring buffer. The response is newest-first and supports `?limit=N`. Entries include method, host, path, query presence, remote IP, subdomain, tunnel ID, stream ID, status, outcome, byte counts, duration, and an optional error string. Raw query strings and authorization values are not returned.
 
 Gateway logs are structured text logs written to stdout. Operational logs include an `event` field such as `gateway.public_request`, `gateway.tunnel_registered`, `gateway.agent_auth_failed`, and `gateway.agent_keepalive_failed`.
 
 Public request logs include method, host, path, whether a query string was present, route outcome, status, tunnel ID, stream ID, byte counts, duration, remote IP, and optional `request_id` from `X-Request-ID` or `X-Correlation-ID`. Raw query strings and token values are not logged.
 
 When `PORTHOOK_CONTROL_PLANE_URL` is configured, requested subdomains require an existing control-plane reservation owned by the validated token. Agents that omit `--subdomain` still receive random subdomains without a reservation.
+
+Reserved subdomains may also have public access policies managed by the control plane. The gateway evaluates those policies before forwarding public requests to the agent. Supported policy modes are `public`, `basic_auth`, `bearer_token`, and `ip_allowlist`. Basic and bearer credentials used for gateway access are consumed at the gateway and are not forwarded to the local service.

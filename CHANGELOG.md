@@ -4,6 +4,16 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+### Added
+- Added reserved-subdomain access policy storage, Postgres migration, admin APIs, and gateway evaluation API.
+- Added gateway enforcement for `public`, `basic_auth`, `bearer_token`, and `ip_allowlist` access policies before public requests reach agents.
+- Added `porthook access create`, `porthook access list`, `porthook access update`, and `porthook access delete` for self-hosted access policy administration.
+- Added dashboard access policy management and gateway request log visibility.
+- Added `GET /api/v1/request-logs` on the gateway with an in-memory recent request log ring buffer.
+
+### Changed
+- Extended gateway, control-plane, dashboard, operations, upgrade, and specification documentation for access policies and request logs.
+
 ## [0.7.0] - 2026-06-30
 
 ### Added

@@ -2,15 +2,15 @@
 
 License: AGPL-3.0-only
 
-The control plane owns users, tokens, tunnel metadata, reserved names, and limits.
+The control plane owns users, tokens, tunnel metadata, reserved names, access policies, and limits.
 
-Current scope is token management and reserved subdomain ownership for self-hosted gateway authentication.
+Current scope is token management, reserved subdomain ownership, and public access policy management for self-hosted gateway authentication.
 
 Supported token scopes:
 
 - `register_tunnel`
 
-Token APIs reject unknown scopes and malformed JSON. Token admin, validator, reservation, and authorization operations are logged without plaintext token values.
+Token APIs reject unknown scopes and malformed JSON. Token admin, validator, reservation, access policy, and authorization operations are logged without plaintext token values.
 
 Run locally:
 
@@ -36,7 +36,7 @@ http://localhost:8082/dashboard/
 
 Use the configured `PORTHOOK_CONTROL_ADMIN_TOKEN` to log in. The dashboard stores that admin token in browser session storage for the current tab and sends it as a bearer token to the control-plane token APIs. Use logout to clear the browser session value.
 
-The dashboard can list, create, and revoke agent tokens, reserve subdomains for active tokens, and show active gateway tunnels. Plaintext agent tokens are displayed only from the create response; the control plane stores token hashes and later list responses contain token summaries only. Successful token validation updates `last_used_at` metadata for token list views.
+The dashboard can list, create, and revoke agent tokens, reserve subdomains for active tokens, manage access policies, show active gateway tunnels, and inspect recent gateway request logs. Plaintext agent tokens are displayed only from the create response; the control plane stores token hashes and later list responses contain token summaries only. Access policy secrets are accepted only in create/update requests and are not returned by list responses. Successful token validation updates `last_used_at` metadata for token list views.
 
 ## Runtime Configuration
 
@@ -89,6 +89,18 @@ printf '%s' 'admin-secret' | porthook reserved create \
   --token-id tok_...
 ```
 
+Create an access policy for a reserved subdomain:
+
+```sh
+porthook access create \
+  --control-plane http://localhost:8082 \
+  --admin-token 'admin-secret' \
+  --reserved-subdomain-id rs_... \
+  --mode basic_auth \
+  --basic-username demo \
+  --basic-password 'gateway-password'
+```
+
 ## Operational Endpoints
 
 - `GET /healthz`
@@ -99,12 +111,18 @@ printf '%s' 'admin-secret' | porthook reserved create \
 - `GET /api/v1/reserved-subdomains`
 - `POST /api/v1/reserved-subdomains`
 - `DELETE /api/v1/reserved-subdomains/{id}`
+- `GET /api/v1/access-policies`
+- `POST /api/v1/access-policies`
+- `GET /api/v1/access-policies/{id}`
+- `PUT /api/v1/access-policies/{id}`
+- `DELETE /api/v1/access-policies/{id}`
+- `POST /api/v1/access-policies/evaluate`
 
-`/readyz` checks the token and reservation stores. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include readiness state, process uptime, token inventory, reserved subdomain inventory, token admin operations, token validations, reserved subdomain operations, authorization failures, and readiness failures.
+`/readyz` checks the token, reservation, and access policy stores. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include readiness state, process uptime, token inventory, reserved subdomain inventory, access policy inventory, token admin operations, token validations, reserved subdomain operations, access policy operations/evaluations, authorization failures, and readiness failures.
 
 `/api/v1/status` returns JSON with the control-plane readiness state and binary version for dashboard and automation checks.
 
-Control-plane logs are structured text logs written to stdout. Audit-relevant logs include an `event` field such as `control_plane.auth_failed`, `control_plane.token_created`, `control_plane.token_validated`, `control_plane.token_revoked`, `control_plane.reservation_created`, and `control_plane.reservation_authorized`. Logs include method, path, remote IP, optional `request_id` from `X-Request-ID` or `X-Correlation-ID`, token IDs where available, subdomains, outcomes, and denial reasons. Authorization headers and plaintext token values are not logged.
+Control-plane logs are structured text logs written to stdout. Audit-relevant logs include an `event` field such as `control_plane.auth_failed`, `control_plane.token_created`, `control_plane.token_validated`, `control_plane.token_revoked`, `control_plane.reservation_created`, `control_plane.reservation_authorized`, `control_plane.access_policy_created`, and `control_plane.access_policy_evaluated`. Logs include method, path, remote IP, optional `request_id` from `X-Request-ID` or `X-Correlation-ID`, token IDs where available, subdomains, policy IDs, outcomes, and denial reasons. Authorization headers, plaintext token values, and access policy secrets are not logged.
 
 ## API
 
@@ -158,6 +176,31 @@ List reserved subdomains:
 ```sh
 curl -sS http://localhost:8082/api/v1/reserved-subdomains \
   -H 'Authorization: Bearer admin-secret'
+```
+
+Create an access policy:
+
+```sh
+curl -sS -X POST http://localhost:8082/api/v1/access-policies \
+  -H 'Authorization: Bearer admin-secret' \
+  -H 'Content-Type: application/json' \
+  -d '{"reserved_subdomain_id":"rs_...","mode":"basic_auth","basic_username":"demo","basic_password":"gateway-password"}'
+```
+
+List access policies:
+
+```sh
+curl -sS http://localhost:8082/api/v1/access-policies \
+  -H 'Authorization: Bearer admin-secret'
+```
+
+Evaluate an access policy for the gateway:
+
+```sh
+curl -sS -X POST http://localhost:8082/api/v1/access-policies/evaluate \
+  -H 'Authorization: Bearer validator-secret' \
+  -H 'Content-Type: application/json' \
+  -d '{"subdomain":"demo","remote_ip":"192.0.2.10","basic_username":"demo","basic_password":"gateway-password"}'
 ```
 
 The gateway uses `POST /api/v1/reserved-subdomains/authorize` with the validator bearer token to authorize requested subdomains during tunnel registration.
