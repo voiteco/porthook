@@ -219,6 +219,94 @@ h3 {
   padding-top: 24px;
 }
 
+.overview-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.metric-tile {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  min-height: 86px;
+  padding: 14px;
+}
+
+.metric-tile span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.metric-tile strong {
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.chart-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.chart-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.chart-heading {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.bar-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.bar-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(120px, 0.45fr) minmax(140px, 1fr) minmax(42px, auto);
+}
+
+.bar-label {
+  overflow-wrap: anywhere;
+}
+
+.bar-track {
+  background: #eef2f6;
+  border-radius: 999px;
+  display: block;
+  height: 10px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  background: var(--accent);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+}
+
+.bar-count {
+  color: var(--muted);
+  text-align: right;
+}
+
+.chart-empty {
+  margin: 0;
+}
+
 label {
   color: var(--ink);
   font-size: 14px;
@@ -395,11 +483,17 @@ tr.revoked {
   }
 
   .login-panel,
-  .create-form {
+  .create-form,
+  .overview-grid,
+  .chart-grid {
     grid-template-columns: 1fr;
   }
 
   .button-cell {
     justify-content: flex-start;
+  }
+
+  .bar-row {
+    grid-template-columns: minmax(0, 0.7fr) minmax(70px, 1fr) minmax(36px, auto);
   }
 }

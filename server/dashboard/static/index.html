@@ -279,6 +279,51 @@
           <div class="subsection">
             <div class="section-heading">
               <div>
+                <h2>Operational overview</h2>
+                <p class="muted" id="overview-count">No gateway data loaded</p>
+              </div>
+            </div>
+
+            <div class="overview-grid">
+              <div class="metric-tile">
+                <span>Active tunnels</span>
+                <strong id="overview-active-tunnels">0</strong>
+              </div>
+              <div class="metric-tile">
+                <span>Recent requests</span>
+                <strong id="overview-recent-requests">0</strong>
+              </div>
+              <div class="metric-tile">
+                <span>Error rate</span>
+                <strong id="overview-error-rate">0%</strong>
+              </div>
+              <div class="metric-tile">
+                <span>p95 latency</span>
+                <strong id="overview-p95-latency">0 ms</strong>
+              </div>
+            </div>
+
+            <div class="chart-grid">
+              <div class="chart-panel">
+                <div class="chart-heading">
+                  <h3>Requests by outcome</h3>
+                  <p class="muted" id="overview-outcome-count">No requests loaded</p>
+                </div>
+                <div class="bar-list" id="overview-outcome-chart"></div>
+              </div>
+              <div class="chart-panel">
+                <div class="chart-heading">
+                  <h3>Status classes</h3>
+                  <p class="muted" id="overview-status-count">No requests loaded</p>
+                </div>
+                <div class="bar-list" id="overview-status-chart"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="subsection">
+            <div class="section-heading">
+              <div>
                 <h2>Request logs</h2>
                 <p class="muted" id="request-log-count">No request logs loaded</p>
               </div>
