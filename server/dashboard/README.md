@@ -31,7 +31,7 @@ Access policy tables show policy modes and non-secret settings. Plaintext policy
 
 Custom domain management maps a fully qualified hostname to a reserved subdomain. DNS and TLS for that hostname are handled outside the dashboard.
 
-The operational overview, active tunnels, and request logs views read `GET /api/v1/tunnels` and `GET /api/v1/request-logs` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack. Request log entries include path and `query_present`, but not raw query strings.
+The operational overview, active tunnels, and request logs views read `GET /api/v1/tunnels` and `GET /api/v1/request-logs` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack. Request log entries include path, `query_present`, and `request_id`, but not raw query strings.
 
 Future dashboard scope:
 

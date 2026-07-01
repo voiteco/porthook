@@ -64,6 +64,7 @@ const elements = {
   requestLogSubdomain: document.querySelector("#request-log-subdomain"),
   requestLogStatus: document.querySelector("#request-log-status"),
   requestLogOutcome: document.querySelector("#request-log-outcome"),
+  requestLogRequestID: document.querySelector("#request-log-request-id"),
   requestLogLimit: document.querySelector("#request-log-limit"),
   requestLogsBody: document.querySelector("#request-logs-body"),
   requestLogsEmptyState: document.querySelector("#request-logs-empty-state"),
@@ -575,6 +576,7 @@ function renderRequestLogRow(entry) {
     cell(entry.path || "-"),
     cell(entry.status || "-"),
     cell(entry.outcome || "-"),
+    monoCell(entry.request_id || "-"),
     cell(`${entry.duration_ms || 0} ms`),
     cell(`${entry.request_bytes || 0}/${entry.response_bytes || 0}`),
     cell(entry.remote_ip || "-"),
@@ -586,6 +588,7 @@ function filterRequestLogs(logs) {
   const subdomain = elements.requestLogSubdomain.value.trim().toLowerCase();
   const status = elements.requestLogStatus.value.trim();
   const outcome = elements.requestLogOutcome.value.trim().toLowerCase();
+  const requestID = elements.requestLogRequestID.value.trim().toLowerCase();
   return logs.filter((entry) => {
     if (subdomain && String(entry.subdomain || "").toLowerCase() !== subdomain) {
       return false;
@@ -594,6 +597,9 @@ function filterRequestLogs(logs) {
       return false;
     }
     if (outcome && !String(entry.outcome || "").toLowerCase().includes(outcome)) {
+      return false;
+    }
+    if (requestID && !String(entry.request_id || "").toLowerCase().includes(requestID)) {
       return false;
     }
     return true;
@@ -1112,7 +1118,7 @@ elements.requestLogForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await loadRequestLogs();
 });
-for (const input of [elements.requestLogSubdomain, elements.requestLogStatus, elements.requestLogOutcome]) {
+for (const input of [elements.requestLogSubdomain, elements.requestLogStatus, elements.requestLogOutcome, elements.requestLogRequestID]) {
   input.addEventListener("input", () => renderRequestLogs(currentRequestLogs));
 }
 
