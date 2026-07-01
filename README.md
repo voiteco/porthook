@@ -182,7 +182,7 @@ Open the self-hosted dashboard:
 http://localhost:8082/dashboard/
 ```
 
-Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, manage custom domains and access policies, show active gateway tunnels, and inspect recent gateway request logs.
+Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, manage custom domains and access policies, show active gateway tunnels, runtime, and metrics, run diagnostics, inspect audit events, and inspect recent gateway request logs.
 
 Check the local gateway and control-plane operational endpoints:
 
@@ -191,6 +191,12 @@ printf '%s' '<admin-token>' | porthook doctor \
   --gateway http://localhost:8080 \
   --control-plane http://localhost:8082 \
   --admin-token-stdin
+```
+
+Inspect active tunnels from the CLI:
+
+```sh
+porthook tunnels list --gateway http://localhost:8080
 ```
 
 Create an agent token:

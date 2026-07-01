@@ -417,10 +417,14 @@ porthook access create --control-plane <url> --reserved-subdomain-id <id> --mode
 porthook access list --control-plane <url>
 porthook access update --control-plane <url> <policy-id> --mode <mode>
 porthook access delete --control-plane <url> <policy-id>
+porthook tunnels list --gateway <url>
+porthook tunnels show --gateway <url> <tunnel-id>
 porthook version
 ```
 
 `porthook tokens list` prints token summaries only. Summaries include creation time, last successful validation time when available, and revocation time when revoked.
+
+`porthook tunnels list` and `porthook tunnels show` read active tunnel summaries from the gateway public API. They do not require an admin token and do not expose local target URLs.
 
 Postgres-backed control-plane token storage uses embedded versioned SQL migrations. The control plane applies pending migrations at startup and records applied versions in `schema_migrations`.
 
