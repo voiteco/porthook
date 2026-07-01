@@ -18,6 +18,7 @@ import (
 	"github.com/voiteco/porthook/server/control-plane/internal/customdomains"
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
+	"github.com/voiteco/porthook/server/internal/healthcheck"
 	"github.com/voiteco/porthook/server/internal/telemetry"
 )
 
@@ -36,8 +37,13 @@ func run(args []string, stdout io.Writer) error {
 		case "version", "--version", "-version":
 			fmt.Fprintln(stdout, version)
 			return nil
+		case "healthcheck":
+			if len(args) > 1 {
+				return fmt.Errorf("usage: porthook-control-plane [version|--version|healthcheck]")
+			}
+			return runHealthcheck(context.Background(), stdout)
 		default:
-			return fmt.Errorf("usage: porthook-control-plane [version|--version]")
+			return fmt.Errorf("usage: porthook-control-plane [version|--version|healthcheck]")
 		}
 	}
 
@@ -67,6 +73,19 @@ func run(args []string, stdout io.Writer) error {
 	defer stop()
 
 	return server.Run(ctx)
+}
+
+func runHealthcheck(ctx context.Context, stdout io.Writer) error {
+	cfg := controlplane.ConfigFromEnv()
+	healthcheckURL, err := healthcheck.URLFromEnvOrListenAddr(cfg.Addr, "/readyz")
+	if err != nil {
+		return err
+	}
+	if err := healthcheck.HTTP(ctx, healthcheckURL, healthcheck.TimeoutFromEnv()); err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, "ok")
+	return nil
 }
 
 func stores(ctx context.Context, cfg controlplane.Config) (tokens.Store, reserved.Store, access.Store, customdomains.Store, error) {

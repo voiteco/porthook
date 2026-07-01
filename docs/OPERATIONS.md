@@ -52,6 +52,10 @@ Use them together with:
    ```sh
    curl -i https://check.${PORTHOOK_ROOT_DOMAIN}/healthz
    curl -i https://${PORTHOOK_CONTROL_DOMAIN}/readyz
+   docker compose \
+     --env-file deploy/compose/.env.production \
+     -f deploy/compose/docker-compose.production.yml \
+     ps
    ```
 
 7. Run an end-to-end tunnel check with a newly created agent token and, if using a requested subdomain, a matching reservation.
@@ -66,6 +70,8 @@ docker compose \
   -f deploy/compose/docker-compose.production.yml \
   ps
 ```
+
+The gateway and control-plane containers should report `healthy`. If either stays `starting` or `unhealthy`, inspect its logs before debugging the reverse proxy.
 
 Check service logs:
 

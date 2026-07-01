@@ -41,6 +41,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/porthook-control-plane", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
 
   porthook-gateway:
     build:
@@ -50,7 +56,7 @@ services:
     restart: unless-stopped
     depends_on:
       porthook-control-plane:
-        condition: service_started
+        condition: service_healthy
     environment:
       PORTHOOK_ADDR: ":8080"
       PORTHOOK_AGENT_ADDR: ":8081"
@@ -77,15 +83,21 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/porthook-gateway", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
 
   reverse-proxy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       porthook-gateway:
-        condition: service_started
+        condition: service_healthy
       porthook-control-plane:
-        condition: service_started
+        condition: service_healthy
     environment:
       PORTHOOK_ROOT_DOMAIN: ${PORTHOOK_ROOT_DOMAIN:?set PORTHOOK_ROOT_DOMAIN}
       PORTHOOK_AGENT_DOMAIN: ${PORTHOOK_AGENT_DOMAIN:?set PORTHOOK_AGENT_DOMAIN}
