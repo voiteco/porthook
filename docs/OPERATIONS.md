@@ -309,7 +309,7 @@ Schema migrations in the current pre-1.0 line are intended to be additive, but a
 ### Suspected Admin Token Exposure
 
 1. Rotate `PORTHOOK_CONTROL_ADMIN_TOKEN`.
-2. Review `control_plane.auth_failed`, `control_plane.token_created`, `control_plane.token_revoked`, `control_plane.reservation_created`, and `control_plane.reservation_deleted` events.
+2. Review recent control-plane audit events through `/api/v1/events`, plus `control_plane.auth_failed`, `control_plane.token_created`, `control_plane.token_revoked`, `control_plane.reservation_created`, and `control_plane.reservation_deleted` logs.
 3. Revoke unknown or unused agent tokens.
 4. Review reserved subdomains for unexpected ownership.
 5. Confirm the control-plane access boundary still blocks untrusted networks.

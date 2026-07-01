@@ -34,6 +34,7 @@ type Server struct {
 	logger         *slog.Logger
 	metrics        metrics
 	startedAt      time.Time
+	auditEvents    *auditEventBuffer
 }
 
 type validateTokenRequest struct {
@@ -84,6 +85,7 @@ type statusResponse struct {
 const maxJSONBodyBytes = 1 << 20
 
 const readinessTimeout = 2 * time.Second
+const defaultAuditEventLimit = 500
 
 func NewServer(cfg Config, service *tokens.Service, reservationServices ...*reserved.Service) *Server {
 	reservationService := reserved.NewService(reserved.NewMemoryStore())
@@ -124,6 +126,7 @@ func NewServerWithCustomDomains(cfg Config, service *tokens.Service, reservation
 		customDomains:  customDomainService,
 		logger:         slog.Default(),
 		startedAt:      time.Now().UTC(),
+		auditEvents:    newAuditEventBuffer(defaultAuditEventLimit),
 	}
 }
 
@@ -164,6 +167,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/dashboard", dashboardHandler)
 	mux.Handle("/dashboard/", dashboardHandler)
 	mux.HandleFunc("/api/v1/status", s.handleStatus)
+	mux.HandleFunc("/api/v1/events", s.handleEvents)
 	mux.HandleFunc("/api/v1/tokens", s.handleTokens)
 	mux.HandleFunc("/api/v1/tokens/", s.handleTokenByID)
 	mux.HandleFunc("/api/v1/tokens/validate", s.handleValidateToken)
@@ -215,6 +219,27 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, "GET")
+		return
+	}
+	if !s.authorized(r) {
+		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.Bool("token_configured", s.cfg.AdminToken != ""),
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	limit := auditEventLimit(r, defaultAuditEventLimit)
+	events := s.auditEvents.list(limit)
+	s.logAudit(r, slog.LevelInfo, "control-plane audit events listed", "control_plane.audit_events_listed", slog.Int("count", len(events)))
+	writeJSON(w, http.StatusOK, auditEventsResponse{Events: events})
 }
 
 func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
@@ -1024,6 +1049,59 @@ func (s *Server) logAudit(r *http.Request, level slog.Level, msg, event string, 
 	}
 	base = append(base, attrs...)
 	s.logger.LogAttrs(r.Context(), level, msg, base...)
+	s.auditEvents.add(auditEvent{
+		Time:      time.Now().UTC(),
+		Level:     level.String(),
+		Message:   msg,
+		Event:     event,
+		Method:    r.Method,
+		Path:      r.URL.Path,
+		RemoteIP:  remoteIP(r.RemoteAddr),
+		RequestID: requestID(r),
+		Fields:    auditEventFields(attrs),
+	})
+}
+
+func auditEventFields(attrs []slog.Attr) map[string]string {
+	if len(attrs) == 0 {
+		return nil
+	}
+	fields := make(map[string]string, len(attrs))
+	for _, attr := range attrs {
+		if attr.Key == "" {
+			continue
+		}
+		value := attr.Value.Resolve()
+		fields[attr.Key] = auditEventFieldValue(value)
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
+func auditEventFieldValue(value slog.Value) string {
+	switch value.Kind() {
+	case slog.KindString:
+		return value.String()
+	case slog.KindBool:
+		if value.Bool() {
+			return "true"
+		}
+		return "false"
+	case slog.KindInt64:
+		return fmt.Sprintf("%d", value.Int64())
+	case slog.KindUint64:
+		return fmt.Sprintf("%d", value.Uint64())
+	case slog.KindFloat64:
+		return fmt.Sprintf("%g", value.Float64())
+	case slog.KindDuration:
+		return value.Duration().String()
+	case slog.KindTime:
+		return value.Time().Format(time.RFC3339Nano)
+	default:
+		return fmt.Sprint(value.Any())
+	}
 }
 
 func remoteIP(remoteAddr string) string {
