@@ -36,7 +36,7 @@ http://localhost:8082/dashboard/
 
 Use the configured `PORTHOOK_CONTROL_ADMIN_TOKEN` to log in. The dashboard stores that admin token in browser session storage for the current tab and sends it as a bearer token to the control-plane token APIs. Use logout to clear the browser session value.
 
-The dashboard can list, create, and revoke agent tokens, reserve subdomains for active tokens, manage custom domains and access policies, inspect control-plane audit events, show active gateway tunnels, and inspect recent gateway request logs. Plaintext agent tokens are displayed only from the create response; the control plane stores token hashes and later list responses contain token summaries only. Access policy secrets are accepted only in create/update requests and are not returned by list responses. Successful token validation updates `last_used_at` metadata for token list views.
+The dashboard can list, create, and revoke agent tokens, reserve subdomains for active tokens, manage custom domains and access policies, inspect control-plane audit events, show active gateway tunnels, run browser diagnostics, and inspect recent gateway request logs. Plaintext agent tokens are displayed only from the create response; the control plane stores token hashes and later list responses contain token summaries only. Access policy secrets are accepted only in create/update requests and are not returned by list responses. Successful token validation updates `last_used_at` metadata for token list views.
 
 ## Runtime Configuration
 

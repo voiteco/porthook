@@ -201,6 +201,11 @@ h3 {
   grid-template-columns: minmax(260px, 1fr) auto;
 }
 
+.diagnostics-form {
+  grid-template-columns: auto;
+  justify-content: start;
+}
+
 .access-form {
   grid-template-columns: minmax(210px, 1fr) minmax(150px, 0.5fr) minmax(170px, 0.7fr) minmax(190px, 0.8fr) minmax(170px, 0.7fr) auto auto;
 }
