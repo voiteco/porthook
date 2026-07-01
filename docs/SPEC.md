@@ -230,6 +230,7 @@ Responsibilities:
 - Show basic request logs.
 - Reserve subdomains.
 - Manage access policies.
+- Show control-plane audit events.
 - Manage self-hosted instance settings.
 
 The dashboard is useful, but not required for the first tunnel MVP.
@@ -446,6 +447,7 @@ Minimum:
 - In-memory gateway request logs for recent public requests.
 - OpenTelemetry traces for gateway/control-plane HTTP paths.
 - Dashboard operational overview charts.
+- Dashboard control-plane audit event view.
 
 Future:
 

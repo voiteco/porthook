@@ -46,6 +46,16 @@ const elements = {
   accessPoliciesBody: document.querySelector("#access-policies-body"),
   accessPoliciesEmptyState: document.querySelector("#access-policies-empty-state"),
   accessPolicyCount: document.querySelector("#access-policy-count"),
+  auditEventForm: document.querySelector("#audit-event-form"),
+  auditEventEvent: document.querySelector("#audit-event-event"),
+  auditEventLevel: document.querySelector("#audit-event-level"),
+  auditEventRequestID: document.querySelector("#audit-event-request-id"),
+  auditEventRemoteIP: document.querySelector("#audit-event-remote-ip"),
+  auditEventField: document.querySelector("#audit-event-field"),
+  auditEventLimit: document.querySelector("#audit-event-limit"),
+  auditEventsBody: document.querySelector("#audit-events-body"),
+  auditEventsEmptyState: document.querySelector("#audit-events-empty-state"),
+  auditEventCount: document.querySelector("#audit-event-count"),
   gatewayForm: document.querySelector("#gateway-form"),
   gatewayURL: document.querySelector("#gateway-url"),
   tunnelsBody: document.querySelector("#tunnels-body"),
@@ -87,6 +97,7 @@ let currentTokens = [];
 let currentReservations = [];
 let currentCustomDomains = [];
 let currentAccessPolicies = [];
+let currentAuditEvents = [];
 let currentTunnels = [];
 let currentRequestLogs = [];
 let editingAccessPolicyID = "";
@@ -104,6 +115,7 @@ function setAuthenticated(authenticated) {
     currentReservations = [];
     currentCustomDomains = [];
     currentAccessPolicies = [];
+    currentAuditEvents = [];
     currentTunnels = [];
     currentRequestLogs = [];
     editingAccessPolicyID = "";
@@ -112,18 +124,21 @@ function setAuthenticated(authenticated) {
     elements.reservationsBody.replaceChildren();
     elements.customDomainsBody.replaceChildren();
     elements.accessPoliciesBody.replaceChildren();
+    elements.auditEventsBody.replaceChildren();
     elements.tunnelsBody.replaceChildren();
     elements.requestLogsBody.replaceChildren();
     elements.emptyState.hidden = true;
     elements.reservationsEmptyState.hidden = true;
     elements.customDomainsEmptyState.hidden = true;
     elements.accessPoliciesEmptyState.hidden = true;
+    elements.auditEventsEmptyState.hidden = true;
     elements.tunnelsEmptyState.hidden = true;
     elements.requestLogsEmptyState.hidden = true;
     elements.tokenCount.textContent = "No tokens loaded";
     elements.reservationCount.textContent = "No reservations loaded";
     elements.customDomainCount.textContent = "No custom domains loaded";
     elements.accessPolicyCount.textContent = "No access policies loaded";
+    elements.auditEventCount.textContent = "No audit events loaded";
     elements.tunnelCount.textContent = "No tunnels loaded";
     elements.requestLogCount.textContent = "No request logs loaded";
     clearTunnelDetail();
@@ -200,7 +215,7 @@ async function refreshStatus() {
 async function refreshApp() {
   showNotice("");
   clearCreatedToken();
-  await Promise.all([loadTokens(), refreshStatus(), loadTunnels({ silent: true }), loadRequestLogs({ silent: true })]);
+  await Promise.all([loadTokens(), loadAuditEvents(), refreshStatus(), loadTunnels({ silent: true }), loadRequestLogs({ silent: true })]);
   await loadReservations();
   await loadCustomDomains();
   await loadAccessPolicies();
@@ -477,6 +492,73 @@ function accessPolicyActionCell(policy) {
   remove.addEventListener("click", () => deleteAccessPolicy(policy));
   item.append(edit, remove);
   return item;
+}
+
+async function loadAuditEvents() {
+  const limit = normalizedAuditEventLimit();
+  elements.auditEventCount.textContent = "Loading audit events";
+  elements.auditEventsBody.replaceChildren();
+  elements.auditEventsEmptyState.hidden = true;
+
+  const payload = await apiRequest(`/api/v1/events?limit=${encodeURIComponent(limit)}`);
+  currentAuditEvents = payload.events || [];
+  renderAuditEvents(currentAuditEvents);
+}
+
+function renderAuditEvents(events) {
+  const filtered = filterAuditEvents(events);
+  elements.auditEventsBody.replaceChildren(...filtered.map(renderAuditEventRow));
+  elements.auditEventsEmptyState.hidden = filtered.length !== 0;
+  const loaded = events.length === filtered.length ? `${events.length}` : `${filtered.length} of ${events.length}`;
+  elements.auditEventCount.textContent = `${loaded} audit event${filtered.length === 1 ? "" : "s"}`;
+}
+
+function renderAuditEventRow(event) {
+  const row = document.createElement("tr");
+  row.append(
+    cell(formatTime(event.time)),
+    cell(event.level || "-"),
+    monoCell(event.event || "-"),
+    cell(event.message || "-"),
+    cell(event.method || "-"),
+    cell(event.path || "-"),
+    monoCell(event.request_id || "-"),
+    cell(event.remote_ip || "-"),
+    monoCell(auditEventFields(event)),
+  );
+  return row;
+}
+
+function filterAuditEvents(events) {
+  const eventName = elements.auditEventEvent.value.trim().toLowerCase();
+  const level = elements.auditEventLevel.value.trim().toUpperCase();
+  const requestID = elements.auditEventRequestID.value.trim().toLowerCase();
+  const remoteIP = elements.auditEventRemoteIP.value.trim().toLowerCase();
+  const field = elements.auditEventField.value.trim().toLowerCase();
+  return events.filter((event) => {
+    if (eventName && !String(event.event || "").toLowerCase().includes(eventName)) {
+      return false;
+    }
+    if (level && String(event.level || "").toUpperCase() !== level) {
+      return false;
+    }
+    if (requestID && !String(event.request_id || "").toLowerCase().includes(requestID)) {
+      return false;
+    }
+    if (remoteIP && !String(event.remote_ip || "").toLowerCase().includes(remoteIP)) {
+      return false;
+    }
+    if (field && !auditEventFields(event).toLowerCase().includes(field)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function auditEventFields(event) {
+  const fields = event.fields || {};
+  const entries = Object.entries(fields).sort(([left], [right]) => left.localeCompare(right));
+  return entries.map(([key, value]) => `${key}=${value}`).join(", ") || "-";
 }
 
 function reservationByID(id) {
@@ -849,6 +931,14 @@ function formatDuration(milliseconds) {
 
 function normalizedRequestLogLimit() {
   const value = Number.parseInt(elements.requestLogLimit.value, 10);
+  if (!Number.isFinite(value) || value <= 0) {
+    return 100;
+  }
+  return Math.min(value, 1000);
+}
+
+function normalizedAuditEventLimit() {
+  const value = Number.parseInt(elements.auditEventLimit.value, 10);
   if (!Number.isFinite(value) || value <= 0) {
     return 100;
   }
@@ -1294,6 +1384,17 @@ elements.customDomainForm.addEventListener("submit", createCustomDomain);
 elements.accessPolicyForm.addEventListener("submit", saveAccessPolicy);
 elements.accessMode.addEventListener("change", updateAccessPolicyFields);
 elements.accessPolicyCancel.addEventListener("click", resetAccessPolicyForm);
+elements.auditEventForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await loadAuditEvents();
+  } catch (error) {
+    elements.auditEventCount.textContent = "Audit events unavailable";
+    elements.auditEventsBody.replaceChildren();
+    elements.auditEventsEmptyState.hidden = false;
+    showNotice(error.message, "error");
+  }
+});
 elements.gatewayForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const gatewayURL = normalizedGatewayURL();
@@ -1306,6 +1407,15 @@ elements.requestLogForm.addEventListener("submit", async (event) => {
   await loadRequestLogs();
 });
 elements.tunnelDetailClose.addEventListener("click", clearTunnelDetail);
+for (const input of [
+  elements.auditEventEvent,
+  elements.auditEventLevel,
+  elements.auditEventRequestID,
+  elements.auditEventRemoteIP,
+  elements.auditEventField,
+]) {
+  input.addEventListener("input", () => renderAuditEvents(currentAuditEvents));
+}
 for (const input of [
   elements.requestLogSubdomain,
   elements.requestLogMethod,

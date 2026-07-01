@@ -243,6 +243,72 @@
           <div class="subsection">
             <div class="section-heading">
               <div>
+                <h2>Audit events</h2>
+                <p class="muted" id="audit-event-count">No audit events loaded</p>
+              </div>
+            </div>
+
+            <form class="create-form audit-event-form" id="audit-event-form">
+              <div class="field">
+                <label for="audit-event-event">Event</label>
+                <input id="audit-event-event" name="audit-event-event" type="text" placeholder="control_plane.token_created">
+              </div>
+              <div class="field compact">
+                <label for="audit-event-level">Level</label>
+                <select id="audit-event-level" name="audit-event-level">
+                  <option value="">Any</option>
+                  <option value="INFO">INFO</option>
+                  <option value="WARN">WARN</option>
+                  <option value="ERROR">ERROR</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="audit-event-request-id">Request ID</label>
+                <input id="audit-event-request-id" name="audit-event-request-id" type="text">
+              </div>
+              <div class="field">
+                <label for="audit-event-remote-ip">Remote IP</label>
+                <input id="audit-event-remote-ip" name="audit-event-remote-ip" type="text">
+              </div>
+              <div class="field">
+                <label for="audit-event-field">Field</label>
+                <input id="audit-event-field" name="audit-event-field" type="text" placeholder="token_id">
+              </div>
+              <div class="field compact">
+                <label for="audit-event-limit">Limit</label>
+                <input id="audit-event-limit" name="audit-event-limit" type="number" min="1" max="1000" value="100">
+              </div>
+              <button type="submit">Load events</button>
+            </form>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Level</th>
+                    <th>Event</th>
+                    <th>Message</th>
+                    <th>Method</th>
+                    <th>Path</th>
+                    <th>Request ID</th>
+                    <th>Remote IP</th>
+                    <th>Fields</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-events-body"></tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" id="audit-events-empty-state" hidden>
+              <h3>No audit events</h3>
+              <p class="muted">Control-plane audit events appear after authenticated admin or validator activity.</p>
+            </div>
+          </div>
+
+          <div class="subsection">
+            <div class="section-heading">
+              <div>
                 <h2>Active tunnels</h2>
                 <p class="muted" id="tunnel-count">No tunnels loaded</p>
               </div>
