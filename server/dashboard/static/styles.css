@@ -201,6 +201,10 @@ h3 {
   grid-template-columns: minmax(210px, 1fr) minmax(150px, 0.5fr) minmax(170px, 0.7fr) minmax(190px, 0.8fr) minmax(170px, 0.7fr) auto auto;
 }
 
+.request-log-form {
+  grid-template-columns: minmax(180px, 0.8fr) minmax(120px, 0.45fr) minmax(180px, 0.8fr) minmax(110px, 0.4fr) auto;
+}
+
 .policy-field[hidden] {
   display: none;
 }

@@ -45,12 +45,21 @@ const elements = {
   tunnelsBody: document.querySelector("#tunnels-body"),
   tunnelsEmptyState: document.querySelector("#tunnels-empty-state"),
   tunnelCount: document.querySelector("#tunnel-count"),
+  requestLogForm: document.querySelector("#request-log-form"),
+  requestLogSubdomain: document.querySelector("#request-log-subdomain"),
+  requestLogStatus: document.querySelector("#request-log-status"),
+  requestLogOutcome: document.querySelector("#request-log-outcome"),
+  requestLogLimit: document.querySelector("#request-log-limit"),
+  requestLogsBody: document.querySelector("#request-logs-body"),
+  requestLogsEmptyState: document.querySelector("#request-logs-empty-state"),
+  requestLogCount: document.querySelector("#request-log-count"),
 };
 
 let adminToken = sessionStorage.getItem(storageKey) || "";
 let currentTokens = [];
 let currentReservations = [];
 let currentAccessPolicies = [];
+let currentRequestLogs = [];
 let editingAccessPolicyID = "";
 
 elements.gatewayURL.value = sessionStorage.getItem(gatewayStorageKey) || defaultGatewayURL();
@@ -64,19 +73,23 @@ function setAuthenticated(authenticated) {
     currentTokens = [];
     currentReservations = [];
     currentAccessPolicies = [];
+    currentRequestLogs = [];
     editingAccessPolicyID = "";
     elements.tokensBody.replaceChildren();
     elements.reservationsBody.replaceChildren();
     elements.accessPoliciesBody.replaceChildren();
     elements.tunnelsBody.replaceChildren();
+    elements.requestLogsBody.replaceChildren();
     elements.emptyState.hidden = true;
     elements.reservationsEmptyState.hidden = true;
     elements.accessPoliciesEmptyState.hidden = true;
     elements.tunnelsEmptyState.hidden = true;
+    elements.requestLogsEmptyState.hidden = true;
     elements.tokenCount.textContent = "No tokens loaded";
     elements.reservationCount.textContent = "No reservations loaded";
     elements.accessPolicyCount.textContent = "No access policies loaded";
     elements.tunnelCount.textContent = "No tunnels loaded";
+    elements.requestLogCount.textContent = "No request logs loaded";
     renderReservationTokenOptions();
     renderAccessReservationOptions();
     resetAccessPolicyForm();
@@ -148,7 +161,7 @@ async function refreshStatus() {
 async function refreshApp() {
   showNotice("");
   clearCreatedToken();
-  await Promise.all([loadTokens(), refreshStatus(), loadTunnels({ silent: true })]);
+  await Promise.all([loadTokens(), refreshStatus(), loadTunnels({ silent: true }), loadRequestLogs({ silent: true })]);
   await loadReservations();
   await loadAccessPolicies();
 }
@@ -370,6 +383,89 @@ function renderTunnelRow(tunnel) {
     cell(formatTime(tunnel.connected_at)),
   );
   return row;
+}
+
+async function loadRequestLogs({ silent = false } = {}) {
+  const baseURL = normalizedGatewayURL();
+  if (!baseURL) {
+    elements.requestLogCount.textContent = "Gateway URL required";
+    currentRequestLogs = [];
+    renderRequestLogs([]);
+    return;
+  }
+
+  const limit = normalizedRequestLogLimit();
+  elements.requestLogCount.textContent = "Loading request logs";
+  elements.requestLogsBody.replaceChildren();
+  elements.requestLogsEmptyState.hidden = true;
+
+  try {
+    const response = await fetch(`${baseURL}/api/v1/request-logs?limit=${encodeURIComponent(limit)}`, { cache: "no-store" });
+    const payload = await readPayload(response);
+    if (!response.ok) {
+      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
+    }
+    currentRequestLogs = payload.request_logs || [];
+    renderRequestLogs(currentRequestLogs);
+  } catch (error) {
+    currentRequestLogs = [];
+    elements.requestLogCount.textContent = "Request logs unavailable";
+    elements.requestLogsBody.replaceChildren();
+    elements.requestLogsEmptyState.hidden = false;
+    if (!silent) {
+      showNotice(error.message, "error");
+    }
+  }
+}
+
+function renderRequestLogs(logs) {
+  const filtered = filterRequestLogs(logs);
+  elements.requestLogsBody.replaceChildren(...filtered.map(renderRequestLogRow));
+  elements.requestLogsEmptyState.hidden = filtered.length !== 0;
+  const loaded = logs.length === filtered.length ? `${logs.length}` : `${filtered.length} of ${logs.length}`;
+  elements.requestLogCount.textContent = `${loaded} request log${filtered.length === 1 ? "" : "s"}`;
+}
+
+function renderRequestLogRow(entry) {
+  const row = document.createElement("tr");
+  row.append(
+    cell(formatTime(entry.time)),
+    cell(entry.subdomain || "-"),
+    cell(entry.method || "-"),
+    cell(entry.path || "-"),
+    cell(entry.status || "-"),
+    cell(entry.outcome || "-"),
+    cell(`${entry.duration_ms || 0} ms`),
+    cell(`${entry.request_bytes || 0}/${entry.response_bytes || 0}`),
+    cell(entry.remote_ip || "-"),
+  );
+  return row;
+}
+
+function filterRequestLogs(logs) {
+  const subdomain = elements.requestLogSubdomain.value.trim().toLowerCase();
+  const status = elements.requestLogStatus.value.trim();
+  const outcome = elements.requestLogOutcome.value.trim().toLowerCase();
+  return logs.filter((entry) => {
+    if (subdomain && String(entry.subdomain || "").toLowerCase() !== subdomain) {
+      return false;
+    }
+    if (status && String(entry.status || "") !== status) {
+      return false;
+    }
+    if (outcome && !String(entry.outcome || "").toLowerCase().includes(outcome)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function normalizedRequestLogLimit() {
+  const value = Number.parseInt(elements.requestLogLimit.value, 10);
+  if (!Number.isFinite(value) || value <= 0) {
+    return 100;
+  }
+  return Math.min(value, 1000);
 }
 
 function cell(text) {
@@ -710,8 +806,15 @@ elements.gatewayForm.addEventListener("submit", async (event) => {
   const gatewayURL = normalizedGatewayURL();
   sessionStorage.setItem(gatewayStorageKey, gatewayURL);
   elements.gatewayURL.value = gatewayURL;
-  await loadTunnels();
+  await Promise.all([loadTunnels(), loadRequestLogs()]);
 });
+elements.requestLogForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await loadRequestLogs();
+});
+for (const input of [elements.requestLogSubdomain, elements.requestLogStatus, elements.requestLogOutcome]) {
+  input.addEventListener("input", () => renderRequestLogs(currentRequestLogs));
+}
 
 updateAccessPolicyFields();
 setAuthenticated(Boolean(adminToken));
