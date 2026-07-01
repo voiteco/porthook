@@ -12,6 +12,8 @@ CONTROL_PORT="${PORTHOOK_SMOKE_CONTROL_PORT:-18084}"
 SUBDOMAIN="${PORTHOOK_SMOKE_SUBDOMAIN:-control-demo}"
 ADMIN_TOKEN="${PORTHOOK_SMOKE_ADMIN_TOKEN:-smoke-admin-token}"
 VALIDATOR_TOKEN="${PORTHOOK_SMOKE_VALIDATOR_TOKEN:-smoke-validator-token}"
+BASIC_USERNAME="${PORTHOOK_SMOKE_BASIC_USERNAME:-smoke-user}"
+BASIC_PASSWORD="${PORTHOOK_SMOKE_BASIC_PASSWORD:-smoke-password}"
 KEEP_LOGS="${PORTHOOK_SMOKE_KEEP_LOGS:-0}"
 SKIP_BUILD="${PORTHOOK_SMOKE_SKIP_BUILD:-0}"
 
@@ -136,6 +138,7 @@ python3 - "${LOCAL_PORT}" "${FIXTURE_DIR}" \
 import http.server
 import pathlib
 import sys
+import urllib.parse
 
 port = int(sys.argv[1])
 fixture_dir = pathlib.Path(sys.argv[2])
@@ -144,7 +147,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
-        if self.path != "/smoke.txt":
+        path = urllib.parse.urlsplit(self.path).path
+        if path != "/smoke.txt":
             self.send_error(404)
             return
         body = (fixture_dir / "smoke.txt").read_bytes()
@@ -198,8 +202,16 @@ if [[ "${dashboard_js}" != *"/api/v1/reserved-subdomains"* ]]; then
 	echo "Dashboard JavaScript did not include reserved subdomain API client" >&2
 	exit 1
 fi
+if [[ "${dashboard_js}" != *"/api/v1/access-policies"* ]]; then
+	echo "Dashboard JavaScript did not include access policy API client" >&2
+	exit 1
+fi
 if [[ "${dashboard_js}" != *"/api/v1/tunnels"* ]]; then
 	echo "Dashboard JavaScript did not include gateway tunnel API client" >&2
+	exit 1
+fi
+if [[ "${dashboard_js}" != *"/api/v1/request-logs"* ]]; then
+	echo "Dashboard JavaScript did not include gateway request log API client" >&2
 	exit 1
 fi
 
@@ -257,6 +269,35 @@ printf '%s' "${ADMIN_TOKEN}" | \
 	>"${LOG_DIR}/reserved-create.json" 2>"${LOG_DIR}/reserved-create.err"
 if ! grep -q "${SUBDOMAIN}" "${LOG_DIR}/reserved-create.json"; then
 	echo "Reserved subdomain was not created: ${SUBDOMAIN}" >&2
+	exit 1
+fi
+RESERVED_SUBDOMAIN_ID="$(extract_json_field id <"${LOG_DIR}/reserved-create.json")"
+
+access_policy_json="$(printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" access create \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--reserved-subdomain-id "${RESERVED_SUBDOMAIN_ID}" \
+	--mode "basic_auth" \
+	--basic-username "${BASIC_USERNAME}" \
+	--basic-password "${BASIC_PASSWORD}" \
+	--json \
+	2>"${LOG_DIR}/access-create.err")"
+printf '%s' "${access_policy_json}" >"${LOG_DIR}/access-create.json"
+ACCESS_POLICY_ID="$(printf '%s' "${access_policy_json}" | extract_json_field id)"
+if grep -q "${BASIC_PASSWORD}" "${LOG_DIR}/access-create.json"; then
+	echo "Access policy create output exposed the configured password" >&2
+	exit 1
+fi
+
+printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" access list \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--json \
+	>"${LOG_DIR}/access-list.json" 2>"${LOG_DIR}/access-list.err"
+if ! grep -q "${ACCESS_POLICY_ID}" "${LOG_DIR}/access-list.json"; then
+	echo "Created access policy was not listed: ${ACCESS_POLICY_ID}" >&2
 	exit 1
 fi
 
@@ -317,7 +358,25 @@ if not any(tunnel.get("subdomain") == want_subdomain for tunnel in tunnels):
     raise SystemExit(f"active tunnel {want_subdomain!r} was not listed: {payload}")
 ' "${SUBDOMAIN}"
 
-response="$(curl -fsS -H "Host: ${SUBDOMAIN}.localhost" "http://127.0.0.1:${PUBLIC_PORT}/smoke.txt")"
+unauthorized_status="$(curl -sS \
+	-o "${LOG_DIR}/protected-unauthorized.body" \
+	-D "${LOG_DIR}/protected-unauthorized.headers" \
+	-w "%{http_code}" \
+	-H "Host: ${SUBDOMAIN}.localhost" \
+	"http://127.0.0.1:${PUBLIC_PORT}/smoke.txt")"
+if [[ "${unauthorized_status}" != "401" ]]; then
+	echo "Unexpected protected tunnel status without credentials: ${unauthorized_status}" >&2
+	exit 1
+fi
+if ! grep -qi 'WWW-Authenticate: Basic realm="Porthook tunnel"' "${LOG_DIR}/protected-unauthorized.headers"; then
+	echo "Protected tunnel did not return a Basic auth challenge" >&2
+	exit 1
+fi
+
+response="$(curl -fsS \
+	-u "${BASIC_USERNAME}:${BASIC_PASSWORD}" \
+	-H "Host: ${SUBDOMAIN}.localhost" \
+	"http://127.0.0.1:${PUBLIC_PORT}/smoke.txt")"
 if [[ "${response}" != "${MARKER}" ]]; then
 	echo "Unexpected smoke response: ${response}" >&2
 	exit 1
@@ -325,8 +384,40 @@ fi
 
 wait_for_log "${LOG_DIR}/agent.log" "GET /smoke.txt -> 200" "agent request log"
 
+query_response="$(curl -fsS \
+	-u "${BASIC_USERNAME}:${BASIC_PASSWORD}" \
+	-H "Host: ${SUBDOMAIN}.localhost" \
+	"http://127.0.0.1:${PUBLIC_PORT}/smoke.txt?smoke_query_marker=present")"
+if [[ "${query_response}" != "${MARKER}" ]]; then
+	echo "Unexpected query smoke response: ${query_response}" >&2
+	exit 1
+fi
+
+request_logs_json="$(curl -fsS "http://127.0.0.1:${PUBLIC_PORT}/api/v1/request-logs?limit=20")"
+printf '%s' "${request_logs_json}" | python3 -c '
+import json
+import sys
+
+want_subdomain = sys.argv[1]
+raw = sys.stdin.read()
+if "smoke_query_marker=present" in raw:
+    raise SystemExit("request logs exposed the raw query string")
+payload = json.loads(raw)
+logs = payload.get("request_logs", [])
+if not any(
+    entry.get("subdomain") == want_subdomain
+    and entry.get("path") == "/smoke.txt"
+    and entry.get("query_present") is True
+    and entry.get("status") == 200
+    and entry.get("outcome") == "completed"
+    for entry in logs
+):
+    raise SystemExit(f"missing completed query request log for {want_subdomain!r}: {payload}")
+' "${SUBDOMAIN}"
+
 curl -fsS \
 	-H "Host: ${SUBDOMAIN}.localhost" \
+	-u "${BASIC_USERNAME}:${BASIC_PASSWORD}" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary "@${UPLOAD_FILE}" \
 	"http://127.0.0.1:${PUBLIC_PORT}/echo" \

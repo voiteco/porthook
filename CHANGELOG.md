@@ -4,6 +4,8 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-01
+
 ### Added
 - Added reserved-subdomain access policy storage, Postgres migration, admin APIs, and gateway evaluation API.
 - Added gateway enforcement for `public`, `basic_auth`, `bearer_token`, and `ip_allowlist` access policies before public requests reach agents.
@@ -13,6 +15,7 @@ All notable changes to Porthook are documented here.
 
 ### Changed
 - Extended gateway, control-plane, dashboard, operations, upgrade, and specification documentation for access policies and request logs.
+- Extended the control-plane smoke test to cover protected tunnel requests and gateway request logs.
 
 ## [0.7.0] - 2026-06-30
 
