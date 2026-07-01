@@ -26,7 +26,7 @@ func TestCachedCustomDomainResolverCachesResultsUntilTTL(t *testing.T) {
 			Subdomain: "demo",
 		},
 	}
-	resolver := newCachedCustomDomainResolver(next, time.Minute)
+	resolver := newCachedCustomDomainResolver(next, time.Minute, 5*time.Second)
 	cached, ok := resolver.(*cachedCustomDomainResolver)
 	if !ok {
 		t.Fatal("newCachedCustomDomainResolver returned non-cached resolver")
@@ -61,8 +61,46 @@ func TestCachedCustomDomainResolverCachesResultsUntilTTL(t *testing.T) {
 
 func TestCachedCustomDomainResolverCanBeDisabled(t *testing.T) {
 	next := &countingCustomDomainResolver{}
-	resolver := newCachedCustomDomainResolver(next, 0)
+	resolver := newCachedCustomDomainResolver(next, 0, 0)
 	if resolver != next {
 		t.Fatalf("resolver = %#v, want original resolver when ttl is zero", resolver)
+	}
+}
+
+func TestCachedCustomDomainResolverUsesShortMissTTL(t *testing.T) {
+	next := &countingCustomDomainResolver{
+		result: customDomainResolution{
+			Found:    false,
+			Hostname: "preview.example.test",
+			Reason:   "not_verified",
+		},
+	}
+	resolver := newCachedCustomDomainResolver(next, time.Minute, 5*time.Second)
+	cached, ok := resolver.(*cachedCustomDomainResolver)
+	if !ok {
+		t.Fatal("newCachedCustomDomainResolver returned non-cached resolver")
+	}
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	cached.now = func() time.Time { return now }
+
+	_, err := cached.ResolveCustomDomain(context.Background(), "preview.example.test")
+	if err != nil {
+		t.Fatalf("first ResolveCustomDomain returned error: %v", err)
+	}
+	_, err = cached.ResolveCustomDomain(context.Background(), "preview.example.test")
+	if err != nil {
+		t.Fatalf("cached ResolveCustomDomain returned error: %v", err)
+	}
+	if next.calls != 1 {
+		t.Fatalf("calls = %d, want 1", next.calls)
+	}
+
+	now = now.Add(6 * time.Second)
+	_, err = cached.ResolveCustomDomain(context.Background(), "preview.example.test")
+	if err != nil {
+		t.Fatalf("expired miss ResolveCustomDomain returned error: %v", err)
+	}
+	if next.calls != 2 {
+		t.Fatalf("calls after miss expiry = %d, want 2", next.calls)
 	}
 }

@@ -195,7 +195,7 @@ Operational behavior:
 - The agent still registers the reserved subdomain, for example `porthook http 3000 --subdomain demo`.
 - Access policies are attached to the reserved subdomain and apply to both `demo.tunnels.example.com` and any custom domains mapped to that reservation.
 - Gateway request logs include the original host and mark custom-domain routes.
-- The gateway caches custom-domain lookup results briefly. Tune `PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL` when you need faster mapping changes.
+- The gateway caches active custom-domain lookup results briefly. Tune `PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL` for active mappings and `PORTHOOK_CUSTOM_DOMAIN_MISS_TTL` for misses such as `pending_verification` when you need faster mapping changes.
 
 ## Verification
 

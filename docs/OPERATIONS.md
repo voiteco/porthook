@@ -97,6 +97,7 @@ Common symptoms:
 | --- | --- |
 | Agent cannot log in | `PORTHOOK_AGENT_DOMAIN` DNS, reverse proxy route to `porthook-gateway:8081`, `gateway.agent_auth_failed`, control-plane validator token. |
 | Tunnel URL returns 404 | Wildcard DNS, `PORTHOOK_ROOT_DOMAIN`, active `gateway.tunnel_registered` event for that subdomain. |
+| Custom domain returns 404 | `gateway.public_request` outcome, TXT verification status, `PORTHOOK_CUSTOM_DOMAIN_MISS_TTL`, preserved `Host` header, and active tunnel for the mapped reserved subdomain. |
 | Tunnel URL returns 429 | Per-tunnel rate limit settings on the gateway. |
 | Tunnel URL returns 401 | Basic or bearer access policy requires valid public credentials. |
 | Tunnel URL returns 403 | IP allowlist or another access policy denied the public request. |

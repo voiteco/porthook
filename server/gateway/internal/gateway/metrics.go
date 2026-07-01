@@ -73,7 +73,7 @@ func (s *Server) recordPublicRequestMetrics(status int, outcome string) {
 		s.metrics.publicRequestBodyTooLargeTotal.Add(1)
 	case "client_canceled":
 		s.metrics.publicRequestClientCanceledTotal.Add(1)
-	case "no_active_session", "no_tunnel_for_host":
+	case "no_active_session", "no_tunnel_for_host", "custom_domain_not_found", "custom_domain_not_verified", "custom_domain_verification_failed", "custom_domain_no_control_plane", "custom_domain_lookup_miss":
 		s.metrics.publicRequestNoActiveSessionTotal.Add(1)
 	case "access_denied":
 		s.metrics.publicRequestAccessDeniedTotal.Add(1)

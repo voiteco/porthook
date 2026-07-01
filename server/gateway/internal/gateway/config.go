@@ -16,6 +16,7 @@ const (
 	defaultStaticToken           = "dev-token"
 	defaultControlPlaneTimeout   = 5 * time.Second
 	defaultCustomDomainCacheTTL  = 30 * time.Second
+	defaultCustomDomainMissTTL   = 5 * time.Second
 	defaultMaxBodyBytes          = 1 << 20
 	defaultMaxConcurrentStreams  = 64
 	defaultRateLimitRPS          = 60
@@ -44,6 +45,7 @@ type Config struct {
 	ControlPlaneToken          string
 	ControlPlaneTimeout        time.Duration
 	CustomDomainCacheTTL       time.Duration
+	CustomDomainMissTTL        time.Duration
 	MaxBodyBytes               int64
 	MaxConcurrentStreams       int
 	RateLimitRequestsPerSecond int
@@ -73,6 +75,7 @@ func ConfigFromEnv() Config {
 		ControlPlaneToken:          envString("PORTHOOK_CONTROL_PLANE_TOKEN", ""),
 		ControlPlaneTimeout:        envDuration("PORTHOOK_CONTROL_PLANE_TIMEOUT", defaultControlPlaneTimeout),
 		CustomDomainCacheTTL:       envDuration("PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL", defaultCustomDomainCacheTTL),
+		CustomDomainMissTTL:        envDuration("PORTHOOK_CUSTOM_DOMAIN_MISS_TTL", defaultCustomDomainMissTTL),
 		MaxBodyBytes:               envInt64("PORTHOOK_MAX_BODY_BYTES", defaultMaxBodyBytes),
 		MaxConcurrentStreams:       envInt("PORTHOOK_MAX_CONCURRENT_STREAMS", defaultMaxConcurrentStreams),
 		RateLimitRequestsPerSecond: envInt("PORTHOOK_RATE_LIMIT_RPS", defaultRateLimitRPS),
@@ -113,6 +116,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.CustomDomainCacheTTL < 0 {
 		cfg.CustomDomainCacheTTL = defaultCustomDomainCacheTTL
+	}
+	if cfg.CustomDomainMissTTL < 0 {
+		cfg.CustomDomainMissTTL = defaultCustomDomainMissTTL
 	}
 	if cfg.MaxBodyBytes <= 0 {
 		cfg.MaxBodyBytes = defaultMaxBodyBytes

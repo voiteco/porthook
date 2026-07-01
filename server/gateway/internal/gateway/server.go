@@ -586,6 +586,12 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		status = http.StatusNotFound
+		customDomain = route.CustomDomain
+		if route.MissReason != "" {
+			outcome = customDomainMissOutcome(route.MissReason)
+			http.Error(w, customDomainMissMessage(route.MissReason), http.StatusNotFound)
+			return
+		}
 		outcome = "no_tunnel_for_host"
 		http.Error(w, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
 		return
@@ -834,6 +840,7 @@ func (s *Server) logPublicRequest(r *http.Request, entry publicRequestLog) {
 type hostRoute struct {
 	Subdomain    string
 	CustomDomain string
+	MissReason   string
 }
 
 func (s *Server) routeForHost(ctx context.Context, hostport string) (hostRoute, bool, error) {
@@ -845,22 +852,91 @@ func (s *Server) routeForHost(ctx context.Context, hostport string) (hostRoute, 
 	if !ok {
 		return hostRoute{}, false, nil
 	}
+	if sameHostname(hostname, s.cfg.RootDomain) {
+		return hostRoute{}, false, nil
+	}
 	s.metrics.customDomainLookupsTotal.Add(1)
 	result, err := s.domains.ResolveCustomDomain(ctx, hostname)
 	if err != nil {
 		s.metrics.customDomainLookupErrorsTotal.Add(1)
 		return hostRoute{}, false, err
 	}
+	resultHostname := strings.TrimSpace(result.Hostname)
+	if resultHostname == "" {
+		resultHostname = hostname
+	}
 	if !result.Found {
 		s.metrics.customDomainLookupMissesTotal.Add(1)
-		return hostRoute{}, false, nil
+		return hostRoute{CustomDomain: resultHostname, MissReason: customDomainMissReason(result.Reason)}, false, nil
 	}
-	if strings.TrimSpace(result.Subdomain) == "" {
+	if result.Status != "" && result.Status != "active" {
+		s.metrics.customDomainLookupMissesTotal.Add(1)
+		return hostRoute{CustomDomain: resultHostname, MissReason: customDomainStatusMissReason(result.Status)}, false, nil
+	}
+	subdomain := strings.ToLower(strings.TrimSpace(result.Subdomain))
+	if subdomain == "" {
 		s.metrics.customDomainLookupErrorsTotal.Add(1)
 		return hostRoute{}, false, fmt.Errorf("custom domain %q did not resolve to a subdomain", hostname)
 	}
+	if err := names.ValidateSubdomain(subdomain); err != nil {
+		s.metrics.customDomainLookupErrorsTotal.Add(1)
+		return hostRoute{}, false, fmt.Errorf("custom domain %q resolved to invalid subdomain %q: %w", hostname, result.Subdomain, err)
+	}
 	s.metrics.customDomainLookupHitsTotal.Add(1)
-	return hostRoute{Subdomain: result.Subdomain, CustomDomain: result.Hostname}, true, nil
+	return hostRoute{Subdomain: subdomain, CustomDomain: resultHostname}, true, nil
+}
+
+func sameHostname(left, right string) bool {
+	left = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(left)), ".")
+	right = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(right)), ".")
+	return left != "" && left == right
+}
+
+func customDomainStatusMissReason(status string) string {
+	switch strings.TrimSpace(status) {
+	case "pending_verification":
+		return "not_verified"
+	case "verification_failed":
+		return "verification_failed"
+	default:
+		return "not_found"
+	}
+}
+
+func customDomainMissReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "not_found"
+	}
+	return reason
+}
+
+func customDomainMissOutcome(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case "not_verified":
+		return "custom_domain_not_verified"
+	case "verification_failed":
+		return "custom_domain_verification_failed"
+	case "no_control_plane":
+		return "custom_domain_no_control_plane"
+	case "not_found", "":
+		return "custom_domain_not_found"
+	default:
+		return "custom_domain_lookup_miss"
+	}
+}
+
+func customDomainMissMessage(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case "not_verified":
+		return "custom domain is pending verification"
+	case "verification_failed":
+		return "custom domain verification failed"
+	case "no_control_plane":
+		return "custom domains require a control plane"
+	default:
+		return "custom domain was not found"
+	}
 }
 
 func (s *Server) subdomainFromHost(hostport string) (string, bool) {
