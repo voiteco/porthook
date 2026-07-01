@@ -17,6 +17,7 @@ type requestLogEntry struct {
 	QueryPresent  bool      `json:"query_present"`
 	RemoteIP      string    `json:"remote_ip"`
 	Subdomain     string    `json:"subdomain,omitempty"`
+	CustomDomain  string    `json:"custom_domain,omitempty"`
 	TunnelID      string    `json:"tunnel_id,omitempty"`
 	StreamID      string    `json:"stream_id,omitempty"`
 	Status        int       `json:"status"`
@@ -96,6 +97,7 @@ func requestLogEntryFromPublicRequest(r *http.Request, entry publicRequestLog) r
 		QueryPresent:  r.URL.RawQuery != "",
 		RemoteIP:      remoteIP(r.RemoteAddr),
 		Subdomain:     entry.Subdomain,
+		CustomDomain:  entry.CustomDomain,
 		TunnelID:      entry.TunnelID,
 		StreamID:      entry.StreamID,
 		Status:        entry.Status,

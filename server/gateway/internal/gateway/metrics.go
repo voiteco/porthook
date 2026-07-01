@@ -19,6 +19,10 @@ type metrics struct {
 	publicRequestNoActiveSessionTotal    atomic.Uint64
 	publicRequestAccessDeniedTotal       atomic.Uint64
 	publicRequestAccessPolicyErrorsTotal atomic.Uint64
+	customDomainLookupsTotal             atomic.Uint64
+	customDomainLookupHitsTotal          atomic.Uint64
+	customDomainLookupMissesTotal        atomic.Uint64
+	customDomainLookupErrorsTotal        atomic.Uint64
 	tokenValidationsTotal                atomic.Uint64
 	tokenValidationErrorsTotal           atomic.Uint64
 	authFailuresTotal                    atomic.Uint64
@@ -44,6 +48,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetric(w, "porthook_gateway_public_request_no_active_session_total", "Public HTTP requests for hosts without an active tunnel session.", "counter", s.metrics.publicRequestNoActiveSessionTotal.Load())
 	writeMetric(w, "porthook_gateway_public_request_access_denied_total", "Public HTTP requests rejected by tunnel access policy.", "counter", s.metrics.publicRequestAccessDeniedTotal.Load())
 	writeMetric(w, "porthook_gateway_public_request_access_policy_errors_total", "Public HTTP requests that could not evaluate tunnel access policy.", "counter", s.metrics.publicRequestAccessPolicyErrorsTotal.Load())
+	writeMetric(w, "porthook_gateway_custom_domain_lookups_total", "Custom domain lookups attempted by the gateway.", "counter", s.metrics.customDomainLookupsTotal.Load())
+	writeMetric(w, "porthook_gateway_custom_domain_lookup_hits_total", "Custom domain lookups that found a tunnel route.", "counter", s.metrics.customDomainLookupHitsTotal.Load())
+	writeMetric(w, "porthook_gateway_custom_domain_lookup_misses_total", "Custom domain lookups that did not find a tunnel route.", "counter", s.metrics.customDomainLookupMissesTotal.Load())
+	writeMetric(w, "porthook_gateway_custom_domain_lookup_errors_total", "Custom domain lookups that failed before producing a route.", "counter", s.metrics.customDomainLookupErrorsTotal.Load())
 	writeMetric(w, "porthook_gateway_token_validations_total", "Agent token validation attempts.", "counter", s.metrics.tokenValidationsTotal.Load())
 	writeMetric(w, "porthook_gateway_token_validation_errors_total", "Agent token validation attempts that failed before a valid/invalid result.", "counter", s.metrics.tokenValidationErrorsTotal.Load())
 	writeMetric(w, "porthook_gateway_auth_failures_total", "Agent authentication failures.", "counter", s.metrics.authFailuresTotal.Load())
