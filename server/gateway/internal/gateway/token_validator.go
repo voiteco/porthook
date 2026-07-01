@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/voiteco/porthook/server/internal/telemetry"
 )
 
 const scopeRegisterTunnel = "register_tunnel"
@@ -236,7 +238,8 @@ func newControlPlaneClient(cfg Config) (controlPlaneClient, error) {
 		customDomainLookupEndpoint:     customDomainLookupEndpoint,
 		bearerToken:                    controlPlaneToken,
 		client: &http.Client{
-			Timeout: cfg.ControlPlaneTimeout,
+			Timeout:   cfg.ControlPlaneTimeout,
+			Transport: telemetry.HTTPTransport(nil),
 		},
 	}, nil
 }

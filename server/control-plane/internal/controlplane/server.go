@@ -21,6 +21,7 @@ import (
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 	"github.com/voiteco/porthook/server/dashboard"
+	"github.com/voiteco/porthook/server/internal/telemetry"
 )
 
 type Server struct {
@@ -174,7 +175,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/reserved-subdomains", s.handleReservedSubdomains)
 	mux.HandleFunc("/api/v1/reserved-subdomains/", s.handleReservedSubdomainByID)
 	mux.HandleFunc("/api/v1/reserved-subdomains/authorize", s.handleAuthorizeReservedSubdomain)
-	return mux
+	return telemetry.HTTPHandler(mux, "control_plane.http")
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {

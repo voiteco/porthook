@@ -9,6 +9,7 @@ Use them together with:
 - [Domains and TLS](./DOMAINS_TLS.md)
 - [Control-Plane Access Boundary](./ACCESS_BOUNDARY.md)
 - [Docker Compose Deployment](../deploy/compose/README.md)
+- [Observability](./OBSERVABILITY.md)
 - [Upgrading](./UPGRADING.md)
 
 ## Production Compose Deploy

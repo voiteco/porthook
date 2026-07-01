@@ -68,6 +68,8 @@ Required local environment values:
 | `PORTHOOK_AGENT_PORT` | Host port mapped to the gateway agent WebSocket listener. |
 | `PORTHOOK_CONTROL_PORT` | Host port mapped to the control-plane API listener. |
 
+Optional OpenTelemetry values in the example env file can enable gateway and control-plane trace export. Leave `PORTHOOK_OTEL_ENABLED=false` unless an OTLP collector or stdout trace debugging is intentionally configured. See [../../docs/OBSERVABILITY.md](../../docs/OBSERVABILITY.md).
+
 Start Postgres, the control plane, and the gateway:
 
 ```sh
@@ -93,6 +95,7 @@ The production Compose stack keeps the gateway and control-plane ports private t
 Read [../../docs/DOMAINS_TLS.md](../../docs/DOMAINS_TLS.md) before using this stack for internet-facing traffic.
 Read [../../docs/ACCESS_BOUNDARY.md](../../docs/ACCESS_BOUNDARY.md) before exposing `PORTHOOK_CONTROL_DOMAIN`.
 Use [../../docs/OPERATIONS.md](../../docs/OPERATIONS.md) for backup, restore, upgrade, rollback, and token rotation runbooks.
+Use [../../docs/OBSERVABILITY.md](../../docs/OBSERVABILITY.md) for Prometheus metrics and OpenTelemetry tracing configuration.
 
 Copy the production example environment and replace every `change-me` value:
 

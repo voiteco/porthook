@@ -55,6 +55,9 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_WS_PONG_TIMEOUT` | `5s` | WebSocket keepalive pong timeout. |
 | `PORTHOOK_SHUTDOWN_TIMEOUT` | `5s` | Graceful shutdown timeout. |
 | `PORTHOOK_REQUEST_LOG_LIMIT` | `500` | Number of recent public request log entries kept in memory. Set `0` to disable the in-memory request log endpoint. |
+| `PORTHOOK_OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing. |
+| `PORTHOOK_OTEL_EXPORTER` | `none` | Trace exporter: `otlp`, `otlp-http`, `otlp-grpc`, `stdout`, `console`, or `none`. |
+| `PORTHOOK_OTEL_PROTOCOL` | `http/protobuf` | OTLP protocol when using `PORTHOOK_OTEL_EXPORTER=otlp`: `http/protobuf` or `grpc`. |
 
 Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
 
@@ -81,3 +84,5 @@ When `PORTHOOK_CONTROL_PLANE_URL` is configured, requested subdomains require an
 Reserved subdomains may also have public access policies managed by the control plane. The gateway evaluates those policies before forwarding public requests to the agent. Supported policy modes are `public`, `basic_auth`, `bearer_token`, and `ip_allowlist`. Basic and bearer credentials used for gateway access are consumed at the gateway and are not forwarded to the local service.
 
 Custom domains are resolved through the control plane when a public request host does not match `{subdomain}.{PORTHOOK_ROOT_DOMAIN}`. A custom domain maps to a reserved subdomain, so the agent still registers the reserved name and any access policy on that reservation applies to both the wildcard hostname and mapped custom hostnames.
+
+OpenTelemetry tracing is disabled by default. See [../../docs/OBSERVABILITY.md](../../docs/OBSERVABILITY.md) for OTLP and stdout trace exporter configuration.

@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/voiteco/porthook/server/gateway/internal/gateway"
+	"github.com/voiteco/porthook/server/internal/telemetry"
 )
 
 var version = "dev"
@@ -37,6 +39,16 @@ func run(args []string, stdout io.Writer) error {
 	logger := slog.New(slog.NewTextHandler(stdout, nil))
 	cfg := gateway.ConfigFromEnv()
 
+	shutdownTelemetry, err := telemetry.Setup(context.Background(), telemetry.ConfigFromEnv("porthook-gateway", version))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), maxDuration(cfg.ShutdownTimeout, 5*time.Second))
+		defer cancel()
+		_ = shutdownTelemetry(shutdownCtx)
+	}()
+
 	server := gateway.NewServer(cfg, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -49,4 +61,11 @@ func run(args []string, stdout io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
 }
