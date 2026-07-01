@@ -4,6 +4,21 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-01
+
+### Added
+- Added custom domain storage, Postgres migration, admin APIs, and gateway lookup API for control-plane-backed self-hosted deployments.
+- Added gateway custom-domain routing with lookup caching, metrics, request log fields, and control-plane client integration.
+- Added `porthook domains create`, `porthook domains list`, and `porthook domains delete` for self-hosted custom domain administration.
+- Added dashboard custom domain management.
+- Added custom domain DNS, TLS, deployment, upgrade, and self-hosting documentation.
+- Added optional OpenTelemetry tracing for gateway and control-plane HTTP paths with stdout and OTLP exporters.
+- Added dashboard operational overview charts for active tunnels, recent requests, error rate, latency, outcomes, and status classes.
+
+### Changed
+- Updated the Go toolchain requirement and server Docker build images to Go 1.25 for current OpenTelemetry dependencies.
+- Updated README, specifications, Compose examples, and operations docs for custom domains, tracing, and dashboard operational views.
+
 ## [0.8.0] - 2026-07-01
 
 ### Added
