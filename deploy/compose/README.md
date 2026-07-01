@@ -64,6 +64,8 @@ Required local environment values:
 | `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | Shared bearer token used by the gateway when validating agent tokens through the control plane. |
 | `PORTHOOK_ROOT_DOMAIN` | Root domain used for tunnel subdomains. Use `localhost` for local smoke testing. |
 | `PORTHOOK_PUBLIC_URL` | Public base URL printed by the gateway when a tunnel is registered. |
+| `PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL` | Gateway cache TTL for active custom-domain mappings. |
+| `PORTHOOK_CUSTOM_DOMAIN_MISS_TTL` | Gateway cache TTL for custom-domain misses and pending verification states. |
 | `PORTHOOK_PUBLIC_PORT` | Host port mapped to the gateway public HTTP listener. |
 | `PORTHOOK_AGENT_PORT` | Host port mapped to the gateway agent WebSocket listener. |
 | `PORTHOOK_CONTROL_PORT` | Host port mapped to the control-plane API listener. |
@@ -109,6 +111,8 @@ Configure these public names:
 | --- | --- |
 | `PORTHOOK_ROOT_DOMAIN` | Wildcard tunnel domain, for example `tunnels.example.com`. |
 | `PORTHOOK_PUBLIC_URL` | Public URL printed for registered tunnels, for example `https://tunnels.example.com`. |
+| `PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL` | Gateway cache TTL for active custom-domain mappings. |
+| `PORTHOOK_CUSTOM_DOMAIN_MISS_TTL` | Gateway cache TTL for custom-domain misses and pending verification states. |
 | `PORTHOOK_AGENT_DOMAIN` | Dedicated hostname agents use for WebSocket connections. |
 | `PORTHOOK_CONTROL_DOMAIN` | Dedicated hostname for the control-plane API and dashboard. |
 | `PORTHOOK_CADDYFILE_PATH` | Caddyfile mounted into the reverse proxy. |

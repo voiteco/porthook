@@ -10,11 +10,12 @@ import (
 )
 
 type cachedCustomDomainResolver struct {
-	next  customDomainResolver
-	ttl   time.Duration
-	now   func() time.Time
-	mu    sync.RWMutex
-	cache map[string]customDomainCacheEntry
+	next    customDomainResolver
+	hitTTL  time.Duration
+	missTTL time.Duration
+	now     func() time.Time
+	mu      sync.RWMutex
+	cache   map[string]customDomainCacheEntry
 }
 
 type customDomainCacheEntry struct {
@@ -22,18 +23,22 @@ type customDomainCacheEntry struct {
 	expires time.Time
 }
 
-func newCachedCustomDomainResolver(next customDomainResolver, ttl time.Duration) customDomainResolver {
-	if ttl == 0 {
+func newCachedCustomDomainResolver(next customDomainResolver, hitTTL, missTTL time.Duration) customDomainResolver {
+	if hitTTL == 0 && missTTL == 0 {
 		return next
 	}
-	if ttl < 0 {
-		ttl = defaultCustomDomainCacheTTL
+	if hitTTL < 0 {
+		hitTTL = defaultCustomDomainCacheTTL
+	}
+	if missTTL < 0 {
+		missTTL = defaultCustomDomainMissTTL
 	}
 	return &cachedCustomDomainResolver{
-		next:  next,
-		ttl:   ttl,
-		now:   func() time.Time { return time.Now().UTC() },
-		cache: make(map[string]customDomainCacheEntry),
+		next:    next,
+		hitTTL:  hitTTL,
+		missTTL: missTTL,
+		now:     func() time.Time { return time.Now().UTC() },
+		cache:   make(map[string]customDomainCacheEntry),
 	}
 }
 
@@ -56,10 +61,18 @@ func (r *cachedCustomDomainResolver) ResolveCustomDomain(ctx context.Context, ho
 		return customDomainResolution{}, err
 	}
 
+	ttl := r.hitTTL
+	if !result.Found {
+		ttl = r.missTTL
+	}
+	if ttl <= 0 {
+		return result, nil
+	}
+
 	r.mu.Lock()
 	r.cache[key] = customDomainCacheEntry{
 		result:  result,
-		expires: now.Add(r.ttl),
+		expires: now.Add(ttl),
 	}
 	r.mu.Unlock()
 	return result, nil

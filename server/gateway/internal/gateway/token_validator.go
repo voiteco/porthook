@@ -210,7 +210,7 @@ func newCustomDomainResolver(cfg Config) (customDomainResolver, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newCachedCustomDomainResolver(client, cfg.CustomDomainCacheTTL), nil
+	return newCachedCustomDomainResolver(client, cfg.CustomDomainCacheTTL, cfg.CustomDomainMissTTL), nil
 }
 
 func newControlPlaneClient(cfg Config) (controlPlaneClient, error) {

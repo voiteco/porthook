@@ -1097,6 +1097,81 @@ func TestPublicRequestRoutesCustomDomainThroughControlPlane(t *testing.T) {
 	}
 }
 
+func TestRouteForHostReturnsCustomDomainMissReason(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	server.domains = &routeTestCustomDomainResolver{
+		result: customDomainResolution{
+			Found:    false,
+			Reason:   "not_verified",
+			Hostname: "preview.example.test",
+			Status:   "pending_verification",
+		},
+	}
+
+	route, ok, err := server.routeForHost(context.Background(), "preview.example.test")
+	if err != nil {
+		t.Fatalf("routeForHost returned error: %v", err)
+	}
+	if ok {
+		t.Fatal("routeForHost returned ok for pending custom domain")
+	}
+	if route.CustomDomain != "preview.example.test" || route.MissReason != "not_verified" {
+		t.Fatalf("route = %+v, want custom domain miss reason", route)
+	}
+	if got := customDomainMissOutcome(route.MissReason); got != "custom_domain_not_verified" {
+		t.Fatalf("outcome = %q, want custom_domain_not_verified", got)
+	}
+}
+
+func TestRouteForHostRejectsInvalidCustomDomainSubdomain(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	server.domains = &routeTestCustomDomainResolver{
+		result: customDomainResolution{
+			Found:     true,
+			Hostname:  "preview.example.test",
+			Subdomain: "bad_name",
+			Status:    "active",
+		},
+	}
+
+	_, ok, err := server.routeForHost(context.Background(), "preview.example.test")
+	if err == nil {
+		t.Fatal("routeForHost returned nil error for invalid subdomain")
+	}
+	if ok {
+		t.Fatal("routeForHost returned ok for invalid subdomain")
+	}
+	if !strings.Contains(err.Error(), "invalid subdomain") {
+		t.Fatalf("error = %q, want invalid subdomain", err.Error())
+	}
+}
+
+func TestRouteForHostDoesNotLookupRootDomainAsCustomDomain(t *testing.T) {
+	cfg := testConfig()
+	cfg.RootDomain = "example.test"
+	server := NewServer(cfg, slog.Default())
+	resolver := &routeTestCustomDomainResolver{
+		result: customDomainResolution{
+			Found:     true,
+			Hostname:  "example.test",
+			Subdomain: "demo",
+			Status:    "active",
+		},
+	}
+	server.domains = resolver
+
+	_, ok, err := server.routeForHost(context.Background(), "example.test")
+	if err != nil {
+		t.Fatalf("routeForHost returned error: %v", err)
+	}
+	if ok {
+		t.Fatal("routeForHost routed the root domain")
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("custom domain lookup calls = %d, want 0", resolver.calls)
+	}
+}
+
 func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
 	cfg := testConfig()
 	cfg.RequestLogLimit = 2
@@ -1940,6 +2015,20 @@ type errString string
 
 func (e errString) Error() string {
 	return string(e)
+}
+
+type routeTestCustomDomainResolver struct {
+	calls  int
+	result customDomainResolution
+	err    error
+}
+
+func (r *routeTestCustomDomainResolver) ResolveCustomDomain(context.Context, string) (customDomainResolution, error) {
+	r.calls++
+	if r.err != nil {
+		return customDomainResolution{}, r.err
+	}
+	return r.result, nil
 }
 
 func errUnexpectedType(got, want messages.Type) error {
