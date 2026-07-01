@@ -28,6 +28,10 @@ type accessPolicyEvaluator interface {
 	EvaluateAccessPolicy(context.Context, accessPolicyEvaluationRequest) (accessPolicyEvaluation, error)
 }
 
+type customDomainResolver interface {
+	ResolveCustomDomain(context.Context, string) (customDomainResolution, error)
+}
+
 type agentTokenValidation struct {
 	Valid   bool
 	TokenID string
@@ -52,12 +56,23 @@ type accessPolicyEvaluation struct {
 	Reason  string
 }
 
+type customDomainResolution struct {
+	Found               bool
+	Reason              string
+	Hostname            string
+	CustomDomainID      string
+	ReservedSubdomainID string
+	Subdomain           string
+	Status              string
+}
+
 type staticTokenValidator struct {
 	token string
 }
 
 type staticReservedSubdomainAuthorizer struct{}
 type staticAccessPolicyEvaluator struct{}
+type staticCustomDomainResolver struct{}
 
 type errorTokenValidator struct {
 	err error
@@ -68,6 +83,10 @@ type errorReservedSubdomainAuthorizer struct {
 }
 
 type errorAccessPolicyEvaluator struct {
+	err error
+}
+
+type errorCustomDomainResolver struct {
 	err error
 }
 
@@ -87,6 +106,10 @@ func (v staticAccessPolicyEvaluator) EvaluateAccessPolicy(context.Context, acces
 	return accessPolicyEvaluation{Allowed: true, Mode: "public", Reason: "no_control_plane"}, nil
 }
 
+func (v staticCustomDomainResolver) ResolveCustomDomain(context.Context, string) (customDomainResolution, error) {
+	return customDomainResolution{Found: false, Reason: "no_control_plane"}, nil
+}
+
 func (v errorReservedSubdomainAuthorizer) AuthorizeReservedSubdomain(context.Context, string, string) (reservedSubdomainAuthorization, error) {
 	return reservedSubdomainAuthorization{}, v.err
 }
@@ -95,10 +118,15 @@ func (v errorAccessPolicyEvaluator) EvaluateAccessPolicy(context.Context, access
 	return accessPolicyEvaluation{}, v.err
 }
 
+func (v errorCustomDomainResolver) ResolveCustomDomain(context.Context, string) (customDomainResolution, error) {
+	return customDomainResolution{}, v.err
+}
+
 type controlPlaneClient struct {
 	tokenValidationEndpoint        string
 	reservedSubdomainAuthzEndpoint string
 	accessPolicyEvaluationEndpoint string
+	customDomainLookupEndpoint     string
 	bearerToken                    string
 	client                         *http.Client
 }
@@ -137,6 +165,20 @@ type evaluateAccessPolicyResponse struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
+type lookupCustomDomainRequest struct {
+	Hostname string `json:"hostname"`
+}
+
+type lookupCustomDomainResponse struct {
+	Found               bool   `json:"found"`
+	Reason              string `json:"reason,omitempty"`
+	Hostname            string `json:"hostname,omitempty"`
+	CustomDomainID      string `json:"custom_domain_id,omitempty"`
+	ReservedSubdomainID string `json:"reserved_subdomain_id,omitempty"`
+	Subdomain           string `json:"subdomain,omitempty"`
+	Status              string `json:"status,omitempty"`
+}
+
 func newAgentTokenValidator(cfg Config) (agentTokenValidator, error) {
 	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
 		return staticTokenValidator{token: cfg.StaticToken}, nil
@@ -158,6 +200,17 @@ func newAccessPolicyEvaluator(cfg Config) (accessPolicyEvaluator, error) {
 	return newControlPlaneClient(cfg)
 }
 
+func newCustomDomainResolver(cfg Config) (customDomainResolver, error) {
+	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
+		return staticCustomDomainResolver{}, nil
+	}
+	client, err := newControlPlaneClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return newCachedCustomDomainResolver(client, cfg.CustomDomainCacheTTL), nil
+}
+
 func newControlPlaneClient(cfg Config) (controlPlaneClient, error) {
 	controlPlaneToken := strings.TrimSpace(cfg.ControlPlaneToken)
 	if controlPlaneToken == "" {
@@ -174,15 +227,56 @@ func newControlPlaneClient(cfg Config) (controlPlaneClient, error) {
 	tokenValidationEndpoint := controlPlaneEndpoint(*parsed, "/api/v1/tokens/validate")
 	reservedSubdomainAuthzEndpoint := controlPlaneEndpoint(*parsed, "/api/v1/reserved-subdomains/authorize")
 	accessPolicyEvaluationEndpoint := controlPlaneEndpoint(*parsed, "/api/v1/access-policies/evaluate")
+	customDomainLookupEndpoint := controlPlaneEndpoint(*parsed, "/api/v1/custom-domains/lookup")
 
 	return controlPlaneClient{
 		tokenValidationEndpoint:        tokenValidationEndpoint,
 		reservedSubdomainAuthzEndpoint: reservedSubdomainAuthzEndpoint,
 		accessPolicyEvaluationEndpoint: accessPolicyEvaluationEndpoint,
+		customDomainLookupEndpoint:     customDomainLookupEndpoint,
 		bearerToken:                    controlPlaneToken,
 		client: &http.Client{
 			Timeout: cfg.ControlPlaneTimeout,
 		},
+	}, nil
+}
+
+func (v controlPlaneClient) ResolveCustomDomain(ctx context.Context, hostname string) (customDomainResolution, error) {
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(lookupCustomDomainRequest{
+		Hostname: hostname,
+	}); err != nil {
+		return customDomainResolution{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.customDomainLookupEndpoint, &body)
+	if err != nil {
+		return customDomainResolution{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+v.bearerToken)
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return customDomainResolution{}, fmt.Errorf("lookup custom domain: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return customDomainResolution{}, fmt.Errorf("lookup custom domain returned status %d", resp.StatusCode)
+	}
+
+	var result lookupCustomDomainResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return customDomainResolution{}, fmt.Errorf("decode custom domain lookup: %w", err)
+	}
+	return customDomainResolution{
+		Found:               result.Found,
+		Reason:              result.Reason,
+		Hostname:            result.Hostname,
+		CustomDomainID:      result.CustomDomainID,
+		ReservedSubdomainID: result.ReservedSubdomainID,
+		Subdomain:           result.Subdomain,
+		Status:              result.Status,
 	}, nil
 }
 

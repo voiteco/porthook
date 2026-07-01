@@ -40,6 +40,7 @@ type Server struct {
 	tokens      agentTokenValidator
 	reserved    reservedSubdomainAuthorizer
 	access      accessPolicyEvaluator
+	domains     customDomainResolver
 	metrics     metrics
 	startedAt   time.Time
 	requestLogs *requestLogBuffer
@@ -71,6 +72,11 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 		logger.Warn("gateway access policy evaluator configuration failed", "event", "gateway.access_policy_evaluator_config_failed", "error", err)
 		accessPolicyEvaluator = errorAccessPolicyEvaluator{err: err}
 	}
+	customDomainResolver, err := newCustomDomainResolver(cfg)
+	if err != nil {
+		logger.Warn("gateway custom domain resolver configuration failed", "event", "gateway.custom_domain_resolver_config_failed", "error", err)
+		customDomainResolver = errorCustomDomainResolver{err: err}
+	}
 
 	return &Server{
 		cfg:         cfg,
@@ -79,6 +85,7 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 		tokens:      tokenValidator,
 		reserved:    reservedAuthorizer,
 		access:      accessPolicyEvaluator,
+		domains:     customDomainResolver,
 		startedAt:   time.Now().UTC(),
 		requestLogs: newRequestLogBuffer(cfg.RequestLogLimit),
 		sessions:    make(map[string]*agentSession),
@@ -531,6 +538,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	status := 0
 	outcome := "unknown"
 	var subdomain string
+	var customDomain string
 	var tunnelID string
 	var streamID string
 	var requestBytes int64
@@ -546,6 +554,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 			Status:        status,
 			Outcome:       outcome,
 			Subdomain:     subdomain,
+			CustomDomain:  customDomain,
 			TunnelID:      tunnelID,
 			StreamID:      streamID,
 			RequestBytes:  requestBytes,
@@ -557,13 +566,22 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		s.recordPublicRequestMetrics(status, outcome)
 	}()
 
-	subdomain, ok := s.subdomainFromHost(r.Host)
+	route, ok, err := s.routeForHost(r.Context(), r.Host)
+	if err != nil {
+		status = http.StatusServiceUnavailable
+		outcome = "custom_domain_lookup_failed"
+		requestErr = err
+		http.Error(w, "custom domain lookup failed", http.StatusServiceUnavailable)
+		return
+	}
 	if !ok {
 		status = http.StatusNotFound
 		outcome = "no_tunnel_for_host"
 		http.Error(w, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
 		return
 	}
+	subdomain = route.Subdomain
+	customDomain = route.CustomDomain
 
 	session, ok := s.sessionBySubdomain(subdomain)
 	if !ok {
@@ -762,6 +780,7 @@ type publicRequestLog struct {
 	Status        int
 	Outcome       string
 	Subdomain     string
+	CustomDomain  string
 	TunnelID      string
 	StreamID      string
 	RequestBytes  int64
@@ -783,6 +802,7 @@ func (s *Server) logPublicRequest(r *http.Request, entry publicRequestLog) {
 		slog.Bool("query_present", r.URL.RawQuery != ""),
 		slog.String("remote_ip", remoteIP(r.RemoteAddr)),
 		slog.String("subdomain", entry.Subdomain),
+		slog.String("custom_domain", entry.CustomDomain),
 		slog.String("tunnel_id", entry.TunnelID),
 		slog.String("stream_id", entry.StreamID),
 		slog.Int("status", entry.Status),
@@ -799,6 +819,38 @@ func (s *Server) logPublicRequest(r *http.Request, entry publicRequestLog) {
 	}
 
 	s.logger.LogAttrs(r.Context(), level, "public request", attrs...)
+}
+
+type hostRoute struct {
+	Subdomain    string
+	CustomDomain string
+}
+
+func (s *Server) routeForHost(ctx context.Context, hostport string) (hostRoute, bool, error) {
+	if subdomain, ok := s.subdomainFromHost(hostport); ok {
+		return hostRoute{Subdomain: subdomain}, true, nil
+	}
+
+	hostname, ok := customDomainLookupHostname(hostport)
+	if !ok {
+		return hostRoute{}, false, nil
+	}
+	s.metrics.customDomainLookupsTotal.Add(1)
+	result, err := s.domains.ResolveCustomDomain(ctx, hostname)
+	if err != nil {
+		s.metrics.customDomainLookupErrorsTotal.Add(1)
+		return hostRoute{}, false, err
+	}
+	if !result.Found {
+		s.metrics.customDomainLookupMissesTotal.Add(1)
+		return hostRoute{}, false, nil
+	}
+	if strings.TrimSpace(result.Subdomain) == "" {
+		s.metrics.customDomainLookupErrorsTotal.Add(1)
+		return hostRoute{}, false, fmt.Errorf("custom domain %q did not resolve to a subdomain", hostname)
+	}
+	s.metrics.customDomainLookupHitsTotal.Add(1)
+	return hostRoute{Subdomain: result.Subdomain, CustomDomain: result.Hostname}, true, nil
 }
 
 func (s *Server) subdomainFromHost(hostport string) (string, bool) {
@@ -823,6 +875,40 @@ func (s *Server) subdomainFromHost(hostport string) (string, bool) {
 		return "", false
 	}
 	return subdomain, true
+}
+
+func customDomainLookupHostname(hostport string) (string, bool) {
+	host := strings.ToLower(strings.TrimSpace(hostport))
+	if host == "" {
+		return "", false
+	}
+	if splitHost, _, err := net.SplitHostPort(host); err == nil {
+		host = splitHost
+	} else if strings.Contains(host, ":") {
+		return "", false
+	}
+	host = strings.TrimSuffix(host, ".")
+	if !strings.Contains(host, ".") {
+		return "", false
+	}
+	if strings.ContainsAny(host, "*/_") {
+		return "", false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > names.MaxSubdomainLength || label[0] == '-' || label[len(label)-1] == '-' {
+			return "", false
+		}
+		for _, r := range label {
+			switch {
+			case r >= 'a' && r <= 'z':
+			case r >= '0' && r <= '9':
+			case r == '-':
+			default:
+				return "", false
+			}
+		}
+	}
+	return host, true
 }
 
 func (s *Server) sessionBySubdomain(subdomain string) (*agentSession, bool) {

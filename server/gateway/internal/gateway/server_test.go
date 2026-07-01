@@ -963,6 +963,140 @@ func TestPublicRequestEnforcesBasicAccessPolicy(t *testing.T) {
 	}
 }
 
+func TestPublicRequestRoutesCustomDomainThroughControlPlane(t *testing.T) {
+	lookupCalls := 0
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer validator-secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/tokens/validate":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"valid":    true,
+				"token_id": "tok_owner",
+			})
+		case "/api/v1/reserved-subdomains/authorize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": true,
+			})
+		case "/api/v1/custom-domains/lookup":
+			lookupCalls++
+			var req lookupCustomDomainRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if req.Hostname != "preview.example.test" {
+				http.Error(w, "unexpected hostname", http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"found":                 true,
+				"hostname":              "preview.example.test",
+				"custom_domain_id":      "cd_preview",
+				"reserved_subdomain_id": "rs_demo",
+				"subdomain":             "demo",
+				"status":                "active",
+			})
+		case "/api/v1/access-policies/evaluate":
+			var req evaluateAccessPolicyRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if req.Subdomain != "demo" {
+				http.Error(w, "unexpected subdomain", http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": true,
+				"mode":    "public",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
+	cfg := testConfig()
+	cfg.ControlPlaneURL = controlPlane.URL
+	cfg.ControlPlaneToken = "validator-secret"
+	cfg.StreamTimeout = 200 * time.Millisecond
+	cfg.CustomDomainCacheTTL = time.Minute
+	cfg.RequestLogLimit = 10
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, payload, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if payload.Path != "/custom" {
+			agentErr <- errString("unexpected forwarded path")
+			return
+		}
+		agentErr <- writeStreamedResponse(ctx, conn, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+			Status: http.StatusOK,
+			Body:   []byte("custom ok"),
+		})
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/custom", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "preview.example.test"
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("custom domain request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || string(body) != "custom ok" {
+		t.Fatalf("response = %d %q, want 200 custom ok", resp.StatusCode, string(body))
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+	if lookupCalls != 1 {
+		t.Fatalf("lookup calls = %d, want 1", lookupCalls)
+	}
+
+	logResp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?limit=1")
+	if err != nil {
+		t.Fatalf("GET request logs returned error: %v", err)
+	}
+	defer logResp.Body.Close()
+	var logs requestLogsResponse
+	if err := json.NewDecoder(logResp.Body).Decode(&logs); err != nil {
+		t.Fatalf("decode request logs returned error: %v", err)
+	}
+	if len(logs.RequestLogs) != 1 || logs.RequestLogs[0].CustomDomain != "preview.example.test" {
+		t.Fatalf("request logs = %+v, want custom domain", logs.RequestLogs)
+	}
+}
+
 func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
 	cfg := testConfig()
 	cfg.RequestLogLimit = 2
