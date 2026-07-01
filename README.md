@@ -4,7 +4,7 @@ Porthook is an open-source reverse tunnel service for exposing local development
 
 This repository is the public self-hosted product. Private commercial, hosted-cloud, pricing, and operating plans should live in separate private repositories.
 
-Project status: pre-1.0. The local HTTP tunnel path, self-hosted control-plane token management, gateway token validation, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs and operational defaults can still change before 1.0.
+Project status: pre-1.0. The local HTTP tunnel path, self-hosted control-plane token management, gateway token validation, reserved subdomains, access policies, custom domain mappings, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs and operational defaults can still change before 1.0.
 
 ## What It Does
 
@@ -42,6 +42,7 @@ The first product shape is intentionally narrow:
 - Wildcard subdomain routing.
 - Token-based tunnel authentication.
 - Optional control-plane token validation for self-hosted deployments.
+- Reserved subdomains, access policies, and custom domain mappings for control-plane-backed deployments.
 - Health, readiness, and Prometheus text metrics endpoints.
 - Basic request logs for local debugging.
 - Agent reconnects for transient gateway disconnects.
@@ -106,7 +107,6 @@ Out of scope for the first MVP:
 
 - Raw TCP and UDP tunnels.
 - Multi-region routing.
-- Custom domains.
 - Organization management.
 - Hosted-cloud operations.
 - Commercial features.
@@ -123,11 +123,11 @@ The public edge service that terminates HTTP or HTTPS, routes hostnames to activ
 
 ### Control Plane
 
-The API layer for users, tokens, tunnel sessions, reserved names, and limits. The current implementation includes `porthook-control-plane` for self-hosted token creation, validation, revocation, and reserved subdomain ownership.
+The API layer for users, tokens, tunnel sessions, reserved names, custom domain mappings, and limits. The current implementation includes `porthook-control-plane` for self-hosted token creation, validation, revocation, reserved subdomain ownership, access policies, and custom domains.
 
 ### Dashboard
 
-A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login, token administration, reserved subdomain administration, access policy management, active gateway tunnel visibility, and gateway request logs.
+A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login, token administration, reserved subdomain administration, custom domain management, access policy management, active gateway tunnel visibility, and gateway request logs.
 
 ## Development Roadmap
 
@@ -144,12 +144,12 @@ Completed foundations:
 9. Reserved subdomains for requested tunnel names.
 10. Per-tunnel public access policies for reserved subdomains.
 11. Gateway request log visibility.
+12. Per-tunnel custom domain mappings for self-hosted deployments.
 
 Next major public work:
 
-1. Per-tunnel custom domain support.
-2. OpenTelemetry traces.
-3. Dashboard charts and deeper operational views.
+1. OpenTelemetry traces.
+2. Dashboard charts and deeper operational views.
 
 ## Self-Hosted Quick Start
 
@@ -180,7 +180,7 @@ Open the self-hosted dashboard:
 http://localhost:8082/dashboard/
 ```
 
-Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, manage access policies, show active gateway tunnels, and inspect recent gateway request logs.
+Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, manage custom domains and access policies, show active gateway tunnels, and inspect recent gateway request logs.
 
 Create an agent token:
 
@@ -204,6 +204,16 @@ reservation_json="$(printf '%s' '<admin-token>' | porthook reserved create \
   --token-id "${agent_token_id}" \
   --json)"
 reservation_id="$(printf '%s' "${reservation_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+```
+
+Optionally map a custom hostname to that reserved subdomain:
+
+```sh
+printf '%s' '<admin-token>' | porthook domains create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --hostname demo.example.test \
+  --reserved-subdomain-id "${reservation_id}"
 ```
 
 Optionally protect that reserved subdomain before exposing it publicly:
@@ -230,12 +240,14 @@ Then request the public gateway. Without an access policy, the plain request sho
 
 ```sh
 curl -i -H 'Host: demo.localhost' http://localhost:8080/
+curl -i -H 'Host: demo.example.test' http://localhost:8080/
 ```
 
 With the optional basic-auth access policy above, use:
 
 ```sh
 curl -i -u demo:'<gateway-password>' -H 'Host: demo.localhost' http://localhost:8080/
+curl -i -u demo:'<gateway-password>' -H 'Host: demo.example.test' http://localhost:8080/
 ```
 
 The gateway public listener and control plane both expose `GET /healthz`, `GET /readyz`, and `GET /metrics` for local operations checks. See [deploy/compose/README.md](./deploy/compose/README.md) for the full Compose guide.

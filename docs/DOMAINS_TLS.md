@@ -19,7 +19,7 @@ a tunnel registered as `demo` is announced as:
 https://demo.tunnels.example.com
 ```
 
-The current public self-hosted implementation supports custom root domains for wildcard tunnel routing. It does not yet support arbitrary per-tunnel custom domains such as `preview.customer.com`.
+The current public self-hosted implementation supports custom root domains for wildcard tunnel routing and per-tunnel custom domain mappings in control-plane-backed deployments.
 
 ## Recommended Hostnames
 
@@ -65,6 +65,14 @@ dig +short agent.example.com
 dig +short control.example.com
 ```
 
+For a per-tunnel custom domain such as `preview.customer.com`, create a record that sends that exact hostname to the same reverse proxy or load balancer as the wildcard tunnel traffic:
+
+```text
+preview.customer.com  CNAME  porthook-edge.example.net.
+```
+
+The gateway routes custom domains by the HTTP `Host` header. Your reverse proxy must preserve the original host when forwarding to the gateway public listener.
+
 ## TLS Certificates
 
 The reverse proxy must present certificates that cover the hostnames it serves:
@@ -74,6 +82,7 @@ The reverse proxy must present certificates that cover the hostnames it serves:
 | `demo.tunnels.example.com` and other tunnel names | `*.tunnels.example.com` |
 | `agent.example.com` | `agent.example.com` |
 | `control.example.com` | `control.example.com` |
+| `preview.customer.com` | `preview.customer.com` |
 
 Wildcard certificates normally require DNS-01 validation or a certificate issued outside the reverse proxy. A certificate for `*.tunnels.example.com` does not cover `tunnels.example.com` itself, so include the root name as a separate SAN if your proxy serves redirects, health checks, or landing content on the root hostname.
 
@@ -92,6 +101,8 @@ PORTHOOK_TLS_KEY_PATH=/etc/letsencrypt/live/tunnels.example.com/privkey.pem
 ```
 
 Use filesystem permissions that allow only the reverse proxy process to read the private key.
+
+Custom domains need certificates that cover each custom hostname. A wildcard certificate for `*.tunnels.example.com` does not cover `preview.customer.com`. Use your reverse proxy or certificate automation to provision the custom-domain certificate before sending user traffic to that hostname.
 
 ## Porthook Configuration
 
@@ -124,6 +135,53 @@ The agent should print:
 https://demo.tunnels.example.com
 ```
 
+## Custom Domains
+
+Custom domains map an arbitrary hostname to an existing reserved subdomain. They require a control-plane-backed gateway because the gateway resolves custom hostnames through the control plane.
+
+The required flow is:
+
+1. Create an agent token.
+2. Reserve a subdomain for that token.
+3. Create a custom domain mapping for the reservation.
+4. Point the custom hostname DNS record at the gateway edge.
+5. Ensure the reverse proxy presents a certificate for the custom hostname and forwards the original `Host` header.
+6. Start the agent with the reserved subdomain.
+
+Create the mapping with the CLI:
+
+```sh
+printf '%s' '<admin-token>' | porthook domains create \
+  --control-plane https://control.example.com \
+  --admin-token-stdin \
+  --hostname preview.customer.com \
+  --reserved-subdomain-id rs_...
+```
+
+List and delete mappings:
+
+```sh
+printf '%s' '<admin-token>' | porthook domains list \
+  --control-plane https://control.example.com \
+  --admin-token-stdin
+
+printf '%s' '<admin-token>' | porthook domains delete \
+  --control-plane https://control.example.com \
+  --admin-token-stdin \
+  preview.customer.com
+```
+
+The dashboard exposes the same custom domain create/list/delete operations from `/dashboard/`.
+
+Operational behavior:
+
+- Hostnames are normalized to lowercase and must be fully qualified hostnames. Wildcards, ports, and single-label names are rejected.
+- Custom domains are currently active immediately after creation. DNS and TLS verification are operator responsibilities.
+- The agent still registers the reserved subdomain, for example `porthook http 3000 --subdomain demo`.
+- Access policies are attached to the reserved subdomain and apply to both `demo.tunnels.example.com` and any custom domains mapped to that reservation.
+- Gateway request logs include the original host and mark custom-domain routes.
+- The gateway caches custom-domain lookup results briefly. Tune `PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL` when you need faster mapping changes.
+
 ## Verification
 
 After starting the gateway and reverse proxy, verify the public listener through a wildcard hostname:
@@ -150,6 +208,18 @@ curl -i https://demo.tunnels.example.com/
 
 For control-plane-backed deployments, reserve `demo` for that token before starting the requested-subdomain tunnel.
 
+Verify a custom domain after DNS and TLS are in place:
+
+```sh
+curl -i https://preview.customer.com/
+```
+
+For local Compose testing without public DNS, use a `Host` header against the gateway public listener:
+
+```sh
+curl -i -H 'Host: preview.customer.test' http://localhost:8080/
+```
+
 ## Common Misconfigurations
 
 | Symptom | Likely cause |
@@ -158,5 +228,7 @@ For control-plane-backed deployments, reserve `demo` for that token before start
 | Tunnel URL points to the wrong host or scheme | `PORTHOOK_ROOT_DOMAIN` or `PORTHOOK_PUBLIC_URL` does not match the public DNS/TLS setup. |
 | Browser certificate error on tunnel URLs | Certificate does not cover `*.tunnels.example.com` or the proxy is serving a default certificate. |
 | Requested subdomain is rejected | Control-plane mode requires a reserved subdomain owned by the agent token. |
+| Custom domain returns `404` | No custom domain mapping exists, DNS points at the wrong edge, or the reverse proxy did not preserve the original `Host` header. |
+| Custom domain returns `503` | The mapped reserved subdomain does not have an active tunnel. |
+| Custom domain has a browser certificate error | The reverse proxy certificate does not cover that custom hostname. |
 | `control.example.com` is publicly reachable | DNS, firewall, VPN, or reverse-proxy access rules are too broad for the control-plane surface. |
-

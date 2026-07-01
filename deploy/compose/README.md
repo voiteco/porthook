@@ -119,6 +119,7 @@ Before starting the stack:
 - Point `PORTHOOK_AGENT_DOMAIN` at the same host.
 - Keep `PORTHOOK_CONTROL_DOMAIN` private or protect it with a separate access boundary.
 - Mount a certificate that covers `*.${PORTHOOK_ROOT_DOMAIN}`, `PORTHOOK_AGENT_DOMAIN`, and `PORTHOOK_CONTROL_DOMAIN`.
+- For custom domains, point each custom hostname at the same public edge and make sure the reverse proxy has a certificate for that hostname.
 
 To use the checked-in Caddy IP allowlist example for the control-plane hostname:
 
@@ -154,7 +155,7 @@ http://localhost:8082/dashboard/
 
 Use the configured `PORTHOOK_CONTROL_ADMIN_TOKEN` to log in. The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token.
 
-The dashboard can create, list, and revoke agent tokens, reserve requested subdomains for tokens, and show active gateway tunnels from the gateway public API. The plaintext agent token is displayed only from the create response. Token tables include creation time, last successful validation time, and revocation status.
+The dashboard can create, list, and revoke agent tokens, reserve requested subdomains for tokens, manage custom domains and access policies, and show active gateway tunnels and request logs from the gateway public API. The plaintext agent token is displayed only from the create response. Token tables include creation time, last successful validation time, and revocation status.
 
 Create an agent token through the control plane:
 
@@ -171,11 +172,23 @@ agent_token="$(printf '%s' "${created_token_json}" | python3 -c 'import json,sys
 Reserve a requested subdomain for the token:
 
 ```sh
-printf '%s' '<admin-token>' | porthook reserved create \
+reservation_json="$(printf '%s' '<admin-token>' | porthook reserved create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --name demo \
-  --token-id "${agent_token_id}"
+  --token-id "${agent_token_id}" \
+  --json)"
+reservation_id="$(printf '%s' "${reservation_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+```
+
+Optionally map a custom hostname to the reserved subdomain:
+
+```sh
+printf '%s' '<admin-token>' | porthook domains create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --hostname demo.example.test \
+  --reserved-subdomain-id "${reservation_id}"
 ```
 
 Use the plaintext token with the agent:
@@ -195,7 +208,7 @@ make smoke-control-plane
 
 Back up the `postgres-data` volume before upgrading a Postgres-backed control-plane stack. The control plane applies pending embedded migrations at startup and records them in `schema_migrations`.
 
-For the 0.6.x line, the migrations are additive and create `reserved_subdomains` for requested tunnel names. See [../../docs/UPGRADING.md](../../docs/UPGRADING.md).
+For the 0.9.x line, the migrations are additive and create `custom_domains` for per-tunnel custom domain mappings. See [../../docs/UPGRADING.md](../../docs/UPGRADING.md).
 
 ## Operational Endpoints
 
@@ -213,13 +226,13 @@ The Compose stack exposes:
 | Control-plane status | `http://localhost:8082/api/v1/status` |
 | Dashboard | `http://localhost:8082/dashboard/` |
 
-Gateway metrics include active tunnels, public request counts, token validation attempts, auth failures, and successful tunnel registrations. The gateway active-tunnels JSON endpoint is read-only and omits local target URLs. Control-plane metrics include token admin operations, token validation results, reserved subdomain operations, auth failures, and readiness failures.
+Gateway metrics include active tunnels, public request counts, custom domain lookup results, token validation attempts, auth failures, and successful tunnel registrations. The gateway active-tunnels JSON endpoint is read-only and omits local target URLs. Control-plane metrics include token admin operations, token validation results, reserved subdomain operations, custom domain operations, auth failures, and readiness failures.
 
-The control-plane `/readyz` endpoint checks the token store. In this Compose stack, that means it pings Postgres.
+The control-plane `/readyz` endpoint checks the token, reservation, access policy, and custom domain stores. In this Compose stack, that means it pings Postgres.
 
 ## Internet-Facing Notes
 
-For real internet traffic, update `PORTHOOK_ROOT_DOMAIN` and `PORTHOOK_PUBLIC_URL`, point wildcard DNS at the public gateway, and terminate TLS in front of the public listener. Keep the control-plane API and dashboard private or protected by an additional access boundary.
+For real internet traffic, update `PORTHOOK_ROOT_DOMAIN` and `PORTHOOK_PUBLIC_URL`, point wildcard DNS at the public gateway, and terminate TLS in front of the public listener. For custom domains, point the exact custom hostnames at the public gateway edge and serve certificates for those names. Keep the control-plane API and dashboard private or protected by an additional access boundary.
 
 Reverse proxy examples for Caddy and Traefik live in [../reverse-proxy/](../reverse-proxy/).
 

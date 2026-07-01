@@ -32,7 +32,6 @@ Private hosted-service implementation details belong outside this repository.
 - Raw TCP tunnels.
 - UDP tunnels.
 - Multi-region routing.
-- Custom domains.
 - Persistent request history.
 - Organization management.
 - Hosted-service-only features.
@@ -348,11 +347,15 @@ Routing rule:
 {subdomain}.{root_domain}
 ```
 
-If the hostname does not match an active tunnel, return `404`.
+If the hostname matches `{subdomain}.{root_domain}`, route directly to that subdomain.
+
+If the hostname does not match the root domain and the gateway is connected to a control plane, validate it as a custom domain hostname and resolve it through `POST /api/v1/custom-domains/lookup`.
+
+If no route exists for the hostname, return `404`.
 
 If the tunnel exists but is disconnected, return `503`.
 
-The current gateway supports custom root domains through `PORTHOOK_ROOT_DOMAIN`. Arbitrary per-tunnel custom domains are not implemented yet.
+The current gateway supports custom root domains through `PORTHOOK_ROOT_DOMAIN` and per-tunnel custom domains through control-plane mappings to reserved subdomains. Access policies are evaluated against the resolved reserved subdomain.
 
 ### 11.2 Tunnel Registry
 

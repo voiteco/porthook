@@ -105,7 +105,6 @@ The first MVP does not need:
 - Raw TCP tunnels.
 - UDP tunnels.
 - Multi-region routing.
-- Custom domains.
 - Browser-based replay.
 - Persistent request history.
 - Organization management.
@@ -367,7 +366,15 @@ For self-hosted deployments, the operator configures:
 - TLS certificate.
 - Gateway public URL.
 
-The current self-hosted implementation supports a custom root domain for wildcard tunnel routing. Arbitrary per-tunnel custom domains are future work.
+The current self-hosted implementation supports a custom root domain for wildcard tunnel routing. In control-plane-backed mode, it also supports custom domain mappings from fully qualified hostnames to reserved subdomains.
+
+Custom domain requirements:
+
+- The hostname must point at the gateway public edge.
+- The reverse proxy must preserve the original `Host` header.
+- TLS termination must present a certificate for the custom hostname.
+- The mapped reserved subdomain must have an active tunnel.
+- Access policies on the reserved subdomain apply to both the wildcard hostname and mapped custom domains.
 
 Unknown hostnames should return `404`.
 
@@ -666,7 +673,7 @@ The deployment docs must explain:
 ### Milestone 5: Public Hardening
 
 - Production deployment examples.
-- Custom domain documentation.
+- Custom domain support and documentation.
 - Access control.
 - Audit-friendly logs.
 - Security review checklist.
