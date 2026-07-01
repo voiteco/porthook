@@ -37,6 +37,26 @@ func TestHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestHandlerReturnsRequestIDHeader(t *testing.T) {
+	server := NewServer(Config{}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/status", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Header.Set("X-Correlation-ID", "corr_test")
+	resp, err := httpServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.Header.Get("X-Request-ID") != "corr_test" {
+		t.Fatalf("X-Request-ID = %q, want corr_test", resp.Header.Get("X-Request-ID"))
+	}
+}
+
 func TestDashboardEndpoint(t *testing.T) {
 	server := NewServer(Config{}, tokens.NewService(tokens.NewMemoryStore()))
 	httpServer := httptest.NewServer(server.Handler())

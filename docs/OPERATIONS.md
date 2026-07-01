@@ -91,6 +91,8 @@ Useful log events:
 | `control_plane.access_policy_created` | Admin created an access policy for a reserved subdomain. |
 | `control_plane.access_policy_evaluated` | Gateway access policy evaluation completed. Check `allowed`, `mode`, `reason`, and `subdomain`. |
 
+Gateway and control-plane HTTP responses include `X-Request-ID`. If an upstream proxy already sends `X-Request-ID` or `X-Correlation-ID`, Porthook preserves it; otherwise Porthook generates one. Use that value to correlate client-visible errors with `request_id` in logs.
+
 Common symptoms:
 
 | Symptom | First checks |

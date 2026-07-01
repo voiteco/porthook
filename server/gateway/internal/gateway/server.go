@@ -24,6 +24,7 @@ import (
 	"github.com/voiteco/porthook/protocol/names"
 	"github.com/voiteco/porthook/protocol/wswire"
 	"github.com/voiteco/porthook/server/gateway/internal/registry"
+	"github.com/voiteco/porthook/server/internal/requestid"
 	"github.com/voiteco/porthook/server/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -153,13 +154,13 @@ func (s *Server) PublicHandler() http.Handler {
 	mux.HandleFunc("/api/v1/request-logs", s.handleRequestLogs)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/", s.handlePublicRequest)
-	return telemetry.HTTPHandler(mux, "gateway.public")
+	return requestid.Middleware(telemetry.HTTPHandler(mux, "gateway.public"))
 }
 
 func (s *Server) AgentHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(agentWebSocketPath, s.handleAgentWebSocket)
-	return telemetry.HTTPHandler(mux, "gateway.agent")
+	return requestid.Middleware(telemetry.HTTPHandler(mux, "gateway.agent"))
 }
 
 func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -581,7 +582,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 		outcome = "custom_domain_lookup_failed"
 		requestErr = err
-		http.Error(w, "custom domain lookup failed", http.StatusServiceUnavailable)
+		writePublicError(w, r, "custom domain lookup failed", http.StatusServiceUnavailable)
 		return
 	}
 	if !ok {
@@ -589,11 +590,11 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		customDomain = route.CustomDomain
 		if route.MissReason != "" {
 			outcome = customDomainMissOutcome(route.MissReason)
-			http.Error(w, customDomainMissMessage(route.MissReason), http.StatusNotFound)
+			writePublicError(w, r, customDomainMissMessage(route.MissReason), http.StatusNotFound)
 			return
 		}
 		outcome = "no_tunnel_for_host"
-		http.Error(w, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
+		writePublicError(w, r, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
 		return
 	}
 	subdomain = route.Subdomain
@@ -603,7 +604,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		status = http.StatusNotFound
 		outcome = "no_active_session"
-		http.Error(w, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
+		writePublicError(w, r, fmt.Sprintf("no active tunnel for host %q", r.Host), http.StatusNotFound)
 		return
 	}
 	tunnelID = session.tunnel.TunnelID
@@ -612,7 +613,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusTooManyRequests
 		outcome = "rate_limited"
 		w.Header().Set("Retry-After", "1")
-		http.Error(w, "tunnel rate limit exceeded", http.StatusTooManyRequests)
+		writePublicError(w, r, "tunnel rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 
@@ -621,13 +622,13 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 		outcome = "access_policy_unavailable"
 		requestErr = err
-		http.Error(w, "access policy unavailable", http.StatusServiceUnavailable)
+		writePublicError(w, r, "access policy unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !accessResult.Allowed {
 		status = accessDeniedStatus(accessResult)
 		outcome = "access_denied"
-		writeAccessDenied(w, accessResult)
+		writeAccessDenied(w, r, accessResult)
 		return
 	}
 
@@ -636,7 +637,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusInternalServerError
 		outcome = "stream_id_failed"
 		requestErr = err
-		http.Error(w, "failed to create stream", http.StatusInternalServerError)
+		writePublicError(w, r, "failed to create stream", http.StatusInternalServerError)
 		return
 	}
 
@@ -708,12 +709,12 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrStreamLimitExceeded):
 			status = http.StatusServiceUnavailable
 			outcome = "stream_limit_exceeded"
-			http.Error(w, "tunnel overloaded", http.StatusServiceUnavailable)
+			writePublicError(w, r, "tunnel overloaded", http.StatusServiceUnavailable)
 			return
 		case errors.Is(err, ErrRequestBodyTooLarge):
 			status = http.StatusRequestEntityTooLarge
 			outcome = "request_body_too_large"
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			writePublicError(w, r, "request body too large", http.StatusRequestEntityTooLarge)
 			return
 		case errors.Is(err, context.DeadlineExceeded):
 			if !responseStarted {
@@ -721,7 +722,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 			}
 			outcome = "tunnel_timeout"
 			if !responseStarted {
-				http.Error(w, "tunnel request timed out", http.StatusGatewayTimeout)
+				writePublicError(w, r, "tunnel request timed out", http.StatusGatewayTimeout)
 			}
 			return
 		case errors.Is(err, context.Canceled):
@@ -736,7 +737,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		outcome = "tunnel_error"
 		if !responseStarted {
-			http.Error(w, "tunnel request failed", http.StatusBadGateway)
+			writePublicError(w, r, "tunnel request failed", http.StatusBadGateway)
 		}
 		return
 	}
@@ -774,17 +775,26 @@ func accessDeniedStatus(result accessPolicyEvaluation) int {
 	}
 }
 
-func writeAccessDenied(w http.ResponseWriter, result accessPolicyEvaluation) {
+func writeAccessDenied(w http.ResponseWriter, r *http.Request, result accessPolicyEvaluation) {
 	switch result.Mode {
 	case "basic_auth":
 		w.Header().Set("WWW-Authenticate", `Basic realm="Porthook tunnel"`)
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		writePublicError(w, r, "authentication required", http.StatusUnauthorized)
 	case "bearer_token":
 		w.Header().Set("WWW-Authenticate", `Bearer realm="Porthook tunnel"`)
-		http.Error(w, "bearer token required", http.StatusUnauthorized)
+		writePublicError(w, r, "bearer token required", http.StatusUnauthorized)
 	default:
-		http.Error(w, "access denied", http.StatusForbidden)
+		writePublicError(w, r, "access denied", http.StatusForbidden)
 	}
+}
+
+func writePublicError(w http.ResponseWriter, r *http.Request, message string, status int) {
+	if r != nil {
+		if id := requestID(r); id != "" {
+			message = fmt.Sprintf("%s\nrequest_id: %s", message, id)
+		}
+	}
+	http.Error(w, message, status)
 }
 
 func accessConsumesAuthorization(result accessPolicyEvaluation) bool {
@@ -1123,12 +1133,7 @@ func requestAuditAttrs(r *http.Request, event string) []slog.Attr {
 }
 
 func requestID(r *http.Request) string {
-	for _, header := range []string{"X-Request-ID", "X-Correlation-ID"} {
-		if value := strings.TrimSpace(r.Header.Get(header)); value != "" {
-			return value
-		}
-	}
-	return ""
+	return requestid.FromRequest(r)
 }
 
 func requestProto(r *http.Request) string {

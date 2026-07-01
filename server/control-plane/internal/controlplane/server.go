@@ -21,6 +21,7 @@ import (
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 	"github.com/voiteco/porthook/server/dashboard"
+	"github.com/voiteco/porthook/server/internal/requestid"
 	"github.com/voiteco/porthook/server/internal/telemetry"
 )
 
@@ -175,7 +176,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/reserved-subdomains", s.handleReservedSubdomains)
 	mux.HandleFunc("/api/v1/reserved-subdomains/", s.handleReservedSubdomainByID)
 	mux.HandleFunc("/api/v1/reserved-subdomains/authorize", s.handleAuthorizeReservedSubdomain)
-	return telemetry.HTTPHandler(mux, "control_plane.http")
+	return requestid.Middleware(telemetry.HTTPHandler(mux, "control_plane.http"))
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -1034,12 +1035,7 @@ func remoteIP(remoteAddr string) string {
 }
 
 func requestID(r *http.Request) string {
-	for _, header := range []string{"X-Request-ID", "X-Correlation-ID"} {
-		if value := strings.TrimSpace(r.Header.Get(header)); value != "" {
-			return value
-		}
-	}
-	return ""
+	return requestid.FromRequest(r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
