@@ -1228,6 +1228,37 @@ func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
 	}
 }
 
+func TestPublicHandlerReturnsRequestIDOnErrors(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, publicServer.URL+"/missing", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "missing.localhost"
+	req.Header.Set("X-Request-ID", "req_test")
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if resp.Header.Get("X-Request-ID") != "req_test" {
+		t.Fatalf("X-Request-ID = %q, want req_test", resp.Header.Get("X-Request-ID"))
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "request_id: req_test") {
+		t.Fatalf("body = %q, want request id", string(body))
+	}
+}
+
 func TestPublicRequestRejectsLargeBody(t *testing.T) {
 	cfg := testConfig()
 	cfg.MaxBodyBytes = 3
