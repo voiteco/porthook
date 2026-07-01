@@ -140,6 +140,48 @@
           <div class="subsection">
             <div class="section-heading">
               <div>
+                <h2>Custom domains</h2>
+                <p class="muted" id="custom-domain-count">No custom domains loaded</p>
+              </div>
+            </div>
+
+            <form class="create-form custom-domain-form" id="custom-domain-form">
+              <div class="field">
+                <label for="custom-domain-hostname">Hostname</label>
+                <input id="custom-domain-hostname" name="custom-domain-hostname" type="text" maxlength="253" placeholder="demo.example.com" required>
+              </div>
+              <div class="field">
+                <label for="custom-domain-reservation">Reserved subdomain</label>
+                <select id="custom-domain-reservation" name="custom-domain-reservation" required></select>
+              </div>
+              <button type="submit">Add domain</button>
+            </form>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Hostname</th>
+                    <th>ID</th>
+                    <th>Subdomain</th>
+                    <th>Status</th>
+                    <th>Updated</th>
+                    <th class="right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="custom-domains-body"></tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" id="custom-domains-empty-state" hidden>
+              <h3>No custom domains</h3>
+              <p class="muted">Map a verified hostname to a reserved subdomain.</p>
+            </div>
+          </div>
+
+          <div class="subsection">
+            <div class="section-heading">
+              <div>
                 <h2>Access policies</h2>
                 <p class="muted" id="access-policy-count">No access policies loaded</p>
               </div>
