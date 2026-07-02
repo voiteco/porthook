@@ -6,6 +6,7 @@ All notable changes to Porthook are documented here.
 
 ### Added
 - Added Postgres-backed control-plane audit event storage with an in-memory fallback for development deployments.
+- Added cursor pagination and expanded filters to `GET /api/v1/events`, including event, level, request ID, remote IP, field text, and time-window queries.
 
 ## [0.11.0] - 2026-07-01
 

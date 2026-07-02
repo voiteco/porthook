@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/voiteco/porthook/server/control-plane/internal/access"
 	"github.com/voiteco/porthook/server/control-plane/internal/customdomains"
@@ -122,6 +123,96 @@ func TestAuditEventsEndpointReturnsRecentEvents(t *testing.T) {
 	}
 	if !foundTokenCreated || !foundAuthFailed {
 		t.Fatalf("events = %+v, want token_created and auth_failed", events.Events)
+	}
+}
+
+func TestAuditEventsEndpointFiltersAndPaginates(t *testing.T) {
+	auditStore := NewMemoryAuditEventStore(10)
+	server := NewServerWithAuditEvents(
+		Config{AdminToken: "admin-secret"},
+		tokens.NewService(tokens.NewMemoryStore()),
+		nil,
+		nil,
+		nil,
+		auditStore,
+	)
+	base := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	for _, event := range []AuditEvent{
+		{
+			Time:   base,
+			Level:  "INFO",
+			Event:  "control_plane.token_created",
+			Fields: map[string]string{"token_id": "tok_keep", "name": "agent"},
+		},
+		{
+			Time:   base.Add(time.Second),
+			Level:  "WARN",
+			Event:  "control_plane.auth_failed",
+			Fields: map[string]string{"surface": "admin"},
+		},
+		{
+			Time:   base.Add(2 * time.Second),
+			Level:  "INFO",
+			Event:  "control_plane.token_deleted",
+			Fields: map[string]string{"token_id": "tok_keep"},
+		},
+	} {
+		if err := auditStore.Add(context.Background(), event); err != nil {
+			t.Fatalf("Add returned error: %v", err)
+		}
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/events?limit=1&event=token&field=tok_keep", nil)
+	if err != nil {
+		t.Fatalf("NewRequest events returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer admin-secret")
+	resp, err := httpServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET events returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("events status = %d, want 200; body = %q", resp.StatusCode, readResponseBody(t, resp))
+	}
+	var first auditEventsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&first); err != nil {
+		t.Fatalf("decode events returned error: %v", err)
+	}
+	if len(first.Events) != 1 || first.Events[0].Event != "control_plane.token_deleted" {
+		t.Fatalf("first events = %+v, want newest matching token event", first.Events)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("next cursor is empty, want second page cursor")
+	}
+	if first.Filters.Limit != 1 || first.Filters.Event != "token" || first.Filters.Field != "tok_keep" {
+		t.Fatalf("filters = %+v, want echoed limit/event/field filters", first.Filters)
+	}
+
+	nextReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/events?limit=1&event=token&field=tok_keep&cursor="+first.NextCursor, nil)
+	if err != nil {
+		t.Fatalf("NewRequest second page returned error: %v", err)
+	}
+	nextReq.Header.Set("Authorization", "Bearer admin-secret")
+	nextResp, err := httpServer.Client().Do(nextReq)
+	if err != nil {
+		t.Fatalf("GET second page returned error: %v", err)
+	}
+	defer nextResp.Body.Close()
+	if nextResp.StatusCode != http.StatusOK {
+		t.Fatalf("second page status = %d, want 200; body = %q", nextResp.StatusCode, readResponseBody(t, nextResp))
+	}
+	var second auditEventsResponse
+	if err := json.NewDecoder(nextResp.Body).Decode(&second); err != nil {
+		t.Fatalf("decode second page returned error: %v", err)
+	}
+	if len(second.Events) != 1 || second.Events[0].Event != "control_plane.token_created" {
+		t.Fatalf("second events = %+v, want older matching token event", second.Events)
+	}
+	if second.Filters.Cursor != first.NextCursor {
+		t.Fatalf("cursor filter = %q, want %q", second.Filters.Cursor, first.NextCursor)
 	}
 }
 
@@ -1325,6 +1416,6 @@ func (s failingAuditEventStore) Add(context.Context, AuditEvent) error {
 	return nil
 }
 
-func (s failingAuditEventStore) List(context.Context, int) ([]AuditEvent, error) {
-	return nil, errors.New("audit store unavailable")
+func (s failingAuditEventStore) List(context.Context, AuditEventListOptions) (AuditEventListPage, error) {
+	return AuditEventListPage{}, errors.New("audit store unavailable")
 }

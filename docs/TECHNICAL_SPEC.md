@@ -433,7 +433,7 @@ Postgres-backed control-plane token, reservation, access policy, custom domain, 
 
 The control plane exposes `GET /api/v1/status` for dashboard and automation checks. It returns JSON with readiness state and the binary version.
 
-The control plane exposes `GET /api/v1/events` for dashboard audit visibility. The endpoint returns recent audit events, newest first, and omits plaintext tokens and access policy secrets. Postgres-backed deployments store audit events durably; development deployments without a database use an in-memory ring buffer.
+The control plane exposes `GET /api/v1/events` for dashboard audit visibility. The endpoint returns recent audit events, newest first, and omits plaintext tokens and access policy secrets. It accepts `limit`, `event`, `level`, `request_id`, `remote_ip`, `field`, `since`, `until`, and `cursor` query parameters; time filters use RFC3339 timestamps. Responses include `events`, echoed `filters`, and `next_cursor` when another page is available. Postgres-backed deployments store audit events durably; development deployments without a database use an in-memory ring buffer.
 
 The dashboard includes browser diagnostics for control-plane status/readiness, audit event API access, configured gateway tunnel/runtime/metrics/request-log API reachability, and an operational JSON export download.
 

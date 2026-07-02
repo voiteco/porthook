@@ -243,15 +243,23 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := auditEventLimit(r, defaultAuditEventLimit)
-	events, err := s.auditEvents.List(r.Context(), limit)
+	opts, err := auditEventListOptionsFromRequest(r, defaultAuditEventLimit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	page, err := s.auditEvents.List(r.Context(), opts)
 	if err != nil {
 		s.logger.ErrorContext(r.Context(), "list audit events failed", slog.String("error", err.Error()))
 		http.Error(w, "list audit events: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.logAudit(r, slog.LevelInfo, "control-plane audit events listed", "control_plane.audit_events_listed", slog.Int("count", len(events)))
-	writeJSON(w, http.StatusOK, auditEventsResponse{Events: events})
+	s.logAudit(r, slog.LevelInfo, "control-plane audit events listed", "control_plane.audit_events_listed", slog.Int("count", len(page.Events)))
+	writeJSON(w, http.StatusOK, auditEventsResponse{
+		Events:     page.Events,
+		NextCursor: page.NextCursor,
+		Filters:    auditEventFiltersForResponse(opts, strings.TrimSpace(r.URL.Query().Get("cursor"))),
+	})
 }
 
 func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {

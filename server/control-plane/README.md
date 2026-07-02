@@ -167,7 +167,7 @@ printf '%s' 'admin-secret' | porthook domains delete \
 
 `/api/v1/status` returns JSON with the control-plane readiness state and binary version for dashboard and automation checks.
 
-`/api/v1/events` returns recent audit events for admin users. Postgres-backed deployments store events durably; deployments without `PORTHOOK_DATABASE_URL` use an in-memory ring buffer. Events are newest-first, support `?limit=N`, and omit plaintext tokens and access policy secrets.
+`/api/v1/events` returns recent audit events for admin users. Postgres-backed deployments store events durably; deployments without `PORTHOOK_DATABASE_URL` use an in-memory ring buffer. Events are newest-first, omit plaintext tokens and access policy secrets, and support `limit`, `event`, `level`, `request_id`, `remote_ip`, `field`, `since`, `until`, and `cursor` query parameters. `since` and `until` use RFC3339 timestamps. Responses include `events`, echoed `filters`, and `next_cursor` when another page is available.
 
 `porthook doctor` checks gateway and control-plane operational endpoints, including `/api/v1/events` when an admin token is provided, and prints response request IDs for log correlation.
 
