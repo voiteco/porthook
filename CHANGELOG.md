@@ -10,6 +10,7 @@ All notable changes to Porthook are documented here.
 - Added optional Postgres-backed gateway request log ingestion for self-hosted deployments.
 - Added cursor pagination, echoed filters, and durable-store reads to `GET /api/v1/request-logs`.
 - Added retention pruning for durable control-plane audit events and gateway request logs.
+- Added dashboard pagination for audit events and gateway request logs using API cursors.
 
 ## [0.11.0] - 2026-07-01
 

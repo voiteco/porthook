@@ -27,7 +27,7 @@ func TestHandlerServesDashboardIndex(t *testing.T) {
 	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'self' http: https:") {
 		t.Fatalf("Content-Security-Policy = %q, want gateway-capable connect-src", got)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Audit events") || !strings.Contains(body, "Diagnostics") || !strings.Contains(body, "Gateway runtime") || !strings.Contains(body, "Metrics drilldown") || !strings.Contains(body, "Operational export") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Request logs") || !strings.Contains(body, "Request ID") || !strings.Contains(body, "Tunnel ID") || !strings.Contains(body, "Tunnel details") {
+	if body := rec.Body.String(); !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Audit events") || !strings.Contains(body, "audit-event-load-more") || !strings.Contains(body, "Diagnostics") || !strings.Contains(body, "Gateway runtime") || !strings.Contains(body, "Metrics drilldown") || !strings.Contains(body, "Operational export") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Request logs") || !strings.Contains(body, "request-log-load-more") || !strings.Contains(body, "Request ID") || !strings.Contains(body, "Tunnel ID") || !strings.Contains(body, "Tunnel details") {
 		t.Fatalf("dashboard index body = %q, want dashboard shell", body)
 	}
 }
@@ -74,6 +74,9 @@ func TestHandlerServesAssets(t *testing.T) {
 	if !strings.Contains(body, "/api/v1/events") || !strings.Contains(body, "renderAuditEvents") {
 		t.Fatalf("asset body = %q, want audit events API client", body)
 	}
+	if !strings.Contains(body, "auditEventQuery") || !strings.Contains(body, "auditEventNextCursor") {
+		t.Fatalf("asset body = %q, want audit event pagination query builder", body)
+	}
 	if !strings.Contains(body, "runDiagnostics") || !strings.Contains(body, "Gateway request logs API") {
 		t.Fatalf("asset body = %q, want diagnostics runner", body)
 	}
@@ -97,6 +100,9 @@ func TestHandlerServesAssets(t *testing.T) {
 	}
 	if !strings.Contains(body, "requestLogQuery") || !strings.Contains(body, "tunnel_id") {
 		t.Fatalf("asset body = %q, want request log filter query builder", body)
+	}
+	if !strings.Contains(body, "requestLogNextCursor") || !strings.Contains(body, "next_cursor") {
+		t.Fatalf("asset body = %q, want request log cursor pagination", body)
 	}
 	if !strings.Contains(body, "renderOperationalOverview") {
 		t.Fatalf("asset body = %q, want operational overview renderer", body)
