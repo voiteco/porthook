@@ -45,7 +45,7 @@ The first product shape is intentionally narrow:
 - Reserved subdomains, access policies, and custom domain mappings for control-plane-backed deployments.
 - Health, readiness, and Prometheus text metrics endpoints.
 - Optional OpenTelemetry traces for gateway and control-plane HTTP paths.
-- Basic request logs for local debugging.
+- Durable operational history for audit events and gateway request logs.
 - Agent reconnects for transient gateway disconnects.
 - A self-hosted dashboard for control-plane administration.
 
@@ -150,10 +150,12 @@ Completed foundations:
 14. Dashboard operational overview charts.
 15. Operational JSON export from the CLI and dashboard.
 16. CLI operational history for audit events and gateway request logs.
+17. Durable audit and gateway request-log pagination.
+18. Operational export schema version 2 with embedded diagnostics.
 
 Next major public work:
 
-1. Deeper operational views.
+1. Release stability, packaging polish, and deployment ergonomics.
 
 ## Self-Hosted Quick Start
 
