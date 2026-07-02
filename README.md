@@ -149,6 +149,7 @@ Completed foundations:
 13. OpenTelemetry trace export for gateway and control-plane HTTP paths.
 14. Dashboard operational overview charts.
 15. Operational JSON export from the CLI and dashboard.
+16. CLI operational history for audit events and gateway request logs.
 
 Next major public work:
 
@@ -208,6 +209,20 @@ Inspect active tunnels from the CLI:
 
 ```sh
 porthook tunnels list --gateway http://localhost:8080
+```
+
+Inspect recent operational history from the CLI:
+
+```sh
+printf '%s' '<admin-token>' | porthook history events \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --limit 50
+
+porthook history requests \
+  --gateway http://localhost:8080 \
+  --status 500 \
+  --limit 50
 ```
 
 Create an agent token:

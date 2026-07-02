@@ -11,6 +11,7 @@ All notable changes to Porthook are documented here.
 - Added cursor pagination, echoed filters, and durable-store reads to `GET /api/v1/request-logs`.
 - Added retention pruning for durable control-plane audit events and gateway request logs.
 - Added dashboard pagination for audit events and gateway request logs using API cursors.
+- Added `porthook history events` and `porthook history requests` for paginated CLI access to audit events and gateway request logs.
 
 ## [0.11.0] - 2026-07-01
 

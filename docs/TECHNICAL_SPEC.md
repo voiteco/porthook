@@ -419,6 +419,8 @@ porthook access update --control-plane <url> <policy-id> --mode <mode>
 porthook access delete --control-plane <url> <policy-id>
 porthook tunnels list --gateway <url>
 porthook tunnels show --gateway <url> <tunnel-id>
+porthook history events --control-plane <url>
+porthook history requests --gateway <url>
 porthook export --gateway <url> --control-plane <url>
 porthook version
 ```
@@ -426,6 +428,8 @@ porthook version
 `porthook tokens list` prints token summaries only. Summaries include creation time, last successful validation time when available, and revocation time when revoked.
 
 `porthook tunnels list` and `porthook tunnels show` read active tunnel summaries from the gateway public API. They do not require an admin token and do not expose local target URLs.
+
+`porthook history events` and `porthook history requests` read paginated operational history from `GET /api/v1/events` and `GET /api/v1/request-logs`. They support the corresponding endpoint filters, `--cursor`, `--limit`, and `--json`; audit events require a control-plane admin token.
 
 `porthook export` writes a best-effort operational JSON snapshot for self-hosted debugging. It includes safe control-plane summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, and request logs. It records partial endpoint failures in an `errors` array and does not include plaintext agent tokens, policy secrets, or local target URLs.
 
