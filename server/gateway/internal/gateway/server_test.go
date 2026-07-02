@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1231,6 +1233,43 @@ func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
 	}
 }
 
+func TestPublicRequestWritesDurableRequestLog(t *testing.T) {
+	store := &captureRequestLogStore{}
+	server := newServerWithRequestLogWriter(testConfig(), slog.Default(), store)
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/missing?secret=value", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "missing.localhost"
+	req.Header.Set("X-Request-ID", "req_durable")
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+
+	entries := store.entriesSnapshot()
+	if len(entries) != 1 {
+		t.Fatalf("durable entries = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.RequestID != "req_durable" || entry.Host != "missing.localhost" || entry.Path != "/missing" {
+		t.Fatalf("durable entry = %+v, want request metadata", entry)
+	}
+	if !entry.QueryPresent || entry.Status != http.StatusNotFound || entry.Outcome != "no_active_session" {
+		t.Fatalf("durable entry = %+v, want safe query marker and 404 outcome", entry)
+	}
+}
+
 func TestRequestLogsEndpointFiltersPublicRequests(t *testing.T) {
 	cfg := testConfig()
 	cfg.RequestLogLimit = 5
@@ -1329,6 +1368,29 @@ func TestRequestLogsEndpointRejectsInvalidFilters(t *testing.T) {
 				t.Fatalf("status = %d, want 400", resp.StatusCode)
 			}
 		})
+	}
+}
+
+func TestReadyzReportsRequestLogStoreFailure(t *testing.T) {
+	store := &captureRequestLogStore{pingErr: errors.New("database unavailable")}
+	server := newServerWithRequestLogWriter(testConfig(), slog.Default(), store)
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	resp, err := publicServer.Client().Get(publicServer.URL + "/readyz")
+	if err != nil {
+		t.Fatalf("GET readyz returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %q", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "request log store") {
+		t.Fatalf("body = %q, want request log store error", body)
 	}
 }
 
@@ -2466,6 +2528,33 @@ func writeStreamedResponse(ctx context.Context, conn *websocket.Conn, streamID, 
 		return err
 	}
 	return wswire.WriteEnvelope(ctx, conn, end)
+}
+
+type captureRequestLogStore struct {
+	mu      sync.Mutex
+	pingErr error
+	addErr  error
+	entries []requestLogEntry
+}
+
+func (s *captureRequestLogStore) Ping(context.Context) error {
+	return s.pingErr
+}
+
+func (s *captureRequestLogStore) Add(_ context.Context, entry requestLogEntry) error {
+	if s.addErr != nil {
+		return s.addErr
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries = append(s.entries, entry)
+	return nil
+}
+
+func (s *captureRequestLogStore) entriesSnapshot() []requestLogEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]requestLogEntry(nil), s.entries...)
 }
 
 func testConfig() Config {

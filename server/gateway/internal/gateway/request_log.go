@@ -3,6 +3,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -33,6 +34,11 @@ type requestLogEntry struct {
 
 type requestLogsResponse struct {
 	RequestLogs []requestLogEntry `json:"request_logs"`
+}
+
+type requestLogWriter interface {
+	Ping(context.Context) error
+	Add(context.Context, requestLogEntry) error
 }
 
 type requestLogFilter struct {

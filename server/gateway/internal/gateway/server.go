@@ -38,16 +38,17 @@ const (
 )
 
 type Server struct {
-	cfg         Config
-	logger      *slog.Logger
-	registry    *registry.Registry
-	tokens      agentTokenValidator
-	reserved    reservedSubdomainAuthorizer
-	access      accessPolicyEvaluator
-	domains     customDomainResolver
-	metrics     metrics
-	startedAt   time.Time
-	requestLogs *requestLogBuffer
+	cfg             Config
+	logger          *slog.Logger
+	registry        *registry.Registry
+	tokens          agentTokenValidator
+	reserved        reservedSubdomainAuthorizer
+	access          accessPolicyEvaluator
+	domains         customDomainResolver
+	metrics         metrics
+	startedAt       time.Time
+	requestLogs     *requestLogBuffer
+	requestLogStore requestLogWriter
 
 	sessionsMu sync.RWMutex
 	sessions   map[string]*agentSession
@@ -57,6 +58,17 @@ type Server struct {
 }
 
 func NewServer(cfg Config, logger *slog.Logger) *Server {
+	return newServerWithRequestLogWriter(cfg, logger, nil)
+}
+
+func NewServerWithRequestLogStore(cfg Config, logger *slog.Logger, requestLogStore *PostgresRequestLogStore) *Server {
+	if requestLogStore == nil {
+		return newServerWithRequestLogWriter(cfg, logger, nil)
+	}
+	return newServerWithRequestLogWriter(cfg, logger, requestLogStore)
+}
+
+func newServerWithRequestLogWriter(cfg Config, logger *slog.Logger, requestLogStore requestLogWriter) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -83,16 +95,17 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 	}
 
 	return &Server{
-		cfg:         cfg,
-		logger:      logger,
-		registry:    registry.New(),
-		tokens:      tokenValidator,
-		reserved:    reservedAuthorizer,
-		access:      accessPolicyEvaluator,
-		domains:     customDomainResolver,
-		startedAt:   time.Now().UTC(),
-		requestLogs: newRequestLogBuffer(cfg.RequestLogLimit),
-		sessions:    make(map[string]*agentSession),
+		cfg:             cfg,
+		logger:          logger,
+		registry:        registry.New(),
+		tokens:          tokenValidator,
+		reserved:        reservedAuthorizer,
+		access:          accessPolicyEvaluator,
+		domains:         customDomainResolver,
+		startedAt:       time.Now().UTC(),
+		requestLogs:     newRequestLogBuffer(cfg.RequestLogLimit),
+		requestLogStore: requestLogStore,
+		sessions:        make(map[string]*agentSession),
 
 		generateSubdomain: names.RandomSubdomain,
 		generateTunnelID:  newTunnelID,
@@ -147,7 +160,11 @@ func (s *Server) PublicHandler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := s.ready(r.Context()); err != nil {
+			http.Error(w, "not ready: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
@@ -826,8 +843,9 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 			ResponseBytes: responseBytes,
 			Error:         requestErr,
 		}
+		logEntry := requestLogEntryFromPublicRequest(r, entry)
 		s.logPublicRequest(r, entry)
-		s.requestLogs.add(requestLogEntryFromPublicRequest(r, entry))
+		s.recordRequestLog(logEntry)
 		s.recordPublicRequestMetrics(status, outcome)
 		telemetry.RecordSpan(r.Context(), status, outcome, requestErr,
 			attribute.String("porthook.subdomain", subdomain),
@@ -1061,6 +1079,38 @@ func writePublicError(w http.ResponseWriter, r *http.Request, message string, st
 
 func accessConsumesAuthorization(result accessPolicyEvaluation) bool {
 	return result.Allowed && (result.Mode == "basic_auth" || result.Mode == "bearer_token")
+}
+
+func (s *Server) ready(ctx context.Context) error {
+	if s.requestLogStore == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.RequestLogWriteTimeout)
+	defer cancel()
+	if err := s.requestLogStore.Ping(ctx); err != nil {
+		return fmt.Errorf("request log store: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) recordRequestLog(entry requestLogEntry) {
+	s.requestLogs.add(entry)
+	if s.requestLogStore == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.RequestLogWriteTimeout)
+	defer cancel()
+	if err := s.requestLogStore.Add(ctx, entry); err != nil {
+		s.logger.Warn("request log store write failed",
+			"event", "gateway.request_log_store_write_failed",
+			"error", err,
+			"request_id", entry.RequestID,
+			"host", entry.Host,
+			"path", entry.Path,
+			"status", entry.Status,
+			"outcome", entry.Outcome,
+		)
+	}
 }
 
 type publicRequestLog struct {
