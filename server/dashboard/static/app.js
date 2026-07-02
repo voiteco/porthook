@@ -58,6 +58,7 @@ const elements = {
   auditEventsBody: document.querySelector("#audit-events-body"),
   auditEventsEmptyState: document.querySelector("#audit-events-empty-state"),
   auditEventCount: document.querySelector("#audit-event-count"),
+  auditEventLoadMore: document.querySelector("#audit-event-load-more"),
   diagnosticsForm: document.querySelector("#diagnostics-form"),
   diagnosticsBody: document.querySelector("#diagnostics-body"),
   diagnosticsEmptyState: document.querySelector("#diagnostics-empty-state"),
@@ -102,6 +103,7 @@ const elements = {
   requestLogsBody: document.querySelector("#request-logs-body"),
   requestLogsEmptyState: document.querySelector("#request-logs-empty-state"),
   requestLogCount: document.querySelector("#request-log-count"),
+  requestLogLoadMore: document.querySelector("#request-log-load-more"),
 };
 
 let adminToken = sessionStorage.getItem(storageKey) || "";
@@ -115,6 +117,8 @@ let currentGatewayRuntime = null;
 let currentMetrics = [];
 let currentTunnels = [];
 let currentRequestLogs = [];
+let auditEventNextCursor = "";
+let requestLogNextCursor = "";
 let editingAccessPolicyID = "";
 let selectedTunnelID = "";
 
@@ -137,6 +141,8 @@ function setAuthenticated(authenticated) {
     currentMetrics = [];
     currentTunnels = [];
     currentRequestLogs = [];
+    auditEventNextCursor = "";
+    requestLogNextCursor = "";
     editingAccessPolicyID = "";
     selectedTunnelID = "";
     elements.tokensBody.replaceChildren();
@@ -159,6 +165,8 @@ function setAuthenticated(authenticated) {
     elements.metricsEmptyState.hidden = true;
     elements.tunnelsEmptyState.hidden = true;
     elements.requestLogsEmptyState.hidden = true;
+    updateAuditEventLoadMore();
+    updateRequestLogLoadMore();
     elements.tokenCount.textContent = "No tokens loaded";
     elements.reservationCount.textContent = "No reservations loaded";
     elements.customDomainCount.textContent = "No custom domains loaded";
@@ -523,15 +531,43 @@ function accessPolicyActionCell(policy) {
   return item;
 }
 
-async function loadAuditEvents() {
-  const limit = normalizedAuditEventLimit();
-  elements.auditEventCount.textContent = "Loading audit events";
-  elements.auditEventsBody.replaceChildren();
-  elements.auditEventsEmptyState.hidden = true;
+async function loadAuditEvents({ append = false } = {}) {
+  const cursor = append ? auditEventNextCursor : "";
+  if (append && !cursor) {
+    return;
+  }
+  const query = auditEventQuery(cursor);
 
-  const payload = await apiRequest(`/api/v1/events?limit=${encodeURIComponent(limit)}`);
-  currentAuditEvents = payload.events || [];
-  renderAuditEvents(currentAuditEvents);
+  if (append) {
+    setAuditEventLoadMoreLoading(true);
+  } else {
+    currentAuditEvents = [];
+    auditEventNextCursor = "";
+    elements.auditEventCount.textContent = "Loading audit events";
+    elements.auditEventsBody.replaceChildren();
+    elements.auditEventsEmptyState.hidden = true;
+    updateAuditEventLoadMore();
+  }
+
+  try {
+    const payload = await apiRequest(`/api/v1/events?${query}`);
+    const events = payload.events || [];
+    currentAuditEvents = append ? currentAuditEvents.concat(events) : events;
+    auditEventNextCursor = payload.next_cursor || "";
+    renderAuditEvents(currentAuditEvents);
+    updateAuditEventLoadMore();
+  } catch (error) {
+    if (append) {
+      auditEventNextCursor = "";
+      renderAuditEvents(currentAuditEvents);
+      updateAuditEventLoadMore();
+    }
+    throw error;
+  } finally {
+    if (append) {
+      setAuditEventLoadMoreLoading(false);
+    }
+  }
 }
 
 function renderAuditEvents(events) {
@@ -539,7 +575,24 @@ function renderAuditEvents(events) {
   elements.auditEventsBody.replaceChildren(...filtered.map(renderAuditEventRow));
   elements.auditEventsEmptyState.hidden = filtered.length !== 0;
   const loaded = events.length === filtered.length ? `${events.length}` : `${filtered.length} of ${events.length}`;
-  elements.auditEventCount.textContent = `${loaded} audit event${filtered.length === 1 ? "" : "s"}`;
+  const suffix = auditEventNextCursor ? ", more available" : "";
+  elements.auditEventCount.textContent = `${loaded} audit event${filtered.length === 1 ? "" : "s"}${suffix}`;
+}
+
+function updateAuditEventLoadMore() {
+  elements.auditEventLoadMore.hidden = !auditEventNextCursor;
+  elements.auditEventLoadMore.disabled = false;
+  elements.auditEventLoadMore.textContent = "Load more";
+}
+
+function setAuditEventLoadMoreLoading(loading) {
+  elements.auditEventLoadMore.disabled = loading;
+  elements.auditEventLoadMore.textContent = loading ? "Loading" : "Load more";
+}
+
+function resetAuditEventPagination() {
+  auditEventNextCursor = "";
+  updateAuditEventLoadMore();
 }
 
 function renderAuditEventRow(event) {
@@ -1066,19 +1119,25 @@ function clearTunnelDetail() {
   }
 }
 
-async function loadRequestLogs({ silent = false } = {}) {
+async function loadRequestLogs({ silent = false, append = false } = {}) {
   const baseURL = normalizedGatewayURL();
   if (!baseURL) {
-    elements.requestLogCount.textContent = "Gateway URL required";
     currentRequestLogs = [];
+    requestLogNextCursor = "";
     renderRequestLogs([]);
+    elements.requestLogCount.textContent = "Gateway URL required";
+    updateRequestLogLoadMore();
     renderOperationalOverview();
     return;
   }
 
   let query;
   try {
-    query = requestLogQuery();
+    const cursor = append ? requestLogNextCursor : "";
+    if (append && !cursor) {
+      return;
+    }
+    query = requestLogQuery(cursor);
   } catch (error) {
     elements.requestLogCount.textContent = "Invalid request log filter";
     if (!silent) {
@@ -1086,9 +1145,16 @@ async function loadRequestLogs({ silent = false } = {}) {
     }
     return;
   }
-  elements.requestLogCount.textContent = "Loading request logs";
-  elements.requestLogsBody.replaceChildren();
-  elements.requestLogsEmptyState.hidden = true;
+  if (append) {
+    setRequestLogLoadMoreLoading(true);
+  } else {
+    currentRequestLogs = [];
+    requestLogNextCursor = "";
+    elements.requestLogCount.textContent = "Loading request logs";
+    elements.requestLogsBody.replaceChildren();
+    elements.requestLogsEmptyState.hidden = true;
+    updateRequestLogLoadMore();
+  }
 
   try {
     const response = await fetch(`${baseURL}/api/v1/request-logs?${query}`, { cache: "no-store" });
@@ -1096,17 +1162,30 @@ async function loadRequestLogs({ silent = false } = {}) {
     if (!response.ok) {
       throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
     }
-    currentRequestLogs = payload.request_logs || [];
+    const logs = payload.request_logs || [];
+    currentRequestLogs = append ? currentRequestLogs.concat(logs) : logs;
+    requestLogNextCursor = payload.next_cursor || "";
     renderRequestLogs(currentRequestLogs);
+    updateRequestLogLoadMore();
     renderOperationalOverview();
   } catch (error) {
-    currentRequestLogs = [];
-    elements.requestLogCount.textContent = "Request logs unavailable";
-    elements.requestLogsBody.replaceChildren();
-    elements.requestLogsEmptyState.hidden = false;
+    requestLogNextCursor = "";
+    if (append) {
+      renderRequestLogs(currentRequestLogs);
+    } else {
+      currentRequestLogs = [];
+      elements.requestLogCount.textContent = "Request logs unavailable";
+      elements.requestLogsBody.replaceChildren();
+      elements.requestLogsEmptyState.hidden = false;
+    }
+    updateRequestLogLoadMore();
     renderOperationalOverview();
     if (!silent) {
       showNotice(error.message, "error");
+    }
+  } finally {
+    if (append) {
+      setRequestLogLoadMoreLoading(false);
     }
   }
 }
@@ -1116,7 +1195,24 @@ function renderRequestLogs(logs) {
   elements.requestLogsBody.replaceChildren(...filtered.map(renderRequestLogRow));
   elements.requestLogsEmptyState.hidden = filtered.length !== 0;
   const loaded = logs.length === filtered.length ? `${logs.length}` : `${filtered.length} of ${logs.length}`;
-  elements.requestLogCount.textContent = `${loaded} request log${filtered.length === 1 ? "" : "s"}`;
+  const suffix = requestLogNextCursor ? ", more available" : "";
+  elements.requestLogCount.textContent = `${loaded} request log${filtered.length === 1 ? "" : "s"}${suffix}`;
+}
+
+function updateRequestLogLoadMore() {
+  elements.requestLogLoadMore.hidden = !requestLogNextCursor;
+  elements.requestLogLoadMore.disabled = false;
+  elements.requestLogLoadMore.textContent = "Load more";
+}
+
+function setRequestLogLoadMoreLoading(loading) {
+  elements.requestLogLoadMore.disabled = loading;
+  elements.requestLogLoadMore.textContent = loading ? "Loading" : "Load more";
+}
+
+function resetRequestLogPagination() {
+  requestLogNextCursor = "";
+  updateRequestLogLoadMore();
 }
 
 function renderRequestLogRow(entry) {
@@ -1315,23 +1411,36 @@ function normalizedAuditEventLimit() {
   return Math.min(value, 1000);
 }
 
-function requestLogQuery() {
+function auditEventQuery(cursor = "") {
   const query = new URLSearchParams();
-  query.set("limit", String(normalizedRequestLogLimit()));
-  appendRequestLogFilter(query, "subdomain", elements.requestLogSubdomain.value);
-  appendRequestLogFilter(query, "method", elements.requestLogMethod.value);
-  appendRequestLogFilter(query, "host", elements.requestLogHost.value);
-  appendRequestLogFilter(query, "path", elements.requestLogPath.value);
-  appendRequestLogFilter(query, "status", elements.requestLogStatus.value);
-  appendRequestLogFilter(query, "outcome", elements.requestLogOutcome.value);
-  appendRequestLogFilter(query, "request_id", elements.requestLogRequestID.value);
-  appendRequestLogFilter(query, "tunnel_id", elements.requestLogTunnelID.value);
-  appendRequestLogTimeFilter(query, "since", elements.requestLogSince.value);
-  appendRequestLogTimeFilter(query, "until", elements.requestLogUntil.value);
+  query.set("limit", String(normalizedAuditEventLimit()));
+  appendQueryFilter(query, "event", elements.auditEventEvent.value);
+  appendQueryFilter(query, "level", elements.auditEventLevel.value);
+  appendQueryFilter(query, "request_id", elements.auditEventRequestID.value);
+  appendQueryFilter(query, "remote_ip", elements.auditEventRemoteIP.value);
+  appendQueryFilter(query, "field", elements.auditEventField.value);
+  appendQueryFilter(query, "cursor", cursor);
   return query.toString();
 }
 
-function appendRequestLogFilter(query, name, value) {
+function requestLogQuery(cursor = "") {
+  const query = new URLSearchParams();
+  query.set("limit", String(normalizedRequestLogLimit()));
+  appendQueryFilter(query, "subdomain", elements.requestLogSubdomain.value);
+  appendQueryFilter(query, "method", elements.requestLogMethod.value);
+  appendQueryFilter(query, "host", elements.requestLogHost.value);
+  appendQueryFilter(query, "path", elements.requestLogPath.value);
+  appendQueryFilter(query, "status", elements.requestLogStatus.value);
+  appendQueryFilter(query, "outcome", elements.requestLogOutcome.value);
+  appendQueryFilter(query, "request_id", elements.requestLogRequestID.value);
+  appendQueryFilter(query, "tunnel_id", elements.requestLogTunnelID.value);
+  appendRequestLogTimeFilter(query, "since", elements.requestLogSince.value);
+  appendRequestLogTimeFilter(query, "until", elements.requestLogUntil.value);
+  appendQueryFilter(query, "cursor", cursor);
+  return query.toString();
+}
+
+function appendQueryFilter(query, name, value) {
   const trimmed = value.trim();
   if (trimmed) {
     query.set(name, trimmed);
@@ -1920,6 +2029,14 @@ elements.auditEventForm.addEventListener("submit", async (event) => {
     showNotice(error.message, "error");
   }
 });
+elements.auditEventLoadMore.addEventListener("click", async () => {
+  try {
+    await loadAuditEvents({ append: true });
+  } catch (error) {
+    elements.auditEventCount.textContent = "More audit events unavailable";
+    showNotice(error.message, "error");
+  }
+});
 elements.diagnosticsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await runDiagnostics();
@@ -1935,6 +2052,9 @@ elements.requestLogForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await loadRequestLogs();
 });
+elements.requestLogLoadMore.addEventListener("click", async () => {
+  await loadRequestLogs({ append: true });
+});
 elements.tunnelDetailClose.addEventListener("click", clearTunnelDetail);
 for (const input of [
   elements.auditEventEvent,
@@ -1942,8 +2062,12 @@ for (const input of [
   elements.auditEventRequestID,
   elements.auditEventRemoteIP,
   elements.auditEventField,
+  elements.auditEventLimit,
 ]) {
-  input.addEventListener("input", () => renderAuditEvents(currentAuditEvents));
+  input.addEventListener("input", () => {
+    resetAuditEventPagination();
+    renderAuditEvents(currentAuditEvents);
+  });
 }
 for (const input of [
   elements.requestLogSubdomain,
@@ -1956,8 +2080,12 @@ for (const input of [
   elements.requestLogTunnelID,
   elements.requestLogSince,
   elements.requestLogUntil,
+  elements.requestLogLimit,
 ]) {
-  input.addEventListener("input", () => renderRequestLogs(currentRequestLogs));
+  input.addEventListener("input", () => {
+    resetRequestLogPagination();
+    renderRequestLogs(currentRequestLogs);
+  });
 }
 
 updateAccessPolicyFields();

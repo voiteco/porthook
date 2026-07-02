@@ -35,7 +35,7 @@ Token tables include `last_used_at` metadata, updated when the gateway successfu
 
 Access policy tables show policy modes and non-secret settings. Plaintext policy secrets are accepted only in create/update form submissions and are never returned by list responses.
 
-Audit events are loaded from `GET /api/v1/events` with the configured admin token. The dashboard renders recent event metadata and flattened audit fields, while the control plane omits plaintext tokens and access policy secrets from event payloads.
+Audit events are loaded from `GET /api/v1/events` with the configured admin token. The dashboard sends event, level, request ID, remote IP, field, and limit filters to the control plane and can page through additional results with API cursors. It renders recent event metadata and flattened audit fields, while the control plane omits plaintext tokens and access policy secrets from event payloads.
 
 Diagnostics run from the browser and check control-plane status/readiness, audit event API access, the configured gateway tunnel API, and the configured gateway request log API.
 
@@ -47,7 +47,7 @@ The operational export downloads a best-effort JSON snapshot from the browser. I
 
 Custom domain management maps a fully qualified hostname to a reserved subdomain. DNS and TLS for that hostname are handled outside the dashboard.
 
-The operational overview, active tunnels, tunnel detail, gateway runtime, and request logs views read `GET /api/v1/tunnels`, `GET /api/v1/tunnels/{id}`, `GET /api/v1/runtime`, and `GET /api/v1/request-logs` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack. Request log filters are sent to the gateway with `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, `until`, and `limit`. Request log entries include path, `query_present`, and `request_id`, but not raw query strings. Tunnel detail omits local target URLs.
+The operational overview, active tunnels, tunnel detail, gateway runtime, and request logs views read `GET /api/v1/tunnels`, `GET /api/v1/tunnels/{id}`, `GET /api/v1/runtime`, and `GET /api/v1/request-logs` from the configured gateway URL. The default is `http://<dashboard-host>:8080` for the local Compose stack. Request log filters are sent to the gateway with `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, `until`, and `limit`, and additional request log pages use the gateway `next_cursor`. Request log entries include path, `query_present`, and `request_id`, but not raw query strings. Tunnel detail omits local target URLs.
 
 Future dashboard scope:
 
