@@ -91,6 +91,19 @@ printf '%s' '<admin-token>' | porthook doctor \
   --admin-token-stdin
 ```
 
+Inspect recent operational history:
+
+```sh
+printf '%s' '<admin-token>' | porthook history events \
+  --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+  --admin-token-stdin \
+  --limit 100
+
+porthook history requests \
+  --gateway https://check.${PORTHOOK_ROOT_DOMAIN} \
+  --limit 100
+```
+
 Capture a best-effort operational export for incident handoff or offline review:
 
 ```sh

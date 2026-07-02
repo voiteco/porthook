@@ -38,7 +38,7 @@ func TestRunHelpPrintsUsage(t *testing.T) {
 		t.Fatalf("run help returned error: %v", err)
 	}
 	output := stdout.String()
-	for _, want := range []string{"porthook login", "porthook tokens", "porthook reserved", "porthook tunnels", "porthook export", "porthook doctor", "porthook help"} {
+	for _, want := range []string{"porthook login", "porthook tokens", "porthook reserved", "porthook tunnels", "porthook history", "porthook export", "porthook doctor", "porthook help"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stdout = %q, want %q", output, want)
 		}

@@ -69,6 +69,15 @@ printf '%s' 'admin-secret' | porthook doctor \
   --admin-token-stdin
 ```
 
+Inspect recent audit events:
+
+```sh
+printf '%s' 'admin-secret' | porthook history events \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --limit 50
+```
+
 Create an agent token:
 
 ```sh
