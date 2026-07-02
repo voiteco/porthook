@@ -43,7 +43,7 @@ The gateway runtime view reads `GET /api/v1/runtime` from the configured gateway
 
 The metrics drilldown reads Prometheus text from `GET /metrics` on the configured gateway URL and renders metric names, types, values, and help text.
 
-The operational export downloads a best-effort JSON snapshot from the browser. It includes safe control-plane summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, parsed and raw metrics, request logs, current filters, and diagnostics already run in the tab. It does not include plaintext agent tokens, policy secrets, or local target URLs.
+The operational export downloads a best-effort JSON snapshot from the browser. It includes safe control-plane summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, parsed and raw metrics, request logs, current filters, and diagnostics already run in the tab. CLI exports use `schema_version: 2` and include the same operational areas plus embedded CLI diagnostics and cursor metadata. Exports do not include plaintext agent tokens, policy secrets, or local target URLs.
 
 Custom domain management maps a fully qualified hostname to a reserved subdomain. DNS and TLS for that hostname are handled outside the dashboard.
 

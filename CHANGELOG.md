@@ -12,6 +12,8 @@ All notable changes to Porthook are documented here.
 - Added retention pruning for durable control-plane audit events and gateway request logs.
 - Added dashboard pagination for audit events and gateway request logs using API cursors.
 - Added `porthook history events` and `porthook history requests` for paginated CLI access to audit events and gateway request logs.
+- Expanded `porthook doctor` to check gateway runtime, metrics, and request-log APIs.
+- Added operational export schema version 2 with embedded diagnostics and audit/request-log pagination metadata.
 
 ## [0.11.0] - 2026-07-01
 

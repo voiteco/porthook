@@ -19,6 +19,10 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 	var authorizedAdminCalls int
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/healthz":
+			_, _ = w.Write([]byte("ok\n"))
+		case "/readyz":
+			_, _ = w.Write([]byte("ready\n"))
 		case "/api/v1/status":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(doctorControlPlaneStatus{Status: "ok", Ready: true, Version: "test"})
@@ -36,10 +40,14 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(listAccessPoliciesResponse{AccessPolicies: []accessPolicySummary{{ID: "ap_demo", ReservedSubdomainID: "rs_demo", Mode: "public", CreatedAt: now, UpdatedAt: now}}})
 		case "/api/v1/events":
 			requireAdminAuth(t, r, &authorizedAdminCalls)
-			if got := r.URL.Query().Get("limit"); got != "5" {
-				t.Fatalf("event limit = %q, want 5", got)
+			switch got := r.URL.Query().Get("limit"); got {
+			case "1":
+				_, _ = w.Write([]byte(`{"events":[{"event":"control_plane.diagnostic"}]}`))
+			case "5":
+				_, _ = w.Write([]byte(`{"events":[{"event":"control_plane.token_created"}],"next_cursor":"cur_events","filters":{"limit":5}}`))
+			default:
+				t.Fatalf("event limit = %q, want 1 or 5", got)
 			}
-			_, _ = w.Write([]byte(`{"events":[{"event":"control_plane.token_created"}]}`))
 		default:
 			t.Fatalf("unexpected control-plane request: %s", r.URL.Path)
 		}
@@ -48,6 +56,10 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/healthz":
+			_, _ = w.Write([]byte("ok\n"))
+		case "/readyz":
+			_, _ = w.Write([]byte("ready\n"))
 		case "/api/v1/tunnels":
 			_ = json.NewEncoder(w).Encode(listTunnelsResponse{Tunnels: []tunnelSummaryCLI{{TunnelID: "tun_demo", Subdomain: "demo", PublicURL: "http://demo.example.test", Protocol: "http", ConnectedAt: now}}})
 		case "/api/v1/tunnels/tun_demo":
@@ -58,10 +70,14 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte("# HELP porthook_gateway_active_tunnels Active tunnels\n# TYPE porthook_gateway_active_tunnels gauge\nporthook_gateway_active_tunnels 1\n"))
 		case "/api/v1/request-logs":
-			if got := r.URL.Query().Get("limit"); got != "7" {
-				t.Fatalf("request log limit = %q, want 7", got)
+			switch got := r.URL.Query().Get("limit"); got {
+			case "1":
+				_ = json.NewEncoder(w).Encode(operationalExportRequestLogsResponse{RequestLogs: []operationalExportRequestLog{{Time: now, Method: http.MethodGet, Host: "demo.example.test", Path: "/", RemoteIP: "192.0.2.1", RequestID: "req_diag", Subdomain: "demo", Status: http.StatusOK, Outcome: "completed", DurationMS: 10}}})
+			case "7":
+				_ = json.NewEncoder(w).Encode(operationalExportRequestLogsResponse{RequestLogs: []operationalExportRequestLog{{Time: now, Method: http.MethodGet, Host: "demo.example.test", Path: "/", RemoteIP: "192.0.2.1", RequestID: "req_demo", Subdomain: "demo", TunnelID: "tun_demo", Status: http.StatusOK, Outcome: "completed", DurationMS: 12}}, NextCursor: "cur_logs", Filters: map[string]any{"limit": 7}})
+			default:
+				t.Fatalf("request log limit = %q, want 1 or 7", got)
 			}
-			_ = json.NewEncoder(w).Encode(operationalExportRequestLogsResponse{RequestLogs: []operationalExportRequestLog{{Time: now, Method: http.MethodGet, Host: "demo.example.test", Path: "/", RemoteIP: "192.0.2.1", RequestID: "req_demo", Subdomain: "demo", TunnelID: "tun_demo", Status: http.StatusOK, Outcome: "completed", DurationMS: 12}}})
 		default:
 			t.Fatalf("unexpected gateway request: %s", r.URL.Path)
 		}
@@ -83,8 +99,8 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	if authorizedAdminCalls != 5 {
-		t.Fatalf("authorized admin calls = %d, want 5", authorizedAdminCalls)
+	if authorizedAdminCalls != 6 {
+		t.Fatalf("authorized admin calls = %d, want 6", authorizedAdminCalls)
 	}
 	var snapshot operationalExportSnapshot
 	if err := json.NewDecoder(&stdout).Decode(&snapshot); err != nil {
@@ -93,11 +109,23 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 	if len(snapshot.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", snapshot.Errors)
 	}
+	if snapshot.SchemaVersion != operationalExportSchemaVersion {
+		t.Fatalf("schema version = %d, want %d", snapshot.SchemaVersion, operationalExportSchemaVersion)
+	}
+	if snapshot.Diagnostics == nil || len(snapshot.Diagnostics.Checks) == 0 {
+		t.Fatalf("diagnostics = %+v, want populated report", snapshot.Diagnostics)
+	}
 	if snapshot.ControlPlane == nil || len(snapshot.ControlPlane.Tokens) != 1 || len(snapshot.ControlPlane.AuditEvents) != 1 {
 		t.Fatalf("control plane snapshot = %+v, want token and audit event", snapshot.ControlPlane)
 	}
+	if snapshot.ControlPlane.AuditEventCursor != "cur_events" || snapshot.ControlPlane.AuditEventFilters["limit"] == nil {
+		t.Fatalf("audit event metadata = cursor %q filters %+v, want cursor and filters", snapshot.ControlPlane.AuditEventCursor, snapshot.ControlPlane.AuditEventFilters)
+	}
 	if snapshot.Gateway == nil || len(snapshot.Gateway.Tunnels) != 1 || len(snapshot.Gateway.TunnelDetails) != 1 || len(snapshot.Gateway.RequestLogs) != 1 {
 		t.Fatalf("gateway snapshot = %+v, want tunnel detail and request log", snapshot.Gateway)
+	}
+	if snapshot.Gateway.RequestLogCursor != "cur_logs" || snapshot.Gateway.RequestLogFilters["limit"] == nil {
+		t.Fatalf("request log metadata = cursor %q filters %+v, want cursor and filters", snapshot.Gateway.RequestLogCursor, snapshot.Gateway.RequestLogFilters)
 	}
 	if len(snapshot.Gateway.Metrics) != 1 || snapshot.Gateway.Metrics[0].Name != "porthook_gateway_active_tunnels" {
 		t.Fatalf("metrics = %+v, want active tunnels metric", snapshot.Gateway.Metrics)
@@ -110,6 +138,8 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 func TestRunOperationalExportRecordsPartialErrors(t *testing.T) {
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/healthz", "/readyz":
+			_, _ = w.Write([]byte("ok\n"))
 		case "/api/v1/tunnels":
 			http.Error(w, "gateway unavailable", http.StatusServiceUnavailable)
 		case "/api/v1/runtime", "/metrics", "/api/v1/request-logs":
@@ -140,6 +170,8 @@ func TestRunOperationalExportRecordsPartialErrors(t *testing.T) {
 func TestRunOperationalExportWritesOutputFile(t *testing.T) {
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/healthz", "/readyz":
+			_, _ = w.Write([]byte("ok\n"))
 		case "/api/v1/tunnels":
 			_, _ = w.Write([]byte(`{"tunnels":[]}`))
 		case "/api/v1/runtime":
