@@ -51,6 +51,10 @@ type requestLogReader interface {
 	List(context.Context, requestLogListOptions) (requestLogListPage, error)
 }
 
+type requestLogPruner interface {
+	PruneBefore(context.Context, time.Time) (int64, error)
+}
+
 type requestLogFilter struct {
 	Subdomain string
 	Status    int
@@ -195,6 +199,41 @@ func (b *requestLogBuffer) listPage(opts requestLogListOptions) requestLogListPa
 		}
 	}
 	return requestLogPage(out, limit)
+}
+
+func (b *requestLogBuffer) PruneBefore(_ context.Context, cutoff time.Time) (int64, error) {
+	if b == nil || len(b.entries) == 0 || cutoff.IsZero() {
+		return 0, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	count := b.next
+	if b.full {
+		count = len(b.entries)
+	}
+	retained := make([]requestLogEntry, 0, count)
+	for i := 0; i < count; i++ {
+		index := i
+		if b.full {
+			index = (b.next + i) % len(b.entries)
+		}
+		entry := b.entries[index]
+		if !entry.Time.IsZero() && entry.Time.Before(cutoff) {
+			continue
+		}
+		retained = append(retained, entry)
+	}
+	for i := range b.entries {
+		b.entries[i] = requestLogEntry{}
+	}
+	copy(b.entries, retained)
+	b.next = len(retained)
+	b.full = b.next == len(b.entries)
+	if b.full {
+		b.next = 0
+	}
+	return int64(count - len(retained)), nil
 }
 
 func requestLogEntryFromPublicRequest(r *http.Request, entry publicRequestLog) requestLogEntry {

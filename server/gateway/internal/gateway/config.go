@@ -9,31 +9,33 @@ import (
 )
 
 const (
-	defaultPublicAddr             = ":8080"
-	defaultAgentAddr              = ":8081"
-	defaultRootDomain             = "localhost"
-	defaultPublicURL              = "http://localhost:8080"
-	defaultStaticToken            = "dev-token"
-	defaultControlPlaneTimeout    = 5 * time.Second
-	defaultCustomDomainCacheTTL   = 30 * time.Second
-	defaultCustomDomainMissTTL    = 5 * time.Second
-	defaultMaxBodyBytes           = 1 << 20
-	defaultMaxConcurrentStreams   = 64
-	defaultRateLimitRPS           = 60
-	defaultRateLimitBurst         = 120
-	defaultStreamChunkBytes       = 32 << 10
-	defaultReadHeaderTimeout      = 5 * time.Second
-	defaultReadTimeout            = 30 * time.Second
-	defaultWriteTimeout           = 35 * time.Second
-	defaultIdleTimeout            = 120 * time.Second
-	defaultHandshakeTimeout       = 10 * time.Second
-	defaultStreamTimeout          = 30 * time.Second
-	defaultWebSocketWriteTimeout  = 10 * time.Second
-	defaultWebSocketPingInterval  = 15 * time.Second
-	defaultWebSocketPongTimeout   = 5 * time.Second
-	defaultShutdownTimeout        = 5 * time.Second
-	defaultRequestLogLimit        = 500
-	defaultRequestLogWriteTimeout = 1 * time.Second
+	defaultPublicAddr              = ":8080"
+	defaultAgentAddr               = ":8081"
+	defaultRootDomain              = "localhost"
+	defaultPublicURL               = "http://localhost:8080"
+	defaultStaticToken             = "dev-token"
+	defaultControlPlaneTimeout     = 5 * time.Second
+	defaultCustomDomainCacheTTL    = 30 * time.Second
+	defaultCustomDomainMissTTL     = 5 * time.Second
+	defaultMaxBodyBytes            = 1 << 20
+	defaultMaxConcurrentStreams    = 64
+	defaultRateLimitRPS            = 60
+	defaultRateLimitBurst          = 120
+	defaultStreamChunkBytes        = 32 << 10
+	defaultReadHeaderTimeout       = 5 * time.Second
+	defaultReadTimeout             = 30 * time.Second
+	defaultWriteTimeout            = 35 * time.Second
+	defaultIdleTimeout             = 120 * time.Second
+	defaultHandshakeTimeout        = 10 * time.Second
+	defaultStreamTimeout           = 30 * time.Second
+	defaultWebSocketWriteTimeout   = 10 * time.Second
+	defaultWebSocketPingInterval   = 15 * time.Second
+	defaultWebSocketPongTimeout    = 5 * time.Second
+	defaultShutdownTimeout         = 5 * time.Second
+	defaultRequestLogLimit         = 500
+	defaultRequestLogWriteTimeout  = 1 * time.Second
+	defaultRequestLogRetention     = 30 * 24 * time.Hour
+	defaultRequestLogPruneInterval = time.Hour
 )
 
 type Config struct {
@@ -65,6 +67,8 @@ type Config struct {
 	RequestLogLimit            int
 	RequestLogDatabaseURL      string
 	RequestLogWriteTimeout     time.Duration
+	RequestLogRetention        time.Duration
+	RequestLogPruneInterval    time.Duration
 }
 
 func ConfigFromEnv() Config {
@@ -97,6 +101,8 @@ func ConfigFromEnv() Config {
 		RequestLogLimit:            envInt("PORTHOOK_REQUEST_LOG_LIMIT", defaultRequestLogLimit),
 		RequestLogDatabaseURL:      envString("PORTHOOK_REQUEST_LOG_DATABASE_URL", ""),
 		RequestLogWriteTimeout:     envDuration("PORTHOOK_REQUEST_LOG_WRITE_TIMEOUT", defaultRequestLogWriteTimeout),
+		RequestLogRetention:        envDuration("PORTHOOK_REQUEST_LOG_RETENTION", defaultRequestLogRetention),
+		RequestLogPruneInterval:    envDuration("PORTHOOK_REQUEST_LOG_PRUNE_INTERVAL", defaultRequestLogPruneInterval),
 	})
 }
 
@@ -176,6 +182,12 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.RequestLogWriteTimeout <= 0 {
 		cfg.RequestLogWriteTimeout = defaultRequestLogWriteTimeout
 	}
+	if cfg.RequestLogRetention < 0 {
+		cfg.RequestLogRetention = defaultRequestLogRetention
+	}
+	if cfg.RequestLogPruneInterval < 0 {
+		cfg.RequestLogPruneInterval = defaultRequestLogPruneInterval
+	}
 	return cfg
 }
 
@@ -217,7 +229,7 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	parsed, err := time.ParseDuration(value)
-	if err != nil || parsed <= 0 {
+	if err != nil || parsed < 0 {
 		return fallback
 	}
 	return parsed

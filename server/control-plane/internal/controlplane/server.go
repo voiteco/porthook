@@ -143,6 +143,8 @@ func (s *Server) Run(ctx context.Context) error {
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	stopAuditPruner := s.startAuditEventPruner(ctx)
+	defer stopAuditPruner()
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -159,6 +161,55 @@ func (s *Server) Run(ctx context.Context) error {
 		return server.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		return err
+	}
+}
+
+func (s *Server) startAuditEventPruner(ctx context.Context) func() {
+	if s.cfg.AuditEventRetention <= 0 || s.cfg.AuditEventPruneInterval <= 0 {
+		return func() {}
+	}
+	pruner, ok := s.auditEvents.(AuditEventPruner)
+	if !ok {
+		return func() {}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(s.cfg.AuditEventPruneInterval)
+		defer ticker.Stop()
+		s.pruneAuditEvents(ctx, pruner)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+				s.pruneAuditEvents(ctx, pruner)
+			}
+		}
+	}()
+	return func() {
+		close(done)
+	}
+}
+
+func (s *Server) pruneAuditEvents(ctx context.Context, pruner AuditEventPruner) {
+	cutoff := time.Now().UTC().Add(-s.cfg.AuditEventRetention)
+	count, err := pruner.PruneBefore(ctx, cutoff)
+	if err != nil {
+		s.logger.WarnContext(ctx, "audit event pruning failed",
+			slog.String("event", "control_plane.audit_events_prune_failed"),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	if count > 0 {
+		s.logger.InfoContext(ctx, "audit events pruned",
+			slog.String("event", "control_plane.audit_events_pruned"),
+			slog.Int64("count", count),
+			slog.Time("cutoff", cutoff),
+		)
 	}
 }
 

@@ -521,6 +521,9 @@ PORTHOOK_WS_WRITE_TIMEOUT=10s
 PORTHOOK_WS_PING_INTERVAL=15s
 PORTHOOK_WS_PONG_TIMEOUT=5s
 PORTHOOK_SHUTDOWN_TIMEOUT=5s
+PORTHOOK_REQUEST_LOG_DATABASE_URL=postgres://...
+PORTHOOK_REQUEST_LOG_RETENTION=720h
+PORTHOOK_REQUEST_LOG_PRUNE_INTERVAL=1h
 ```
 
 Agent environment variables:
@@ -550,9 +553,11 @@ PORTHOOK_CONTROL_ADDR=:8082
 PORTHOOK_CONTROL_ADMIN_TOKEN=...
 PORTHOOK_CONTROL_VALIDATOR_TOKEN=...
 PORTHOOK_DATABASE_URL=postgres://...
+PORTHOOK_AUDIT_EVENT_RETENTION=2160h
+PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL=1h
 ```
 
-Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
+Duration values use Go duration syntax such as `500ms`, `10s`, `1m`, or `720h`. Request-log and audit-event pruning can be disabled by setting the matching retention or prune interval to `0s`.
 
 The agent retries transient dial and WebSocket disconnect failures with exponential backoff and jitter. Authentication failures and explicit tunnel registration errors are terminal.
 
