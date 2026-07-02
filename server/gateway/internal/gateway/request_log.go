@@ -4,6 +4,9 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,6 +16,7 @@ import (
 )
 
 type requestLogEntry struct {
+	ID            int64     `json:"-"`
 	Time          time.Time `json:"time"`
 	Method        string    `json:"method"`
 	Host          string    `json:"host"`
@@ -33,12 +37,18 @@ type requestLogEntry struct {
 }
 
 type requestLogsResponse struct {
-	RequestLogs []requestLogEntry `json:"request_logs"`
+	RequestLogs []requestLogEntry         `json:"request_logs"`
+	NextCursor  string                    `json:"next_cursor,omitempty"`
+	Filters     requestLogFiltersResponse `json:"filters"`
 }
 
 type requestLogWriter interface {
 	Ping(context.Context) error
 	Add(context.Context, requestLogEntry) error
+}
+
+type requestLogReader interface {
+	List(context.Context, requestLogListOptions) (requestLogListPage, error)
 }
 
 type requestLogFilter struct {
@@ -54,12 +64,46 @@ type requestLogFilter struct {
 	Until     time.Time
 }
 
+type requestLogListOptions struct {
+	Limit  int
+	Filter requestLogFilter
+	Cursor requestLogCursor
+}
+
+type requestLogListPage struct {
+	RequestLogs []requestLogEntry
+	NextCursor  string
+}
+
+type requestLogFiltersResponse struct {
+	Limit     int    `json:"limit"`
+	Subdomain string `json:"subdomain,omitempty"`
+	Method    string `json:"method,omitempty"`
+	Host      string `json:"host,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Status    int    `json:"status,omitempty"`
+	Outcome   string `json:"outcome,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	TunnelID  string `json:"tunnel_id,omitempty"`
+	Since     string `json:"since,omitempty"`
+	Until     string `json:"until,omitempty"`
+	Cursor    string `json:"cursor,omitempty"`
+}
+
+type requestLogCursor struct {
+	Time time.Time `json:"time"`
+	ID   int64     `json:"id"`
+}
+
 type requestLogBuffer struct {
 	mu      sync.RWMutex
 	entries []requestLogEntry
 	next    int
 	full    bool
+	nextID  int64
 }
+
+const maxRequestLogLimit = 1000
 
 func newRequestLogBuffer(limit int) *requestLogBuffer {
 	if limit <= 0 {
@@ -75,6 +119,12 @@ func (b *requestLogBuffer) add(entry requestLogEntry) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	if entry.ID == 0 {
+		b.nextID++
+		entry.ID = b.nextID
+	} else if entry.ID > b.nextID {
+		b.nextID = entry.ID
+	}
 	b.entries[b.next] = entry
 	b.next = (b.next + 1) % len(b.entries)
 	if b.next == 0 {
@@ -83,7 +133,7 @@ func (b *requestLogBuffer) add(entry requestLogEntry) {
 }
 
 func (b *requestLogBuffer) list(limit int) []requestLogEntry {
-	return b.listFiltered(limit, requestLogFilter{})
+	return b.listPage(requestLogListOptions{Limit: limit}).RequestLogs
 }
 
 func (b *requestLogBuffer) count() int {
@@ -106,8 +156,12 @@ func (b *requestLogBuffer) capacity() int {
 }
 
 func (b *requestLogBuffer) listFiltered(limit int, filter requestLogFilter) []requestLogEntry {
+	return b.listPage(requestLogListOptions{Limit: limit, Filter: filter}).RequestLogs
+}
+
+func (b *requestLogBuffer) listPage(opts requestLogListOptions) requestLogListPage {
 	if b == nil || len(b.entries) == 0 {
-		return nil
+		return requestLogListPage{}
 	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -116,11 +170,12 @@ func (b *requestLogBuffer) listFiltered(limit int, filter requestLogFilter) []re
 	if b.full {
 		count = len(b.entries)
 	}
-	if limit <= 0 || limit > count {
-		limit = count
+	limit := normalizedRequestLogLimit(opts.Limit)
+	if limit <= 0 {
+		return requestLogListPage{}
 	}
-	out := make([]requestLogEntry, 0, limit)
-	for i := 0; i < count && len(out) < limit; i++ {
+	out := make([]requestLogEntry, 0, min(limit+1, count))
+	for i := 0; i < count; i++ {
 		index := b.next - 1 - i
 		if index < 0 {
 			index += len(b.entries)
@@ -129,11 +184,17 @@ func (b *requestLogBuffer) listFiltered(limit int, filter requestLogFilter) []re
 			break
 		}
 		entry := b.entries[index]
-		if filter.matches(entry) {
+		if opts.Cursor.ID > 0 && entry.ID >= opts.Cursor.ID {
+			continue
+		}
+		if opts.Filter.matches(entry) {
 			out = append(out, entry)
+			if len(out) > limit {
+				break
+			}
 		}
 	}
-	return out
+	return requestLogPage(out, limit)
 }
 
 func requestLogEntryFromPublicRequest(r *http.Request, entry publicRequestLog) requestLogEntry {
@@ -164,13 +225,42 @@ func requestLogEntryFromPublicRequest(r *http.Request, entry publicRequestLog) r
 func requestLogLimit(r *http.Request, fallback int) int {
 	raw := r.URL.Query().Get("limit")
 	if raw == "" {
-		return fallback
+		return normalizedRequestLogLimit(fallback)
 	}
 	limit, err := strconv.Atoi(raw)
 	if err != nil || limit <= 0 {
-		return fallback
+		return normalizedRequestLogLimit(fallback)
+	}
+	return normalizedRequestLogLimit(limit)
+}
+
+func normalizedRequestLogLimit(limit int) int {
+	if limit < 0 {
+		return defaultRequestLogLimit
+	}
+	if limit > maxRequestLogLimit {
+		return maxRequestLogLimit
 	}
 	return limit
+}
+
+func requestLogListOptionsFromRequest(r *http.Request, fallback int) (requestLogListOptions, error) {
+	filter, err := requestLogFilterFromRequest(r)
+	if err != nil {
+		return requestLogListOptions{}, err
+	}
+	opts := requestLogListOptions{
+		Limit:  requestLogLimit(r, fallback),
+		Filter: filter,
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("cursor")); raw != "" {
+		cursor, err := decodeRequestLogCursor(raw)
+		if err != nil {
+			return requestLogListOptions{}, err
+		}
+		opts.Cursor = cursor
+	}
+	return opts, nil
 }
 
 func requestLogFilterFromRequest(r *http.Request) (requestLogFilter, error) {
@@ -256,4 +346,65 @@ func (f requestLogFilter) matches(entry requestLogEntry) bool {
 		return false
 	}
 	return true
+}
+
+func requestLogPage(entries []requestLogEntry, limit int) requestLogListPage {
+	limit = normalizedRequestLogLimit(limit)
+	if limit <= 0 || len(entries) == 0 {
+		return requestLogListPage{}
+	}
+	if len(entries) <= limit {
+		return requestLogListPage{RequestLogs: entries}
+	}
+	page := requestLogListPage{RequestLogs: entries[:limit]}
+	page.NextCursor = encodeRequestLogCursor(page.RequestLogs[len(page.RequestLogs)-1])
+	return page
+}
+
+func encodeRequestLogCursor(entry requestLogEntry) string {
+	if entry.ID <= 0 || entry.Time.IsZero() {
+		return ""
+	}
+	data, err := json.Marshal(requestLogCursor{Time: entry.Time, ID: entry.ID})
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+func decodeRequestLogCursor(raw string) (requestLogCursor, error) {
+	data, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return requestLogCursor{}, errors.New("cursor is invalid")
+	}
+	var cursor requestLogCursor
+	if err := json.Unmarshal(data, &cursor); err != nil {
+		return requestLogCursor{}, errors.New("cursor is invalid")
+	}
+	if cursor.ID <= 0 || cursor.Time.IsZero() {
+		return requestLogCursor{}, errors.New("cursor is invalid")
+	}
+	return cursor, nil
+}
+
+func requestLogFiltersForResponse(opts requestLogListOptions, cursor string) requestLogFiltersResponse {
+	filters := requestLogFiltersResponse{
+		Limit:     normalizedRequestLogLimit(opts.Limit),
+		Subdomain: opts.Filter.Subdomain,
+		Method:    opts.Filter.Method,
+		Host:      opts.Filter.Host,
+		Path:      opts.Filter.Path,
+		Status:    opts.Filter.Status,
+		Outcome:   opts.Filter.Outcome,
+		RequestID: opts.Filter.RequestID,
+		TunnelID:  opts.Filter.TunnelID,
+		Cursor:    cursor,
+	}
+	if !opts.Filter.Since.IsZero() {
+		filters.Since = opts.Filter.Since.Format(time.RFC3339)
+	}
+	if !opts.Filter.Until.IsZero() {
+		filters.Until = opts.Filter.Until.Format(time.RFC3339)
+	}
+	return filters
 }
