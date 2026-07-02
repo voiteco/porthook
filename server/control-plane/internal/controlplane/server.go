@@ -34,7 +34,7 @@ type Server struct {
 	logger         *slog.Logger
 	metrics        metrics
 	startedAt      time.Time
-	auditEvents    *auditEventBuffer
+	auditEvents    AuditEventStore
 }
 
 type validateTokenRequest struct {
@@ -100,6 +100,10 @@ func NewServerWithAccessPolicies(cfg Config, service *tokens.Service, reservatio
 }
 
 func NewServerWithCustomDomains(cfg Config, service *tokens.Service, reservationService *reserved.Service, accessPolicyService *access.Service, customDomainService *customdomains.Service) *Server {
+	return NewServerWithAuditEvents(cfg, service, reservationService, accessPolicyService, customDomainService, nil)
+}
+
+func NewServerWithAuditEvents(cfg Config, service *tokens.Service, reservationService *reserved.Service, accessPolicyService *access.Service, customDomainService *customdomains.Service, auditEventStore AuditEventStore) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
 	}
@@ -118,6 +122,9 @@ func NewServerWithCustomDomains(cfg Config, service *tokens.Service, reservation
 	if customDomainService == nil {
 		customDomainService = customdomains.NewService(customdomains.NewMemoryStore())
 	}
+	if auditEventStore == nil {
+		auditEventStore = NewMemoryAuditEventStore(defaultAuditEventLimit)
+	}
 	return &Server{
 		cfg:            cfg,
 		service:        service,
@@ -126,7 +133,7 @@ func NewServerWithCustomDomains(cfg Config, service *tokens.Service, reservation
 		customDomains:  customDomainService,
 		logger:         slog.Default(),
 		startedAt:      time.Now().UTC(),
-		auditEvents:    newAuditEventBuffer(defaultAuditEventLimit),
+		auditEvents:    auditEventStore,
 	}
 }
 
@@ -237,7 +244,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limit := auditEventLimit(r, defaultAuditEventLimit)
-	events := s.auditEvents.list(limit)
+	events, err := s.auditEvents.List(r.Context(), limit)
+	if err != nil {
+		s.logger.ErrorContext(r.Context(), "list audit events failed", slog.String("error", err.Error()))
+		http.Error(w, "list audit events: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	s.logAudit(r, slog.LevelInfo, "control-plane audit events listed", "control_plane.audit_events_listed", slog.Int("count", len(events)))
 	writeJSON(w, http.StatusOK, auditEventsResponse{Events: events})
 }
@@ -1025,7 +1037,10 @@ func (s *Server) ready(ctx context.Context) error {
 	if err := s.accessPolicies.Ready(ctx); err != nil {
 		return err
 	}
-	return s.customDomains.Ready(ctx)
+	if err := s.customDomains.Ready(ctx); err != nil {
+		return err
+	}
+	return s.auditEvents.Ping(ctx)
 }
 
 func secretEqual(got, want string) bool {
@@ -1049,7 +1064,7 @@ func (s *Server) logAudit(r *http.Request, level slog.Level, msg, event string, 
 	}
 	base = append(base, attrs...)
 	s.logger.LogAttrs(r.Context(), level, msg, base...)
-	s.auditEvents.add(auditEvent{
+	if err := s.auditEvents.Add(r.Context(), AuditEvent{
 		Time:      time.Now().UTC(),
 		Level:     level.String(),
 		Message:   msg,
@@ -1059,7 +1074,9 @@ func (s *Server) logAudit(r *http.Request, level slog.Level, msg, event string, 
 		RemoteIP:  remoteIP(r.RemoteAddr),
 		RequestID: requestID(r),
 		Fields:    auditEventFields(attrs),
-	})
+	}); err != nil {
+		s.logger.ErrorContext(r.Context(), "store audit event failed", slog.String("event", event), slog.String("error", err.Error()))
+	}
 }
 
 func auditEventFields(attrs []slog.Attr) map[string]string {

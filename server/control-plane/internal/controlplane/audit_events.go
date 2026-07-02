@@ -3,13 +3,14 @@
 package controlplane
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 )
 
-type auditEvent struct {
+type AuditEvent struct {
 	Time      time.Time         `json:"time"`
 	Level     string            `json:"level"`
 	Message   string            `json:"message"`
@@ -22,63 +23,74 @@ type auditEvent struct {
 }
 
 type auditEventsResponse struct {
-	Events []auditEvent `json:"events"`
+	Events []AuditEvent `json:"events"`
 }
 
-type auditEventBuffer struct {
+type AuditEventStore interface {
+	Ping(context.Context) error
+	Add(context.Context, AuditEvent) error
+	List(context.Context, int) ([]AuditEvent, error)
+}
+
+type MemoryAuditEventStore struct {
 	mu      sync.RWMutex
-	entries []auditEvent
+	entries []AuditEvent
 	next    int
 	full    bool
 }
 
-func newAuditEventBuffer(limit int) *auditEventBuffer {
+func NewMemoryAuditEventStore(limit int) *MemoryAuditEventStore {
 	if limit <= 0 {
-		return &auditEventBuffer{}
+		return &MemoryAuditEventStore{}
 	}
-	return &auditEventBuffer{entries: make([]auditEvent, limit)}
+	return &MemoryAuditEventStore{entries: make([]AuditEvent, limit)}
 }
 
-func (b *auditEventBuffer) add(entry auditEvent) {
-	if b == nil || len(b.entries) == 0 {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	b.entries[b.next] = entry
-	b.next = (b.next + 1) % len(b.entries)
-	if b.next == 0 {
-		b.full = true
-	}
+func (s *MemoryAuditEventStore) Ping(context.Context) error {
+	return nil
 }
 
-func (b *auditEventBuffer) list(limit int) []auditEvent {
-	if b == nil || len(b.entries) == 0 {
+func (s *MemoryAuditEventStore) Add(_ context.Context, entry AuditEvent) error {
+	if s == nil || len(s.entries) == 0 {
 		return nil
 	}
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	count := b.next
-	if b.full {
-		count = len(b.entries)
+	s.entries[s.next] = entry
+	s.next = (s.next + 1) % len(s.entries)
+	if s.next == 0 {
+		s.full = true
+	}
+	return nil
+}
+
+func (s *MemoryAuditEventStore) List(_ context.Context, limit int) ([]AuditEvent, error) {
+	if s == nil || len(s.entries) == 0 {
+		return nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	count := s.next
+	if s.full {
+		count = len(s.entries)
 	}
 	if limit <= 0 || limit > count {
 		limit = count
 	}
-	out := make([]auditEvent, 0, limit)
+	out := make([]AuditEvent, 0, limit)
 	for i := 0; i < limit; i++ {
-		index := b.next - 1 - i
+		index := s.next - 1 - i
 		if index < 0 {
-			index += len(b.entries)
+			index += len(s.entries)
 		}
-		if !b.full && index >= b.next {
+		if !s.full && index >= s.next {
 			break
 		}
-		out = append(out, b.entries[index])
+		out = append(out, s.entries[index])
 	}
-	return out
+	return out, nil
 }
 
 func auditEventLimit(r *http.Request, fallback int) int {

@@ -4,6 +4,9 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+### Added
+- Added Postgres-backed control-plane audit event storage with an in-memory fallback for development deployments.
+
 ## [0.11.0] - 2026-07-01
 
 ### Added

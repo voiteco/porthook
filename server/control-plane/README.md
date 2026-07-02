@@ -163,11 +163,11 @@ printf '%s' 'admin-secret' | porthook domains delete \
 - `DELETE /api/v1/custom-domains/{id}`
 - `POST /api/v1/custom-domains/lookup`
 
-`/readyz` checks the token, reservation, access policy, and custom domain stores. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include readiness state, process uptime, token inventory, reserved subdomain inventory, access policy inventory, custom domain inventory, token admin operations, token validations, reserved subdomain operations, access policy operations/evaluations, custom domain operations/lookups, authorization failures, and readiness failures.
+`/readyz` checks the token, reservation, access policy, custom domain, and audit event stores. For Postgres-backed deployments, it pings the configured database. Metrics use Prometheus text format and include readiness state, process uptime, token inventory, reserved subdomain inventory, access policy inventory, custom domain inventory, token admin operations, token validations, reserved subdomain operations, access policy operations/evaluations, custom domain operations/lookups, authorization failures, and readiness failures.
 
 `/api/v1/status` returns JSON with the control-plane readiness state and binary version for dashboard and automation checks.
 
-`/api/v1/events` returns recent in-memory audit events for admin users. Events are newest-first, support `?limit=N`, and omit plaintext tokens and access policy secrets.
+`/api/v1/events` returns recent audit events for admin users. Postgres-backed deployments store events durably; deployments without `PORTHOOK_DATABASE_URL` use an in-memory ring buffer. Events are newest-first, support `?limit=N`, and omit plaintext tokens and access policy secrets.
 
 `porthook doctor` checks gateway and control-plane operational endpoints, including `/api/v1/events` when an admin token is provided, and prints response request IDs for log correlation.
 
