@@ -1344,6 +1344,120 @@ func TestRequestLogsEndpointFiltersPublicRequests(t *testing.T) {
 	}
 }
 
+func TestRequestLogsEndpointPaginatesPublicRequests(t *testing.T) {
+	cfg := testConfig()
+	cfg.RequestLogLimit = 5
+	server := NewServer(cfg, slog.Default())
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	server.requestLogs.add(requestLogEntry{
+		Time:      now.Add(-time.Minute),
+		Method:    http.MethodGet,
+		Host:      "api.localhost",
+		Path:      "/old",
+		RequestID: "req_old",
+		Subdomain: "api",
+		TunnelID:  "tun_api",
+		Status:    http.StatusOK,
+		Outcome:   "completed",
+	})
+	server.requestLogs.add(requestLogEntry{
+		Time:      now,
+		Method:    http.MethodGet,
+		Host:      "api.localhost",
+		Path:      "/new",
+		RequestID: "req_new",
+		Subdomain: "api",
+		TunnelID:  "tun_api",
+		Status:    http.StatusOK,
+		Outcome:   "completed",
+	})
+
+	resp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?limit=1&subdomain=api")
+	if err != nil {
+		t.Fatalf("GET request logs returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var first requestLogsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&first); err != nil {
+		t.Fatalf("decode first page returned error: %v", err)
+	}
+	if len(first.RequestLogs) != 1 || first.RequestLogs[0].RequestID != "req_new" {
+		t.Fatalf("first page = %+v, want newest request", first.RequestLogs)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("next cursor is empty, want second page cursor")
+	}
+	if first.Filters.Limit != 1 || first.Filters.Subdomain != "api" {
+		t.Fatalf("filters = %+v, want echoed limit and subdomain", first.Filters)
+	}
+
+	nextResp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?limit=1&subdomain=api&cursor=" + first.NextCursor)
+	if err != nil {
+		t.Fatalf("GET second page returned error: %v", err)
+	}
+	defer nextResp.Body.Close()
+	if nextResp.StatusCode != http.StatusOK {
+		t.Fatalf("second status = %d, want 200", nextResp.StatusCode)
+	}
+	var second requestLogsResponse
+	if err := json.NewDecoder(nextResp.Body).Decode(&second); err != nil {
+		t.Fatalf("decode second page returned error: %v", err)
+	}
+	if len(second.RequestLogs) != 1 || second.RequestLogs[0].RequestID != "req_old" {
+		t.Fatalf("second page = %+v, want older request", second.RequestLogs)
+	}
+	if second.Filters.Cursor != first.NextCursor {
+		t.Fatalf("cursor filter = %q, want %q", second.Filters.Cursor, first.NextCursor)
+	}
+}
+
+func TestRequestLogsEndpointReadsDurableStore(t *testing.T) {
+	store := &captureRequestLogStore{
+		entries: []requestLogEntry{
+			{
+				ID:        1,
+				Time:      time.Now().UTC(),
+				Method:    http.MethodGet,
+				Host:      "durable.localhost",
+				Path:      "/from-store",
+				RequestID: "req_durable_store",
+				Subdomain: "durable",
+				TunnelID:  "tun_durable",
+				Status:    http.StatusAccepted,
+				Outcome:   "completed",
+			},
+		},
+	}
+	server := newServerWithRequestLogWriter(testConfig(), slog.Default(), store)
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	resp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?limit=10")
+	if err != nil {
+		t.Fatalf("GET request logs returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var payload requestLogsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode request logs returned error: %v", err)
+	}
+	if len(payload.RequestLogs) != 1 || payload.RequestLogs[0].RequestID != "req_durable_store" {
+		t.Fatalf("request logs = %+v, want durable store entry", payload.RequestLogs)
+	}
+	if payload.Filters.Limit != 10 {
+		t.Fatalf("filters = %+v, want limit 10", payload.Filters)
+	}
+}
+
 func TestRequestLogsEndpointRejectsInvalidFilters(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	publicServer := httptest.NewServer(server.PublicHandler())
@@ -2534,6 +2648,8 @@ type captureRequestLogStore struct {
 	mu      sync.Mutex
 	pingErr error
 	addErr  error
+	listErr error
+	nextID  int64
 	entries []requestLogEntry
 }
 
@@ -2547,8 +2663,43 @@ func (s *captureRequestLogStore) Add(_ context.Context, entry requestLogEntry) e
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if entry.ID == 0 {
+		s.nextID++
+		entry.ID = s.nextID
+	} else if entry.ID > s.nextID {
+		s.nextID = entry.ID
+	}
 	s.entries = append(s.entries, entry)
 	return nil
+}
+
+func (s *captureRequestLogStore) List(_ context.Context, opts requestLogListOptions) (requestLogListPage, error) {
+	if s.listErr != nil {
+		return requestLogListPage{}, s.listErr
+	}
+	s.mu.Lock()
+	entries := append([]requestLogEntry(nil), s.entries...)
+	s.mu.Unlock()
+
+	limit := normalizedRequestLogLimit(opts.Limit)
+	if limit <= 0 {
+		return requestLogListPage{}, nil
+	}
+	out := make([]requestLogEntry, 0, min(limit+1, len(entries)))
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		if opts.Cursor.ID > 0 && entry.ID >= opts.Cursor.ID {
+			continue
+		}
+		if !opts.Filter.matches(entry) {
+			continue
+		}
+		out = append(out, entry)
+		if len(out) > limit {
+			break
+		}
+	}
+	return requestLogPage(out, limit), nil
 }
 
 func (s *captureRequestLogStore) entriesSnapshot() []requestLogEntry {

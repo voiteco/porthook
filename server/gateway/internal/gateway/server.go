@@ -422,13 +422,22 @@ func (s *Server) handleRequestLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := requestLogLimit(r, s.cfg.RequestLogLimit)
-	filter, err := requestLogFilterFromRequest(r)
+	opts, err := requestLogListOptionsFromRequest(r, s.cfg.RequestLogLimit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, requestLogsResponse{RequestLogs: s.requestLogs.listFiltered(limit, filter)})
+	page, err := s.listRequestLogs(r.Context(), opts)
+	if err != nil {
+		s.logger.ErrorContext(r.Context(), "list request logs failed", "error", err)
+		http.Error(w, "list request logs: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestLogsResponse{
+		RequestLogs: page.RequestLogs,
+		NextCursor:  page.NextCursor,
+		Filters:     requestLogFiltersForResponse(opts, strings.TrimSpace(r.URL.Query().Get("cursor"))),
+	})
 }
 
 func (s *Server) runtimeSummary() runtimeSummary {
@@ -1111,6 +1120,13 @@ func (s *Server) recordRequestLog(entry requestLogEntry) {
 			"outcome", entry.Outcome,
 		)
 	}
+}
+
+func (s *Server) listRequestLogs(ctx context.Context, opts requestLogListOptions) (requestLogListPage, error) {
+	if reader, ok := s.requestLogStore.(requestLogReader); ok {
+		return reader.List(ctx, opts)
+	}
+	return s.requestLogs.listPage(opts), nil
 }
 
 type publicRequestLog struct {

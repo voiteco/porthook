@@ -72,7 +72,7 @@ Required local environment values:
 
 Optional OpenTelemetry values in the example env file can enable gateway and control-plane trace export. Leave `PORTHOOK_OTEL_ENABLED=false` unless an OTLP collector or stdout trace debugging is intentionally configured. See [../../docs/OBSERVABILITY.md](../../docs/OBSERVABILITY.md).
 
-The control-plane and production stacks configure `PORTHOOK_REQUEST_LOG_DATABASE_URL` for the gateway, so public request summaries are written to Postgres in addition to the in-memory recent-log buffer.
+The control-plane and production stacks configure `PORTHOOK_REQUEST_LOG_DATABASE_URL` for the gateway, so public request summaries are stored in Postgres and served from the durable request-log endpoint.
 
 Start Postgres, the control plane, and the gateway:
 

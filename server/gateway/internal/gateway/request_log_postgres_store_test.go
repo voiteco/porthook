@@ -5,6 +5,7 @@ package gateway
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRequestLogPostgresMigrationsAreVersioned(t *testing.T) {
@@ -28,5 +29,46 @@ func TestRequestLogPostgresMigrationsAreVersioned(t *testing.T) {
 func TestNewPostgresRequestLogStoreRejectsNilDB(t *testing.T) {
 	if _, err := NewPostgresRequestLogStore(nil); err == nil {
 		t.Fatal("NewPostgresRequestLogStore returned nil error")
+	}
+}
+
+func TestRequestLogSQLFilters(t *testing.T) {
+	since := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	until := since.Add(time.Hour)
+	cursorTime := until.Add(time.Minute)
+	where, args := requestLogSQLFilters(requestLogListOptions{
+		Filter: requestLogFilter{
+			Subdomain: "api",
+			Method:    "GET",
+			Host:      "example",
+			Path:      "/hooks",
+			Status:    502,
+			Outcome:   "tunnel",
+			RequestID: "req",
+			TunnelID:  "tun",
+			Since:     since,
+			Until:     until,
+		},
+		Cursor: requestLogCursor{Time: cursorTime, ID: 42},
+	})
+	for _, want := range []string{
+		"LOWER(subdomain) = $1",
+		"status = $2",
+		"outcome ILIKE $3",
+		"request_id ILIKE $4",
+		"host ILIKE $5",
+		"method = $6",
+		"path ILIKE $7",
+		"tunnel_id ILIKE $8",
+		"time >= $9",
+		"time <= $10",
+		"(time < $11 OR (time = $11 AND id < $12))",
+	} {
+		if !strings.Contains(where, want) {
+			t.Fatalf("where = %q, want %q", where, want)
+		}
+	}
+	if len(args) != 12 {
+		t.Fatalf("args = %d, want 12", len(args))
 	}
 }
