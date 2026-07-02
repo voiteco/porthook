@@ -69,20 +69,20 @@ func (s *PostgresAuditEventStore) Add(ctx context.Context, event AuditEvent) err
 	return nil
 }
 
-func (s *PostgresAuditEventStore) List(ctx context.Context, limit int) ([]AuditEvent, error) {
-	if limit <= 0 {
-		limit = defaultAuditEventLimit
+func (s *PostgresAuditEventStore) List(ctx context.Context, opts AuditEventListOptions) (AuditEventListPage, error) {
+	limit := normalizedAuditEventLimit(opts.Limit)
+	where, args := auditEventSQLFilters(opts)
+	args = append(args, limit+1)
+	query := `SELECT id, time, level, message, event, method, path, remote_ip, request_id, fields_json::text
+		FROM audit_events`
+	if where != "" {
+		query += " WHERE " + where
 	}
-	rows, err := s.db.QueryContext(
-		ctx,
-		`SELECT time, level, message, event, method, path, remote_ip, request_id, fields_json::text
-		FROM audit_events
-		ORDER BY time DESC, id DESC
-		LIMIT $1`,
-		limit,
-	)
+	query += fmt.Sprintf(" ORDER BY time DESC, id DESC LIMIT $%d", len(args))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list audit events: %w", err)
+		return AuditEventListPage{}, fmt.Errorf("list audit events: %w", err)
 	}
 	defer rows.Close()
 
@@ -90,14 +90,50 @@ func (s *PostgresAuditEventStore) List(ctx context.Context, limit int) ([]AuditE
 	for rows.Next() {
 		event, err := scanAuditEvent(rows)
 		if err != nil {
-			return nil, err
+			return AuditEventListPage{}, err
 		}
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list audit events: %w", err)
+		return AuditEventListPage{}, fmt.Errorf("list audit events: %w", err)
 	}
-	return events, nil
+	return auditEventPage(events, limit), nil
+}
+
+func auditEventSQLFilters(opts AuditEventListOptions) (string, []any) {
+	var where []string
+	var args []any
+
+	add := func(clause string, value any) {
+		args = append(args, value)
+		where = append(where, fmt.Sprintf(clause, len(args)))
+	}
+	addLike := func(column, value string) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
+		add(column+" ILIKE $%d", "%"+value+"%")
+	}
+
+	addLike("event", opts.Event)
+	if strings.TrimSpace(opts.Level) != "" {
+		add("level = $%d", strings.ToUpper(strings.TrimSpace(opts.Level)))
+	}
+	addLike("request_id", opts.RequestID)
+	addLike("remote_ip", opts.RemoteIP)
+	addLike("fields_json::text", opts.Field)
+	if !opts.Since.IsZero() {
+		add("time >= $%d", opts.Since)
+	}
+	if !opts.Until.IsZero() {
+		add("time <= $%d", opts.Until)
+	}
+	if opts.Cursor.ID > 0 && !opts.Cursor.Time.IsZero() {
+		args = append(args, opts.Cursor.Time, opts.Cursor.ID)
+		where = append(where, fmt.Sprintf("(time < $%d OR (time = $%d AND id < $%d))", len(args)-1, len(args)-1, len(args)))
+	}
+
+	return strings.Join(where, " AND "), args
 }
 
 func (s *PostgresAuditEventStore) applyMigrations(ctx context.Context, migrations []AuditPostgresMigration) error {
@@ -195,6 +231,7 @@ func scanAuditEvent(scanner auditEventScanner) (AuditEvent, error) {
 	var requestID sql.NullString
 	var fieldsJSON string
 	err := scanner.Scan(
+		&event.ID,
 		&event.Time,
 		&event.Level,
 		&event.Message,
