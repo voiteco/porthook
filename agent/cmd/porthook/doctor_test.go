@@ -25,6 +25,18 @@ func TestRunDoctorChecksGatewayAndControlPlane(t *testing.T) {
 		case "/api/v1/tunnels":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"tunnels":[{"tunnel_id":"tun_1"}]}`))
+		case "/api/v1/runtime":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"runtime":{"active_tunnels":1,"active_streams":2,"request_log_entries":3,"request_log_capacity":100,"uptime_seconds":60}}`))
+		case "/api/v1/request-logs":
+			if r.URL.Query().Get("limit") != "1" {
+				t.Fatalf("request logs limit = %q, want 1", r.URL.Query().Get("limit"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"request_logs":[{"request_id":"req_public"}]}`))
+		case "/metrics":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("# TYPE porthook_gateway_active_tunnels gauge\nporthook_gateway_active_tunnels 1\n"))
 		default:
 			t.Fatalf("unexpected gateway path %s", r.URL.Path)
 		}
@@ -80,7 +92,7 @@ func TestRunDoctorChecksGatewayAndControlPlane(t *testing.T) {
 	}
 
 	output := stdout.String()
-	for _, want := range []string{"OK", "gateway", "control-plane", "req_gateway", "req_control", "tunnels=1", "events=1", "version=test-version"} {
+	for _, want := range []string{"OK", "gateway", "control-plane", "req_gateway", "req_control", "tunnels=1", "active_tunnels=1", "request_logs=1", "metrics=1", "events=1", "version=test-version"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stdout = %q, want %q", output, want)
 		}
@@ -98,6 +110,15 @@ func TestRunDoctorJSONReportsReadinessFailure(t *testing.T) {
 		case "/api/v1/tunnels":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"tunnels":[]}`))
+		case "/api/v1/runtime":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"runtime":{"active_tunnels":0,"request_log_capacity":100}}`))
+		case "/api/v1/request-logs":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"request_logs":[]}`))
+		case "/metrics":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(""))
 		default:
 			t.Fatalf("unexpected gateway path %s", r.URL.Path)
 		}

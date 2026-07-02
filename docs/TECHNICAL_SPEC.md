@@ -431,7 +431,7 @@ porthook version
 
 `porthook history events` and `porthook history requests` read paginated operational history from `GET /api/v1/events` and `GET /api/v1/request-logs`. They support the corresponding endpoint filters, `--cursor`, `--limit`, and `--json`; audit events require a control-plane admin token.
 
-`porthook export` writes a best-effort operational JSON snapshot for self-hosted debugging. It includes safe control-plane summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, and request logs. It records partial endpoint failures in an `errors` array and does not include plaintext agent tokens, policy secrets, or local target URLs.
+`porthook export` writes a best-effort operational JSON snapshot for self-hosted debugging. Schema version 2 includes safe control-plane summaries, diagnostics, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, request logs, and cursor/filter metadata for paginated audit and request-log endpoints. It records partial endpoint failures in an `errors` array and does not include plaintext agent tokens, policy secrets, or local target URLs.
 
 Postgres-backed control-plane token, reservation, access policy, custom domain, audit event, and gateway request-log storage uses embedded versioned SQL migrations. The control plane and gateway apply their pending migrations at startup and record applied versions in `schema_migrations`.
 
@@ -439,7 +439,7 @@ The control plane exposes `GET /api/v1/status` for dashboard and automation chec
 
 The control plane exposes `GET /api/v1/events` for dashboard audit visibility. The endpoint returns recent audit events, newest first, and omits plaintext tokens and access policy secrets. It accepts `limit`, `event`, `level`, `request_id`, `remote_ip`, `field`, `since`, `until`, and `cursor` query parameters; time filters use RFC3339 timestamps. Responses include `events`, echoed `filters`, and `next_cursor` when another page is available. Postgres-backed deployments store audit events durably; development deployments without a database use an in-memory ring buffer.
 
-The dashboard includes browser diagnostics for control-plane status/readiness, audit event API access, configured gateway tunnel/runtime/metrics/request-log API reachability, and an operational JSON export download.
+The dashboard includes browser diagnostics for control-plane status/readiness, audit event API access, configured gateway tunnel/runtime/metrics/request-log API reachability, and an operational JSON export download. `porthook doctor` checks the same gateway tunnel, runtime, metrics, and request-log APIs from the CLI, plus gateway health/readiness and configured control-plane endpoints.
 
 The gateway exposes `GET /api/v1/tunnels` for dashboard active-tunnel visibility. The endpoint returns active tunnel summaries and omits local target URLs.
 

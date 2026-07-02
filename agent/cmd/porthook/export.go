@@ -18,6 +18,7 @@ import (
 
 const defaultOperationalExportTimeout = 10 * time.Second
 const defaultOperationalExportLimit = 100
+const operationalExportSchemaVersion = 2
 
 const operationalExportUsageText = `usage: porthook export [--gateway URL] [--control-plane URL] [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--event-limit N] [--request-log-limit N] [--output FILE]`
 
@@ -33,12 +34,14 @@ type operationalExportConfig struct {
 }
 
 type operationalExportSnapshot struct {
-	ExportedAt   time.Time                      `json:"exported_at"`
-	Version      string                         `json:"version"`
-	Sources      operationalExportSources       `json:"sources"`
-	ControlPlane *operationalExportControlPlane `json:"control_plane,omitempty"`
-	Gateway      *operationalExportGateway      `json:"gateway,omitempty"`
-	Errors       []operationalExportError       `json:"errors,omitempty"`
+	SchemaVersion int                            `json:"schema_version"`
+	ExportedAt    time.Time                      `json:"exported_at"`
+	Version       string                         `json:"version"`
+	Sources       operationalExportSources       `json:"sources"`
+	Diagnostics   *doctorReport                  `json:"diagnostics,omitempty"`
+	ControlPlane  *operationalExportControlPlane `json:"control_plane,omitempty"`
+	Gateway       *operationalExportGateway      `json:"gateway,omitempty"`
+	Errors        []operationalExportError       `json:"errors,omitempty"`
 }
 
 type operationalExportSources struct {
@@ -55,15 +58,19 @@ type operationalExportControlPlane struct {
 	CustomDomains      []customDomainSummary     `json:"custom_domains"`
 	AccessPolicies     []accessPolicySummary     `json:"access_policies"`
 	AuditEvents        []json.RawMessage         `json:"audit_events"`
+	AuditEventFilters  map[string]any            `json:"audit_event_filters,omitempty"`
+	AuditEventCursor   string                    `json:"audit_event_next_cursor,omitempty"`
 }
 
 type operationalExportGateway struct {
-	Tunnels       []tunnelSummaryCLI            `json:"tunnels"`
-	TunnelDetails []tunnelDetailCLI             `json:"tunnel_details"`
-	Runtime       map[string]any                `json:"runtime,omitempty"`
-	Metrics       []operationalExportMetric     `json:"metrics"`
-	MetricsText   string                        `json:"metrics_text,omitempty"`
-	RequestLogs   []operationalExportRequestLog `json:"request_logs"`
+	Tunnels           []tunnelSummaryCLI            `json:"tunnels"`
+	TunnelDetails     []tunnelDetailCLI             `json:"tunnel_details"`
+	Runtime           map[string]any                `json:"runtime,omitempty"`
+	Metrics           []operationalExportMetric     `json:"metrics"`
+	MetricsText       string                        `json:"metrics_text,omitempty"`
+	RequestLogs       []operationalExportRequestLog `json:"request_logs"`
+	RequestLogFilters map[string]any                `json:"request_log_filters,omitempty"`
+	RequestLogCursor  string                        `json:"request_log_next_cursor,omitempty"`
 }
 
 type operationalExportMetric struct {
@@ -75,6 +82,14 @@ type operationalExportMetric struct {
 
 type operationalExportRequestLogsResponse struct {
 	RequestLogs []operationalExportRequestLog `json:"request_logs"`
+	NextCursor  string                        `json:"next_cursor,omitempty"`
+	Filters     map[string]any                `json:"filters,omitempty"`
+}
+
+type operationalExportAuditEventsResponse struct {
+	Events     []json.RawMessage `json:"events"`
+	NextCursor string            `json:"next_cursor,omitempty"`
+	Filters    map[string]any    `json:"filters,omitempty"`
 }
 
 type operationalExportRequestLog struct {
@@ -229,8 +244,9 @@ func normalizeOperationalExportLimit(value int) int {
 
 func collectOperationalExport(ctx context.Context, cfg operationalExportConfig) operationalExportSnapshot {
 	snapshot := operationalExportSnapshot{
-		ExportedAt: time.Now().UTC(),
-		Version:    version,
+		SchemaVersion: operationalExportSchemaVersion,
+		ExportedAt:    time.Now().UTC(),
+		Version:       version,
 		Sources: operationalExportSources{
 			ControlPlaneURL: cfg.controlPlaneURL,
 			GatewayURL:      cfg.gatewayURL,
@@ -238,6 +254,13 @@ func collectOperationalExport(ctx context.Context, cfg operationalExportConfig) 
 			RequestLogLimit: cfg.requestLogLimit,
 		},
 	}
+	diagnostics := collectDoctorReport(ctx, doctorConfig{
+		gatewayURL:      cfg.gatewayURL,
+		controlPlaneURL: cfg.controlPlaneURL,
+		adminToken:      cfg.adminToken,
+		timeout:         cfg.timeout,
+	})
+	snapshot.Diagnostics = &diagnostics
 	if cfg.controlPlaneURL != "" {
 		collectControlPlaneExport(ctx, cfg, &snapshot)
 	}
@@ -296,6 +319,8 @@ func collectControlPlaneExport(ctx context.Context, cfg operationalExportConfig,
 		addOperationalExportError(snapshot, "control-plane", "/api/v1/events", err)
 	} else {
 		controlPlane.AuditEvents = listed.Events
+		controlPlane.AuditEventFilters = listed.Filters
+		controlPlane.AuditEventCursor = listed.NextCursor
 	}
 }
 
@@ -349,14 +374,16 @@ func collectGatewayExport(ctx context.Context, cfg operationalExportConfig, snap
 		addOperationalExportError(snapshot, "gateway", "/api/v1/request-logs", err)
 	} else {
 		gateway.RequestLogs = logs.RequestLogs
+		gateway.RequestLogFilters = logs.Filters
+		gateway.RequestLogCursor = logs.NextCursor
 	}
 }
 
-func (c tokenAdminClient) listAuditEvents(ctx context.Context, limit int) (doctorAuditEventList, error) {
-	var listed doctorAuditEventList
+func (c tokenAdminClient) listAuditEvents(ctx context.Context, limit int) (operationalExportAuditEventsResponse, error) {
+	var listed operationalExportAuditEventsResponse
 	path := "/api/v1/events?limit=" + strconv.Itoa(limit)
 	if err := c.do(ctx, http.MethodGet, path, nil, &listed); err != nil {
-		return doctorAuditEventList{}, err
+		return operationalExportAuditEventsResponse{}, err
 	}
 	return listed, nil
 }
@@ -487,7 +514,7 @@ func pluralSuffix(count int) string {
 func printOperationalExportHelp(w io.Writer) {
 	fmt.Fprintln(w, `usage: porthook export [--gateway URL] [--control-plane URL] [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--event-limit N] [--request-log-limit N] [--output FILE]
 
-Write a best-effort operational JSON snapshot. The export includes public gateway state, safe control-plane summaries, audit events, metrics, and request logs. It does not include plaintext agent tokens, policy secrets, or local target URLs.
+Write a best-effort operational JSON snapshot. The export includes public gateway state, safe control-plane summaries, diagnostics, audit events, metrics, and request logs. It does not include plaintext agent tokens, policy secrets, or local target URLs.
 
 Options:
   --gateway URL             Gateway public URL. Defaults to PORTHOOK_GATEWAY_URL or http://localhost:8080.

@@ -114,7 +114,7 @@ printf '%s' '<admin-token>' | porthook export \
   --output porthook-operational-export.json
 ```
 
-The export includes safe control-plane summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, and request logs. It records partial endpoint failures in `errors` and does not include plaintext agent tokens, policy secrets, or local target URLs.
+The export includes `schema_version: 2`, safe control-plane summaries, diagnostics, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, request logs, and cursor/filter metadata for paginated audit and request-log endpoints. It records partial endpoint failures in `errors` and does not include plaintext agent tokens, policy secrets, or local target URLs.
 
 Useful log events:
 

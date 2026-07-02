@@ -67,19 +67,61 @@ type doctorAuditEventList struct {
 	Events []json.RawMessage `json:"events"`
 }
 
+type doctorRuntimeResponse struct {
+	Runtime struct {
+		UptimeSeconds      int64 `json:"uptime_seconds"`
+		ActiveTunnels      int   `json:"active_tunnels"`
+		ActiveStreams      int   `json:"active_streams"`
+		RequestLogEntries  int   `json:"request_log_entries"`
+		RequestLogCapacity int   `json:"request_log_capacity"`
+	} `json:"runtime"`
+}
+
+type doctorRequestLogList struct {
+	RequestLogs []json.RawMessage `json:"request_logs"`
+}
+
 func runDoctorCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	cfg, err := parseDoctorConfig(args, stdin, stderr)
 	if err != nil {
 		return err
 	}
 
+	report := collectDoctorReport(context.Background(), cfg)
+
+	if cfg.jsonOutput {
+		if err := writeJSONOutput(stdout, report); err != nil {
+			return err
+		}
+	} else {
+		printDoctorReport(stdout, report)
+	}
+
+	if !report.OK {
+		return fmt.Errorf("doctor found %d failed check(s)", report.failedCount())
+	}
+	return nil
+}
+
+func collectDoctorReport(ctx context.Context, cfg doctorConfig) doctorReport {
 	client := &http.Client{Timeout: cfg.timeout}
-	ctx := context.Background()
 	report := doctorReport{OK: true}
 
-	report.add(runDoctorGET(ctx, client, "gateway", "health", cfg.gatewayURL+"/healthz", nil, plainDoctorDetail))
-	report.add(runDoctorGET(ctx, client, "gateway", "readiness", cfg.gatewayURL+"/readyz", nil, plainDoctorDetail))
-	report.add(runDoctorGET(ctx, client, "gateway", "tunnels API", cfg.gatewayURL+"/api/v1/tunnels", nil, tunnelsDoctorDetail))
+	if cfg.gatewayURL == "" {
+		report.add(skippedDoctorCheck("gateway", "health", "gateway URL is not configured"))
+		report.add(skippedDoctorCheck("gateway", "readiness", "gateway URL is not configured"))
+		report.add(skippedDoctorCheck("gateway", "tunnels API", "gateway URL is not configured"))
+		report.add(skippedDoctorCheck("gateway", "runtime API", "gateway URL is not configured"))
+		report.add(skippedDoctorCheck("gateway", "request logs API", "gateway URL is not configured"))
+		report.add(skippedDoctorCheck("gateway", "metrics", "gateway URL is not configured"))
+	} else {
+		report.add(runDoctorGET(ctx, client, "gateway", "health", cfg.gatewayURL+"/healthz", nil, plainDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "readiness", cfg.gatewayURL+"/readyz", nil, plainDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "tunnels API", cfg.gatewayURL+"/api/v1/tunnels", nil, tunnelsDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "runtime API", cfg.gatewayURL+"/api/v1/runtime", nil, runtimeDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "request logs API", cfg.gatewayURL+"/api/v1/request-logs?limit=1", nil, requestLogsDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "metrics", cfg.gatewayURL+"/metrics", nil, metricsDoctorDetail))
+	}
 
 	if cfg.controlPlaneURL == "" {
 		report.add(skippedDoctorCheck("control-plane", "health", "control-plane URL is not configured"))
@@ -97,18 +139,7 @@ func runDoctorCommand(args []string, stdin io.Reader, stdout io.Writer, stderr i
 		}
 	}
 
-	if cfg.jsonOutput {
-		if err := writeJSONOutput(stdout, report); err != nil {
-			return err
-		}
-	} else {
-		printDoctorReport(stdout, report)
-	}
-
-	if !report.OK {
-		return fmt.Errorf("doctor found %d failed check(s)", report.failedCount())
-	}
-	return nil
+	return report
 }
 
 func parseDoctorConfig(args []string, stdin io.Reader, stderr io.Writer) (doctorConfig, error) {
@@ -307,6 +338,41 @@ func auditEventsDoctorDetail(_ int, body []byte) string {
 	return compactDoctorBody(body)
 }
 
+func runtimeDoctorDetail(_ int, body []byte) string {
+	var payload doctorRuntimeResponse
+	if err := json.Unmarshal(body, &payload); err == nil {
+		return fmt.Sprintf(
+			"active_tunnels=%d active_streams=%d request_logs=%d/%d uptime=%s",
+			payload.Runtime.ActiveTunnels,
+			payload.Runtime.ActiveStreams,
+			payload.Runtime.RequestLogEntries,
+			payload.Runtime.RequestLogCapacity,
+			formatTunnelDuration(time.Duration(payload.Runtime.UptimeSeconds)*time.Second),
+		)
+	}
+	return compactDoctorBody(body)
+}
+
+func requestLogsDoctorDetail(_ int, body []byte) string {
+	var listed doctorRequestLogList
+	if err := json.Unmarshal(body, &listed); err == nil {
+		return fmt.Sprintf("request_logs=%d", len(listed.RequestLogs))
+	}
+	return compactDoctorBody(body)
+}
+
+func metricsDoctorDetail(_ int, body []byte) string {
+	count := 0
+	for _, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		count++
+	}
+	return fmt.Sprintf("metrics=%d bytes=%d", count, len(body))
+}
+
 func compactDoctorBody(body []byte) string {
 	value := strings.TrimSpace(string(body))
 	value = strings.Join(strings.Fields(value), " ")
@@ -353,7 +419,7 @@ func printDoctorHelp(w io.Writer) {
 Run local operational checks against a self-hosted Porthook deployment.
 
 Checks:
-  gateway /healthz, /readyz, and /api/v1/tunnels
+  gateway /healthz, /readyz, /api/v1/tunnels, /api/v1/runtime, /api/v1/request-logs, and /metrics
   control-plane /healthz, /readyz, and /api/v1/status when --control-plane is set
   control-plane /api/v1/events when --control-plane and an admin token are set
 
