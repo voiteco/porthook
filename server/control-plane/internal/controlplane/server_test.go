@@ -229,6 +229,32 @@ func TestStatusEndpointReportsStoreFailure(t *testing.T) {
 	}
 }
 
+func TestReadyzReportsAuditStoreFailure(t *testing.T) {
+	server := NewServerWithAuditEvents(
+		Config{},
+		tokens.NewService(tokens.NewMemoryStore()),
+		reserved.NewService(reserved.NewMemoryStore()),
+		access.NewService(access.NewMemoryStore()),
+		customdomains.NewService(customdomains.NewMemoryStore()),
+		failingAuditEventStore{},
+	)
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	resp, err := httpServer.Client().Get(httpServer.URL + "/readyz")
+	if err != nil {
+		t.Fatalf("GET readyz returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	body := readResponseBody(t, resp)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %q", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "audit store unavailable") {
+		t.Fatalf("body = %q, want audit store error", body)
+	}
+}
+
 func TestMetricsEndpoint(t *testing.T) {
 	server := NewServer(Config{
 		AdminToken:     "admin-secret",
@@ -1287,4 +1313,18 @@ type failingReadyStore struct {
 
 func (s failingReadyStore) Ping(context.Context) error {
 	return errors.New("database unavailable")
+}
+
+type failingAuditEventStore struct{}
+
+func (s failingAuditEventStore) Ping(context.Context) error {
+	return errors.New("audit store unavailable")
+}
+
+func (s failingAuditEventStore) Add(context.Context, AuditEvent) error {
+	return nil
+}
+
+func (s failingAuditEventStore) List(context.Context, int) ([]AuditEvent, error) {
+	return nil, errors.New("audit store unavailable")
 }
