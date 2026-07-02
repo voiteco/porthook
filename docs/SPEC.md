@@ -447,7 +447,7 @@ Minimum:
 - Request count.
 - Error count.
 - Prometheus text metrics.
-- In-memory gateway request logs for recent public requests.
+- In-memory gateway request logs for recent public requests, with optional Postgres ingestion for durable retention.
 - OpenTelemetry traces for gateway/control-plane HTTP paths.
 - Dashboard operational overview charts.
 - Dashboard control-plane audit event view.

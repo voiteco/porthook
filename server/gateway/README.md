@@ -55,6 +55,8 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_WS_PONG_TIMEOUT` | `5s` | WebSocket keepalive pong timeout. |
 | `PORTHOOK_SHUTDOWN_TIMEOUT` | `5s` | Graceful shutdown timeout. |
 | `PORTHOOK_REQUEST_LOG_LIMIT` | `500` | Number of recent public request log entries kept in memory. Set `0` to disable the in-memory request log endpoint. |
+| `PORTHOOK_REQUEST_LOG_DATABASE_URL` | empty | Optional Postgres connection URL for durable gateway request log ingestion. If empty, request logs are kept only in memory. |
+| `PORTHOOK_REQUEST_LOG_WRITE_TIMEOUT` | `1s` | Timeout for writing a public request log entry to the durable store. |
 | `PORTHOOK_HEALTHCHECK_URL` | derived from `PORTHOOK_ADDR` | Optional explicit URL used by `porthook-gateway healthcheck`. |
 | `PORTHOOK_HEALTHCHECK_TIMEOUT` | `2s` | HTTP timeout used by `porthook-gateway healthcheck`. |
 | `PORTHOOK_OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing. |
@@ -81,7 +83,7 @@ Use `porthook doctor --gateway http://localhost:8080` to check gateway health, r
 
 The container image includes `porthook-gateway healthcheck`, which calls `/readyz` through the local public listener. Set `PORTHOOK_HEALTHCHECK_URL` only when the listener cannot be reached through the derived localhost URL.
 
-`GET /api/v1/request-logs` returns recent public request summaries from the in-memory ring buffer. The response is newest-first and supports `?limit=N`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`. Time filters use RFC3339 timestamps, and `limit` is applied after filtering. Entries include method, host, path, query presence, remote IP, request ID, subdomain, tunnel ID, stream ID, status, outcome, byte counts, duration, and an optional error string. Raw query strings and authorization values are not returned.
+`GET /api/v1/request-logs` returns recent public request summaries from the in-memory ring buffer. When `PORTHOOK_REQUEST_LOG_DATABASE_URL` is set, the gateway also writes public request summaries to Postgres for durable retention. The response is newest-first and supports `?limit=N`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`. Time filters use RFC3339 timestamps, and `limit` is applied after filtering. Entries include method, host, path, query presence, remote IP, request ID, subdomain, tunnel ID, stream ID, status, outcome, byte counts, duration, and an optional error string. Raw query strings and authorization values are not returned.
 
 Gateway logs are structured text logs written to stdout. Operational logs include an `event` field such as `gateway.public_request`, `gateway.tunnel_registered`, `gateway.agent_auth_failed`, and `gateway.agent_keepalive_failed`.
 

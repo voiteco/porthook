@@ -429,7 +429,7 @@ porthook version
 
 `porthook export` writes a best-effort operational JSON snapshot for self-hosted debugging. It includes safe control-plane summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, and request logs. It records partial endpoint failures in an `errors` array and does not include plaintext agent tokens, policy secrets, or local target URLs.
 
-Postgres-backed control-plane token, reservation, access policy, custom domain, and audit event storage uses embedded versioned SQL migrations. The control plane applies pending migrations at startup and records applied versions in `schema_migrations`.
+Postgres-backed control-plane token, reservation, access policy, custom domain, audit event, and gateway request-log storage uses embedded versioned SQL migrations. The control plane and gateway apply their pending migrations at startup and record applied versions in `schema_migrations`.
 
 The control plane exposes `GET /api/v1/status` for dashboard and automation checks. It returns JSON with readiness state and the binary version.
 
@@ -443,7 +443,7 @@ The gateway exposes `GET /api/v1/runtime` for dashboard runtime visibility. The 
 
 The dashboard can read the gateway Prometheus `GET /metrics` endpoint and render metric names, types, values, and help text for self-hosted operators.
 
-The gateway exposes `GET /api/v1/request-logs` for dashboard request-log visibility. The endpoint returns recent public request summaries from an in-memory ring buffer, newest first. It supports `limit`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`; `since` and `until` use RFC3339 timestamps, and `limit` is applied after filtering. It includes path and `query_present`, but never raw query strings.
+The gateway exposes `GET /api/v1/request-logs` for dashboard request-log visibility. The endpoint returns recent public request summaries from an in-memory ring buffer, newest first. When `PORTHOOK_REQUEST_LOG_DATABASE_URL` is configured, the gateway also writes public request summaries to Postgres for durable retention. It supports `limit`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`; `since` and `until` use RFC3339 timestamps, and `limit` is applied after filtering. It includes path and `query_present`, but never raw query strings.
 
 When the gateway is configured with `PORTHOOK_CONTROL_PLANE_URL`, requested subdomains are authorized through `POST /api/v1/reserved-subdomains/authorize`. Random subdomains do not require reservations.
 
