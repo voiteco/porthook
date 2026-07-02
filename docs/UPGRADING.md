@@ -2,6 +2,30 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.11.x to 0.12.x
+
+Version 0.12.x adds durable operational history for self-hosted deployments: optional Postgres-backed control-plane audit events, optional Postgres-backed gateway request logs, cursor pagination for both APIs, dashboard pagination, `porthook history`, expanded `porthook doctor` checks, and operational export schema version 2.
+
+Before upgrading a self-hosted deployment:
+
+1. Back up the Postgres volume or database.
+2. Stop the old `porthook-control-plane` and `porthook-gateway` processes or Compose stack.
+3. Deploy the new control-plane, gateway, dashboard assets, CLI binaries, and images together.
+4. Start the control plane and check `GET /readyz` and `GET /api/v1/events?limit=1`.
+5. Start the gateway and check `GET /readyz` and `GET /api/v1/request-logs?limit=1`.
+6. Run `porthook doctor --gateway <gateway-url> --control-plane <control-plane-url>` and include `--admin-token-stdin` when checking audit event access.
+7. Run `porthook history events --control-plane <control-plane-url> --admin-token-stdin --limit 10` and `porthook history requests --gateway <gateway-url> --limit 10`.
+8. Run `porthook export --gateway <gateway-url> --control-plane <control-plane-url> --admin-token-stdin --output porthook-operational-export.json` and confirm the export has `schema_version: 2` and no unexpected `errors`.
+9. Open `/dashboard/`, log in, and confirm audit events and request logs page through additional results.
+
+The 0.12.x migrations are additive:
+
+- create `audit_events` and its supporting indexes if they do not exist
+- create gateway `request_logs` and its supporting indexes if they do not exist
+- create or reuse `schema_migrations` for embedded migration tracking
+
+Rollback to 0.11.x should not require removing the additive tables. A 0.11.x CLI and dashboard will not use durable audit/request-log pagination, `porthook history`, expanded doctor checks, or operational export schema version 2 metadata. If `PORTHOOK_REQUEST_LOG_DATABASE_URL` is set only for 0.12.x gateway request-log storage, unset it before rolling the gateway back.
+
 ## Upgrade from 0.10.x to 0.11.x
 
 Version 0.11.x adds deeper self-hosted operational visibility: dashboard tunnel details, request-log filters, audit events, diagnostics, gateway runtime, metrics drilldown, `porthook tunnels`, and operational JSON export.
