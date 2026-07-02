@@ -100,6 +100,24 @@ func (s *PostgresAuditEventStore) List(ctx context.Context, opts AuditEventListO
 	return auditEventPage(events, limit), nil
 }
 
+func (s *PostgresAuditEventStore) PruneBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("database is required")
+	}
+	if cutoff.IsZero() {
+		return 0, nil
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM audit_events WHERE time < $1`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune audit events: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("prune audit events rows affected: %w", err)
+	}
+	return count, nil
+}
+
 func auditEventSQLFilters(opts AuditEventListOptions) (string, []any) {
 	var where []string
 	var args []any

@@ -1508,6 +1508,29 @@ func TestReadyzReportsRequestLogStoreFailure(t *testing.T) {
 	}
 }
 
+func TestRequestLogPrunerUsesDurableStore(t *testing.T) {
+	now := time.Now().UTC()
+	store := &captureRequestLogStore{
+		entries: []requestLogEntry{
+			{ID: 1, Time: now.Add(-2 * time.Hour), RequestID: "req_old"},
+			{ID: 2, Time: now, RequestID: "req_new"},
+		},
+	}
+	cfg := testConfig()
+	cfg.RequestLogRetention = time.Hour
+	server := newServerWithRequestLogWriter(cfg, slog.Default(), store)
+
+	server.pruneRequestLogs(context.Background(), store)
+
+	entries := store.entriesSnapshot()
+	if len(entries) != 1 || entries[0].RequestID != "req_new" {
+		t.Fatalf("entries = %+v, want only retained durable request log", entries)
+	}
+	if server.requestLogs.count() != 0 {
+		t.Fatalf("memory request logs = %d, want durable pruning to leave memory buffer untouched", server.requestLogs.count())
+	}
+}
+
 func TestPublicHandlerReturnsRequestIDOnErrors(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	publicServer := httptest.NewServer(server.PublicHandler())
@@ -2700,6 +2723,22 @@ func (s *captureRequestLogStore) List(_ context.Context, opts requestLogListOpti
 		}
 	}
 	return requestLogPage(out, limit), nil
+}
+
+func (s *captureRequestLogStore) PruneBefore(_ context.Context, cutoff time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	retained := s.entries[:0]
+	var pruned int64
+	for _, entry := range s.entries {
+		if !entry.Time.IsZero() && entry.Time.Before(cutoff) {
+			pruned++
+			continue
+		}
+		retained = append(retained, entry)
+	}
+	s.entries = retained
+	return pruned, nil
 }
 
 func (s *captureRequestLogStore) entriesSnapshot() []requestLogEntry {

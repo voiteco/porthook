@@ -57,6 +57,8 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_REQUEST_LOG_LIMIT` | `500` | Number of recent public request log entries kept in memory. Set `0` to disable the in-memory request log endpoint. |
 | `PORTHOOK_REQUEST_LOG_DATABASE_URL` | empty | Optional Postgres connection URL for durable gateway request log ingestion. If empty, request logs are kept only in memory. |
 | `PORTHOOK_REQUEST_LOG_WRITE_TIMEOUT` | `1s` | Timeout for writing a public request log entry to the durable store. |
+| `PORTHOOK_REQUEST_LOG_RETENTION` | `720h` | Gateway request log retention window. Set `0s` to disable request log pruning. |
+| `PORTHOOK_REQUEST_LOG_PRUNE_INTERVAL` | `1h` | How often the gateway prunes request logs older than the retention window. Set `0s` to disable the pruning worker. |
 | `PORTHOOK_HEALTHCHECK_URL` | derived from `PORTHOOK_ADDR` | Optional explicit URL used by `porthook-gateway healthcheck`. |
 | `PORTHOOK_HEALTHCHECK_TIMEOUT` | `2s` | HTTP timeout used by `porthook-gateway healthcheck`. |
 | `PORTHOOK_OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing. |

@@ -46,6 +46,8 @@ The dashboard can list, create, and revoke agent tokens, reserve subdomains for 
 | `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Bearer token required for token creation, listing, and revocation. If empty, those requests return `401 Unauthorized`. |
 | `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | empty | Bearer token required for token validation requests from the gateway. If empty, validation returns `401 Unauthorized`. |
 | `PORTHOOK_DATABASE_URL` | empty | Postgres connection URL. If empty, the process uses in-memory storage for development. |
+| `PORTHOOK_AUDIT_EVENT_RETENTION` | `2160h` | Control-plane audit event retention window. Set `0s` to disable audit event pruning. |
+| `PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL` | `1h` | How often the control plane prunes audit events older than the retention window. Set `0s` to disable the pruning worker. |
 | `PORTHOOK_HEALTHCHECK_URL` | derived from `PORTHOOK_CONTROL_ADDR` | Optional explicit URL used by `porthook-control-plane healthcheck`. |
 | `PORTHOOK_HEALTHCHECK_TIMEOUT` | `2s` | HTTP timeout used by `porthook-control-plane healthcheck`. |
 | `PORTHOOK_OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing. |

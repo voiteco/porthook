@@ -124,6 +124,24 @@ func (s *PostgresRequestLogStore) List(ctx context.Context, opts requestLogListO
 	return requestLogPage(entries, limit), nil
 }
 
+func (s *PostgresRequestLogStore) PruneBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("database is required")
+	}
+	if cutoff.IsZero() {
+		return 0, nil
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM gateway_request_logs WHERE time < $1`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune gateway request logs: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("prune gateway request logs rows affected: %w", err)
+	}
+	return count, nil
+}
+
 func requestLogSQLFilters(opts requestLogListOptions) (string, []any) {
 	var where []string
 	var args []any

@@ -40,6 +40,10 @@ type AuditEventStore interface {
 	List(context.Context, AuditEventListOptions) (AuditEventListPage, error)
 }
 
+type AuditEventPruner interface {
+	PruneBefore(context.Context, time.Time) (int64, error)
+}
+
 type MemoryAuditEventStore struct {
 	mu      sync.RWMutex
 	entries []AuditEvent
@@ -147,6 +151,41 @@ func (s *MemoryAuditEventStore) List(_ context.Context, opts AuditEventListOptio
 		}
 	}
 	return auditEventPage(out, limit), nil
+}
+
+func (s *MemoryAuditEventStore) PruneBefore(_ context.Context, cutoff time.Time) (int64, error) {
+	if s == nil || len(s.entries) == 0 || cutoff.IsZero() {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := s.next
+	if s.full {
+		count = len(s.entries)
+	}
+	retained := make([]AuditEvent, 0, count)
+	for i := 0; i < count; i++ {
+		index := i
+		if s.full {
+			index = (s.next + i) % len(s.entries)
+		}
+		entry := s.entries[index]
+		if !entry.Time.IsZero() && entry.Time.Before(cutoff) {
+			continue
+		}
+		retained = append(retained, entry)
+	}
+	for i := range s.entries {
+		s.entries[i] = AuditEvent{}
+	}
+	copy(s.entries, retained)
+	s.next = len(retained)
+	s.full = s.next == len(s.entries)
+	if s.full {
+		s.next = 0
+	}
+	return int64(count - len(retained)), nil
 }
 
 func auditEventListOptionsFromRequest(r *http.Request, fallback int) (AuditEventListOptions, error) {

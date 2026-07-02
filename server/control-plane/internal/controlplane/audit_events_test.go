@@ -105,6 +105,38 @@ func TestMemoryAuditEventStoreFiltersAndPaginates(t *testing.T) {
 	}
 }
 
+func TestMemoryAuditEventStorePrunesOldEntries(t *testing.T) {
+	store := NewMemoryAuditEventStore(5)
+	base := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	for _, event := range []AuditEvent{
+		{Time: base.Add(-2 * time.Hour), Event: "old"},
+		{Time: base.Add(-30 * time.Minute), Event: "recent"},
+		{Time: base, Event: "new"},
+	} {
+		if err := store.Add(context.Background(), event); err != nil {
+			t.Fatalf("Add returned error: %v", err)
+		}
+	}
+
+	pruned, err := store.PruneBefore(context.Background(), base.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("PruneBefore returned error: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("pruned = %d, want 1", pruned)
+	}
+	page, err := store.List(context.Background(), AuditEventListOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if len(page.Events) != 2 {
+		t.Fatalf("events = %d, want 2", len(page.Events))
+	}
+	if page.Events[0].Event != "new" || page.Events[1].Event != "recent" {
+		t.Fatalf("events = %+v, want retained newest-first entries", page.Events)
+	}
+}
+
 func TestAuditPostgresMigrationsAreVersioned(t *testing.T) {
 	migrations := AuditPostgresMigrations()
 	if len(migrations) != 1 {

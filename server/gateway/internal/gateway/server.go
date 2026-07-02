@@ -134,6 +134,9 @@ func (s *Server) Run(ctx context.Context) error {
 	go serveHTTP(errCh, publicServer)
 	go serveHTTP(errCh, agentServer)
 
+	stopRequestLogPruner := s.startRequestLogPruner(ctx)
+	defer stopRequestLogPruner()
+
 	s.logger.Info("gateway started", "event", "gateway.started", "public_addr", s.cfg.PublicAddr, "agent_addr", s.cfg.AgentAddr)
 
 	select {
@@ -151,6 +154,58 @@ func (s *Server) Run(ctx context.Context) error {
 		errPublic := publicServer.Shutdown(shutdownCtx)
 		errAgent := agentServer.Shutdown(shutdownCtx)
 		return errors.Join(err, errPublic, errAgent)
+	}
+}
+
+func (s *Server) startRequestLogPruner(ctx context.Context) func() {
+	if s.cfg.RequestLogRetention <= 0 || s.cfg.RequestLogPruneInterval <= 0 {
+		return func() {}
+	}
+	pruner := requestLogPruner(s.requestLogs)
+	if storePruner, ok := s.requestLogStore.(requestLogPruner); ok {
+		pruner = storePruner
+	}
+	if pruner == nil {
+		return func() {}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(s.cfg.RequestLogPruneInterval)
+		defer ticker.Stop()
+		s.pruneRequestLogs(ctx, pruner)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+				s.pruneRequestLogs(ctx, pruner)
+			}
+		}
+	}()
+	return func() {
+		close(done)
+	}
+}
+
+func (s *Server) pruneRequestLogs(ctx context.Context, pruner requestLogPruner) {
+	cutoff := time.Now().UTC().Add(-s.cfg.RequestLogRetention)
+	count, err := pruner.PruneBefore(ctx, cutoff)
+	if err != nil {
+		s.logger.WarnContext(ctx, "request log pruning failed",
+			slog.String("event", "gateway.request_logs_prune_failed"),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+	if count > 0 {
+		s.logger.InfoContext(ctx, "request logs pruned",
+			slog.String("event", "gateway.request_logs_pruned"),
+			slog.Int64("count", count),
+			slog.Time("cutoff", cutoff),
+		)
 	}
 }
 
