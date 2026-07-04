@@ -77,11 +77,10 @@ The control-plane and production stacks configure `PORTHOOK_REQUEST_LOG_DATABASE
 Start Postgres, the control plane, and the gateway:
 
 ```sh
-docker compose \
-  --env-file deploy/compose/.env.control-plane \
-  -f deploy/compose/docker-compose.control-plane.yml \
-  up --build
+make compose-up
 ```
+
+Use `make compose-up-detached` to start the same stack in the background, `make compose-ps` to inspect container health, `make compose-logs` to follow service logs, and `make compose-down` to stop it. These targets use `deploy/compose/.env.control-plane` and `deploy/compose/docker-compose.control-plane.yml` by default.
 
 The stack listens on:
 
@@ -243,6 +242,17 @@ The control-plane `/readyz` endpoint checks the token, reservation, access polic
 
 The gateway and control-plane images include built-in `healthcheck` subcommands, so the Compose healthchecks work in the scratch runtime images without adding curl or a shell. Use `docker compose ps` to inspect container health and `porthook doctor` for an external operator-facing check.
 
+The gateway and control-plane binaries also include `configcheck` subcommands for validating effective environment configuration:
+
+```sh
+porthook-gateway configcheck
+porthook-gateway configcheck --production
+porthook-control-plane configcheck
+porthook-control-plane configcheck --production
+```
+
+From a source checkout, `make configcheck` validates local development defaults and `make configcheck-production` validates a production-shaped example configuration with generated placeholder-safe values.
+
 ## Internet-Facing Notes
 
 For real internet traffic, update `PORTHOOK_ROOT_DOMAIN` and `PORTHOOK_PUBLIC_URL`, point wildcard DNS at the public gateway, and terminate TLS in front of the public listener. For custom domains, point the exact custom hostnames at the public gateway edge and serve certificates for those names. Keep the control-plane API and dashboard private or protected by an additional access boundary.
@@ -286,10 +296,7 @@ docker compose -f deploy/compose/docker-compose.yml down
 Stop the control-plane stack:
 
 ```sh
-docker compose \
-  --env-file deploy/compose/.env.control-plane \
-  -f deploy/compose/docker-compose.control-plane.yml \
-  down
+make compose-down
 ```
 
 Stop the production stack:

@@ -38,7 +38,13 @@ Use them together with:
      config
    ```
 
-5. Start or update the stack:
+5. Validate binary configuration rules. In a source checkout, this checks production-shaped gateway and control-plane requirements without starting listeners:
+
+   ```sh
+   make configcheck-production
+   ```
+
+6. Start or update the stack:
 
    ```sh
    docker compose \
@@ -47,7 +53,7 @@ Use them together with:
      up --build -d
    ```
 
-6. Check readiness:
+7. Check readiness:
 
    ```sh
    curl -i https://check.${PORTHOOK_ROOT_DOMAIN}/healthz
@@ -58,7 +64,7 @@ Use them together with:
      ps
    ```
 
-7. Run an end-to-end tunnel check with a newly created agent token and, if using a requested subdomain, a matching reservation.
+8. Run an end-to-end tunnel check with a newly created agent token and, if using a requested subdomain, a matching reservation.
 
 ## Health Triage
 
@@ -189,6 +195,18 @@ test -s "${backup_file}"
 
 Store backups outside the Compose host or on durable storage with access controls.
 
+For the local control-plane Compose stack, `make compose-backup` writes a timestamped dump under `backups/`. Override `CONTROL_COMPOSE_ENV`, `CONTROL_COMPOSE_FILE`, or `BACKUP_FILE` when testing an alternate stack.
+
+Record the migration state next to the backup when possible:
+
+```sh
+docker compose \
+  --env-file deploy/compose/.env.production \
+  -f deploy/compose/docker-compose.production.yml \
+  exec -T postgres psql -U porthook -d porthook \
+  -c 'select version from schema_migrations order by version;'
+```
+
 ## Postgres Restore
 
 Prefer restoring into a fresh stack or a maintenance window.
@@ -221,6 +239,19 @@ Prefer restoring into a fresh stack or a maintenance window.
    ```
 
 4. Check `/readyz`, `/api/v1/status`, token listing, and a tunnel round trip.
+
+After restore, also check audit and request-log storage when those APIs are enabled:
+
+```sh
+printf '%s' '<admin-token>' | porthook history events \
+  --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+  --admin-token-stdin \
+  --limit 5
+
+porthook history requests \
+  --gateway https://check.${PORTHOOK_ROOT_DOMAIN} \
+  --limit 5
+```
 
 ## Token Rotation
 
@@ -313,6 +344,7 @@ Expect existing agents to reconnect if the gateway process restarts.
    ```sh
    make test
    make vet
+   make configcheck-production
    make compose-config
    make production-hardening-check
    ```
