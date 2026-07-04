@@ -7,6 +7,7 @@ The dashboard provides a self-hosted web interface for control-plane administrat
 The current dashboard scope is self-hosted administration:
 
 - Token management.
+- Scoped admin token management.
 - Reserved subdomain management.
 - Custom domain management.
 - Access policy management.
@@ -27,9 +28,11 @@ The dashboard is embedded in the control-plane binary and served at:
 /dashboard/
 ```
 
-Authentication uses the self-hosted `PORTHOOK_CONTROL_ADMIN_TOKEN`. The browser stores the admin token in session storage for the current tab and sends it to the control-plane API as a bearer token. Logout clears the session storage value.
+Authentication uses the self-hosted bootstrap `PORTHOOK_CONTROL_ADMIN_TOKEN` or a scoped admin token created through the control plane. The browser stores the admin token in session storage for the current tab and sends it to the control-plane API as a bearer token. Logout clears the session storage value.
 
-The dashboard displays plaintext agent tokens only from the token create response. Token list responses contain summaries without plaintext token values.
+The dashboard displays plaintext admin and agent tokens only from create responses. List responses contain summaries without plaintext token values.
+
+Admin token management uses `GET`, `POST`, and `DELETE /api/v1/admin-tokens`. A scoped admin token needs the `admin_tokens` scope to manage other admin tokens. Other dashboard sections require their matching scopes: `tokens`, `reservations`, `domains`, `access_policies`, `audit_history`, and `runtime_diagnostics`.
 
 Token tables include `last_used_at` metadata, updated when the gateway successfully validates an agent token through the control plane.
 
@@ -43,7 +46,7 @@ The gateway runtime view reads `GET /api/v1/runtime` from the configured gateway
 
 The metrics drilldown reads Prometheus text from `GET /metrics` on the configured gateway URL and renders metric names, types, values, and help text.
 
-The operational export downloads a best-effort JSON snapshot from the browser. It includes safe control-plane summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, parsed and raw metrics, request logs, current filters, and diagnostics already run in the tab. CLI exports use `schema_version: 2` and include the same operational areas plus embedded CLI diagnostics and cursor metadata. Exports do not include plaintext agent tokens, policy secrets, or local target URLs.
+The operational export downloads a best-effort JSON snapshot from the browser. It includes safe control-plane summaries, admin token summaries, audit events, active gateway tunnels and tunnel details, gateway runtime, parsed and raw metrics, request logs, current filters, and diagnostics already run in the tab. CLI exports use `schema_version: 2` and include the same operational areas plus embedded CLI diagnostics and cursor metadata. Exports do not include plaintext admin tokens, plaintext agent tokens, policy secrets, or local target URLs.
 
 Custom domain management maps a fully qualified hostname to a reserved subdomain. DNS and TLS for that hostname are handled outside the dashboard.
 

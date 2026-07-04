@@ -52,6 +52,9 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	} else if opts.Production && looksLikePlaceholderSecret(cfg.AdminToken) {
 		addError("PORTHOOK_CONTROL_ADMIN_TOKEN", "must be replaced with a generated secret in production mode")
 	}
+	if opts.Production && strings.TrimSpace(cfg.AdminToken) != "" {
+		addWarning("PORTHOOK_CONTROL_ADMIN_TOKEN", "is a full-scope bootstrap/recovery token; create scoped admin tokens for routine operations and keep this value offline")
+	}
 	if strings.TrimSpace(cfg.ValidatorToken) == "" {
 		if opts.Production {
 			addError("PORTHOOK_CONTROL_VALIDATOR_TOKEN", "is required in production mode")

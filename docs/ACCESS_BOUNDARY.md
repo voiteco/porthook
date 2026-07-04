@@ -1,6 +1,6 @@
 # Control-Plane Access Boundary
 
-The self-hosted control plane serves administrative APIs and the dashboard. It is protected by `PORTHOOK_CONTROL_ADMIN_TOKEN`, but that token is not a complete production access boundary by itself.
+The self-hosted control plane serves administrative APIs and the dashboard. It is protected by a full-scope bootstrap token in `PORTHOOK_CONTROL_ADMIN_TOKEN` and by scoped admin tokens created through the control plane. These tokens are not a complete production access boundary by themselves.
 
 For internet-facing deployments, place the control-plane hostname behind at least one external boundary:
 
@@ -23,7 +23,7 @@ The public gateway listener is designed for internet traffic. The control-plane 
 | Control-plane API | Private or externally protected. |
 | Dashboard | Same boundary as the control-plane API. |
 
-The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token. Always use HTTPS and avoid exposing the dashboard on a public hostname without an additional boundary.
+The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token. The token can be the bootstrap token or a scoped admin token. Always use HTTPS and avoid exposing the dashboard on a public hostname without an additional boundary.
 
 Gateway operational APIs such as `GET /api/v1/tunnels`, `GET /api/v1/runtime`, `GET /metrics`, and `GET /api/v1/request-logs` are served on the gateway public listener for self-hosted dashboard visibility. Request log responses omit raw query strings and authorization values, and runtime responses omit tokens, local targets, and control-plane URLs, but these endpoints still include operational metadata such as paths, statuses, outcomes, counters, limits, and remote IPs. Protect or route these endpoints externally if that metadata should not be public in your deployment.
 
@@ -87,12 +87,15 @@ curl -i https://control.example.com/dashboard/
 ## Token Handling
 
 - Generate separate values for `PORTHOOK_CONTROL_ADMIN_TOKEN` and `PORTHOOK_CONTROL_VALIDATOR_TOKEN`.
+- Treat `PORTHOOK_CONTROL_ADMIN_TOKEN` as a full-scope bootstrap and recovery token. Keep it offline or restricted after creating scoped admin tokens for routine operators.
+- Give routine admin tokens only the scopes required for their work: `admin_tokens`, `tokens`, `reservations`, `domains`, `access_policies`, `audit_history`, or `runtime_diagnostics`.
 - Do not reuse agent tokens as admin or validator tokens.
 - Keep generated `.env.*` files out of Git.
-- Rotate the admin token after operator turnover or suspected exposure.
+- Revoke scoped admin tokens after operator turnover or suspected exposure.
+- Rotate the bootstrap admin token if the environment value is exposed.
 - Rotate the validator token if gateway or control-plane configuration is exposed.
 
-Changing the validator token requires updating both the gateway and control plane together. Changing the admin token affects CLI token administration and dashboard login.
+Changing the validator token requires updating both the gateway and control plane together. Changing the bootstrap admin token affects recovery access and any CLI or dashboard sessions still using that value. Revoking a scoped admin token affects only sessions using that scoped token.
 
 ## Diagnostics and Exports
 

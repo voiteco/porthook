@@ -115,7 +115,14 @@ func TestRunConfigcheckProductionAcceptsDurableConfig(t *testing.T) {
 	if err := run([]string{"configcheck", "--production"}, &stdout); err != nil {
 		t.Fatalf("run configcheck --production returned error: %v; stdout=%q", err, stdout.String())
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "ok" {
-		t.Fatalf("stdout = %q, want ok", got)
+	output := stdout.String()
+	for _, want := range []string{
+		"warning: PORTHOOK_CONTROL_ADMIN_TOKEN",
+		"bootstrap/recovery token",
+		"ok",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
 	}
 }

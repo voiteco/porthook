@@ -153,6 +153,19 @@ if "@control_denied not remote_ip {$PORTHOOK_CONTROL_ALLOWED_IPS}" not in allowl
     fail("allowlist Caddyfile must deny requests outside PORTHOOK_CONTROL_ALLOWED_IPS")
 
 gateway_env = gateway.get("environment", {})
+control_env = control.get("environment", {})
+admin_token = control_env.get("PORTHOOK_CONTROL_ADMIN_TOKEN")
+validator_token = control_env.get("PORTHOOK_CONTROL_VALIDATOR_TOKEN")
+if not admin_token:
+    fail("control plane must receive PORTHOOK_CONTROL_ADMIN_TOKEN")
+if not validator_token:
+    fail("control plane must receive PORTHOOK_CONTROL_VALIDATOR_TOKEN")
+if admin_token == validator_token:
+    fail("control-plane admin and validator tokens must be different")
+if not control_env.get("PORTHOOK_DATABASE_URL"):
+    fail("control plane must use a durable PORTHOOK_DATABASE_URL")
+if gateway_env.get("PORTHOOK_CONTROL_PLANE_TOKEN") != validator_token:
+    fail("gateway must use the same validator token as the control plane")
 if gateway_env.get("PORTHOOK_CONTROL_PLANE_URL") != "http://porthook-control-plane:8082":
     fail("gateway must use the internal control-plane URL")
 if gateway_env.get("PORTHOOK_PUBLIC_URL") != "https://tunnels.example.com":

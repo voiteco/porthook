@@ -28,7 +28,7 @@ To verify the self-hosted control-plane authentication path:
 make smoke-control-plane
 ```
 
-The control-plane smoke test starts `porthook-control-plane`, creates an agent token with `porthook tokens create --admin-token-stdin`, saves it with `porthook login --token-stdin`, starts the gateway in control-plane validation mode, starts the agent from the saved login config, and verifies GET and POST round-trips through the tunnel.
+The control-plane smoke test starts `porthook-control-plane`, creates a scoped admin token with `porthook admin tokens create --admin-token-stdin`, checks scoped authorization and revocation behavior, creates an agent token with `porthook tokens create --admin-token-stdin`, saves it with `porthook login --token-stdin`, starts the gateway in control-plane validation mode, starts the agent from the saved login config, and verifies GET and POST round-trips through the tunnel.
 
 To verify the Postgres-backed production-like path:
 
