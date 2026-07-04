@@ -52,6 +52,9 @@ jobs:
       - name: Generate checksums
         run: make release-checksums
 
+      - name: Verify release artifacts
+        run: make release-verify VERSION="$VERSION"
+
       - name: Validate Docker Compose config
         run: make compose-config
 

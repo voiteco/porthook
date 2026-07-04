@@ -32,26 +32,13 @@ make smoke-local VERSION=v0.12.0
 make smoke-control-plane VERSION=v0.12.0
 make release-build VERSION=v0.12.0
 make release-checksums
+make release-verify VERSION=v0.12.0
 make compose-config
 make production-hardening-check
 make docker-build VERSION=v0.12.0
 ```
 
-On Linux `amd64`, verify the release binaries directly:
-
-```sh
-./dist/porthook_linux_amd64 version
-./dist/porthook-gateway_linux_amd64 version
-./dist/porthook-control-plane_linux_amd64 version
-```
-
-On macOS, run the binary that matches the local architecture:
-
-```sh
-./dist/porthook_darwin_arm64 version
-./dist/porthook-gateway_darwin_arm64 version
-./dist/porthook-control-plane_darwin_arm64 version
-```
+`make release-verify` checks that the expected binary assets are present, checks `SHA256SUMS`, verifies the embedded version in the local OS/architecture binaries, and runs production `configcheck` for the gateway and control plane.
 
 ## Create a Release
 

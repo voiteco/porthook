@@ -47,6 +47,12 @@ jobs:
       - name: Build release binaries
         run: make release-build VERSION=ci
 
+      - name: Generate release checksums
+        run: make release-checksums
+
+      - name: Verify release artifacts
+        run: make release-verify VERSION=ci
+
       - name: Validate Docker Compose config
         run: make compose-config
 

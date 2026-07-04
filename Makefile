@@ -5,7 +5,7 @@ VERSION ?= dev
 LDFLAGS ?= -s -w -X main.version=$(VERSION)
 RELEASE_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: build clean compose-config docker-build docker-build-control-plane docker-build-gateway fmt fmt-check production-hardening-check release-build release-checksums smoke-control-plane smoke-local test vet
+.PHONY: build clean compose-config docker-build docker-build-control-plane docker-build-gateway fmt fmt-check production-hardening-check release-build release-checksums release-verify smoke-control-plane smoke-local test vet
 
 build:
 	mkdir -p $(BIN_DIR)
@@ -58,6 +58,9 @@ release-checksums:
 	else \
 		shasum -a 256 $$files > SHA256SUMS; \
 	fi
+
+release-verify:
+	VERSION=$(VERSION) DIST_DIR=$(DIST_DIR) ./scripts/release-verify.sh
 
 smoke-local:
 	VERSION=$(VERSION) ./scripts/smoke-local.sh
