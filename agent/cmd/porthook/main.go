@@ -25,6 +25,7 @@ const usageText = `usage: porthook login --server URL [--token TOKEN | --token-s
        porthook logout
        porthook http <port> [--server URL] [--token TOKEN] [--subdomain NAME]
        porthook tokens <create|list|revoke> [options]
+       porthook admin tokens <create|list|revoke> [options]
        porthook reserved <create|list|delete> [options]
        porthook access <create|list|update|delete> [options]
        porthook domains <create|list|verify|delete> [options]
@@ -88,6 +89,8 @@ func runWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Write
 		return nil
 	case "tokens":
 		return runTokensCommand(args[1:], stdin, stdout, stderr)
+	case "admin":
+		return runAdminCommand(args[1:], stdin, stdout, stderr)
 	case "reserved":
 		return runReservedCommand(args[1:], stdin, stdout, stderr)
 	case "access":
