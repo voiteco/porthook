@@ -27,7 +27,7 @@ func TestHandlerServesDashboardIndex(t *testing.T) {
 	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'self' http: https:") {
 		t.Fatalf("Content-Security-Policy = %q, want gateway-capable connect-src", got)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Audit events") || !strings.Contains(body, "audit-event-load-more") || !strings.Contains(body, "Diagnostics") || !strings.Contains(body, "Gateway runtime") || !strings.Contains(body, "Metrics drilldown") || !strings.Contains(body, "Operational export") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Request logs") || !strings.Contains(body, "request-log-load-more") || !strings.Contains(body, "Request ID") || !strings.Contains(body, "Tunnel ID") || !strings.Contains(body, "Tunnel details") {
+	if body := rec.Body.String(); !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") || !strings.Contains(body, "Admin tokens") || !strings.Contains(body, "data-admin-scope") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Audit events") || !strings.Contains(body, "audit-event-load-more") || !strings.Contains(body, "Diagnostics") || !strings.Contains(body, "Gateway runtime") || !strings.Contains(body, "Metrics drilldown") || !strings.Contains(body, "Operational export") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Request logs") || !strings.Contains(body, "request-log-load-more") || !strings.Contains(body, "Request ID") || !strings.Contains(body, "Tunnel ID") || !strings.Contains(body, "Tunnel details") {
 		t.Fatalf("dashboard index body = %q, want dashboard shell", body)
 	}
 }
@@ -58,6 +58,12 @@ func TestHandlerServesAssets(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "/api/v1/tokens") {
 		t.Fatalf("asset body = %q, want token API client", body)
+	}
+	if !strings.Contains(body, "/api/v1/admin-tokens") || !strings.Contains(body, "renderAdminTokens") {
+		t.Fatalf("asset body = %q, want admin token API client", body)
+	}
+	if !strings.Contains(body, "Admin token does not have permission for this action") {
+		t.Fatalf("asset body = %q, want scoped admin permission guidance", body)
 	}
 	if !strings.Contains(body, "/api/v1/status") {
 		t.Fatalf("asset body = %q, want status API client", body)

@@ -195,6 +195,10 @@ h3 {
   padding-top: 20px;
 }
 
+.admin-token-form {
+  grid-template-columns: minmax(220px, 0.45fr) minmax(360px, 1fr) auto;
+}
+
 .reservation-form {
   grid-template-columns: minmax(180px, 0.75fr) minmax(260px, 1fr) auto;
 }
@@ -387,6 +391,26 @@ label {
   font-weight: 650;
 }
 
+fieldset.field {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+legend {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 650;
+  padding: 0;
+}
+
+.scope-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .checkbox-row {
   align-items: center;
   border: 1px solid var(--line);
@@ -576,7 +600,8 @@ tr.selected {
   .create-form,
   .overview-grid,
   .detail-grid,
-  .chart-grid {
+  .chart-grid,
+  .scope-grid {
     grid-template-columns: 1fr;
   }
 

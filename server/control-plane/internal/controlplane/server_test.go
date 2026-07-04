@@ -234,8 +234,8 @@ func TestDashboardEndpoint(t *testing.T) {
 	if !strings.Contains(body, "Token management") {
 		t.Fatalf("body = %q, want dashboard token management UI", body)
 	}
-	if !strings.Contains(body, "Reserved subdomains") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Active tunnels") || !strings.Contains(body, "Request logs") {
-		t.Fatalf("body = %q, want dashboard reserved subdomains, custom domains, access policies, operational overview, active tunnels, and request logs UI", body)
+	if !strings.Contains(body, "Admin tokens") || !strings.Contains(body, "Reserved subdomains") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Active tunnels") || !strings.Contains(body, "Request logs") {
+		t.Fatalf("body = %q, want dashboard admin tokens, reserved subdomains, custom domains, access policies, operational overview, active tunnels, and request logs UI", body)
 	}
 
 	resp, err = httpServer.Client().Get(httpServer.URL + "/dashboard/app.js")
@@ -250,8 +250,8 @@ func TestDashboardEndpoint(t *testing.T) {
 	if !strings.Contains(body, "/api/v1/tokens") {
 		t.Fatalf("asset body = %q, want token API client", body)
 	}
-	if !strings.Contains(body, "/api/v1/reserved-subdomains") || !strings.Contains(body, "/api/v1/custom-domains") || !strings.Contains(body, "/api/v1/access-policies") || !strings.Contains(body, "/api/v1/tunnels") || !strings.Contains(body, "/api/v1/request-logs") {
-		t.Fatalf("asset body = %q, want reservation, custom domain, access policy, tunnel, and request logs API clients", body)
+	if !strings.Contains(body, "/api/v1/admin-tokens") || !strings.Contains(body, "/api/v1/reserved-subdomains") || !strings.Contains(body, "/api/v1/custom-domains") || !strings.Contains(body, "/api/v1/access-policies") || !strings.Contains(body, "/api/v1/tunnels") || !strings.Contains(body, "/api/v1/request-logs") {
+		t.Fatalf("asset body = %q, want admin token, reservation, custom domain, access policy, tunnel, and request logs API clients", body)
 	}
 	if !strings.Contains(body, "renderOperationalOverview") {
 		t.Fatalf("asset body = %q, want operational overview renderer", body)
