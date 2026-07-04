@@ -40,6 +40,9 @@ jobs:
       - name: Run control-plane smoke test
         run: make smoke-control-plane VERSION="$VERSION"
 
+      - name: Run durable smoke test
+        run: make smoke-durable VERSION="$VERSION"
+
       - name: Build release binaries
         run: make release-build VERSION="$VERSION"
 

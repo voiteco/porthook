@@ -14,6 +14,9 @@ ADMIN_TOKEN="${PORTHOOK_SMOKE_ADMIN_TOKEN:-smoke-admin-token}"
 VALIDATOR_TOKEN="${PORTHOOK_SMOKE_VALIDATOR_TOKEN:-smoke-validator-token}"
 BASIC_USERNAME="${PORTHOOK_SMOKE_BASIC_USERNAME:-smoke-user}"
 BASIC_PASSWORD="${PORTHOOK_SMOKE_BASIC_PASSWORD:-smoke-password}"
+DATABASE_URL="${PORTHOOK_SMOKE_DATABASE_URL:-}"
+REQUEST_LOG_DATABASE_URL="${PORTHOOK_SMOKE_REQUEST_LOG_DATABASE_URL:-${DATABASE_URL}}"
+DURABLE_RESTART="${PORTHOOK_SMOKE_DURABLE_RESTART:-0}"
 KEEP_LOGS="${PORTHOOK_SMOKE_KEEP_LOGS:-0}"
 SKIP_BUILD="${PORTHOOK_SMOKE_SKIP_BUILD:-0}"
 
@@ -35,6 +38,8 @@ pathlib.Path(sys.argv[1]).write_bytes((b"porthook-control-plane-stream-" * 3000)
 PY
 
 pids=()
+control_pid=""
+gateway_pid=""
 
 cleanup() {
 	status=$?
@@ -107,6 +112,45 @@ wait_for_log() {
 	return 1
 }
 
+stop_process() {
+	pid="$1"
+	name="$2"
+	if [[ -z "${pid}" ]]; then
+		return 0
+	fi
+	if kill -0 "${pid}" 2>/dev/null; then
+		kill "${pid}" 2>/dev/null || true
+		wait "${pid}" 2>/dev/null || true
+	fi
+	echo "Stopped ${name}" >>"${LOG_DIR}/smoke-control-plane-events.log"
+}
+
+start_control_plane() {
+	PORTHOOK_CONTROL_ADDR="127.0.0.1:${CONTROL_PORT}" \
+	PORTHOOK_CONTROL_ADMIN_TOKEN="${ADMIN_TOKEN}" \
+	PORTHOOK_CONTROL_VALIDATOR_TOKEN="${VALIDATOR_TOKEN}" \
+	PORTHOOK_DATABASE_URL="${DATABASE_URL}" \
+		"${BIN_DIR}/porthook-control-plane" >>"${LOG_DIR}/control-plane.log" 2>&1 &
+	control_pid="$!"
+	pids+=("${control_pid}")
+	wait_for_url "http://127.0.0.1:${CONTROL_PORT}/readyz" "control plane"
+}
+
+start_gateway() {
+	PORTHOOK_ADDR="127.0.0.1:${PUBLIC_PORT}" \
+	PORTHOOK_AGENT_ADDR="127.0.0.1:${AGENT_PORT}" \
+	PORTHOOK_ROOT_DOMAIN="localhost" \
+	PORTHOOK_PUBLIC_URL="http://localhost:${PUBLIC_PORT}" \
+	PORTHOOK_STATIC_TOKEN="unused-static-token" \
+	PORTHOOK_CONTROL_PLANE_URL="http://127.0.0.1:${CONTROL_PORT}" \
+	PORTHOOK_CONTROL_PLANE_TOKEN="${VALIDATOR_TOKEN}" \
+	PORTHOOK_REQUEST_LOG_DATABASE_URL="${REQUEST_LOG_DATABASE_URL}" \
+		"${BIN_DIR}/porthook-gateway" >>"${LOG_DIR}/gateway.log" 2>&1 &
+	gateway_pid="$!"
+	pids+=("${gateway_pid}")
+	wait_for_url "http://127.0.0.1:${PUBLIC_PORT}/healthz" "gateway"
+}
+
 extract_json_field() {
 	field="$1"
 	python3 -c '
@@ -125,6 +169,11 @@ print(value)
 require_command curl
 require_command cmp
 require_command python3
+
+if [[ "${DURABLE_RESTART}" == "1" && -z "${DATABASE_URL}" ]]; then
+	echo "PORTHOOK_SMOKE_DATABASE_URL is required when PORHOOK_SMOKE_DURABLE_RESTART=1" >&2
+	exit 1
+fi
 
 if [[ "${SKIP_BUILD}" != "1" ]]; then
 	(
@@ -179,13 +228,7 @@ PY
 pids+=("$!")
 wait_for_url "http://127.0.0.1:${LOCAL_PORT}/smoke.txt" "local HTTP service"
 
-PORTHOOK_CONTROL_ADDR="127.0.0.1:${CONTROL_PORT}" \
-PORTHOOK_CONTROL_ADMIN_TOKEN="${ADMIN_TOKEN}" \
-PORTHOOK_CONTROL_VALIDATOR_TOKEN="${VALIDATOR_TOKEN}" \
-PORTHOOK_DATABASE_URL="" \
-	"${BIN_DIR}/porthook-control-plane" >"${LOG_DIR}/control-plane.log" 2>&1 &
-pids+=("$!")
-wait_for_url "http://127.0.0.1:${CONTROL_PORT}/readyz" "control plane"
+start_control_plane
 
 dashboard_html="$(curl -fsS "http://127.0.0.1:${CONTROL_PORT}/dashboard/")"
 if [[ "${dashboard_html}" != *"Token management"* ]]; then
@@ -312,16 +355,7 @@ if ! grep -q "${AGENT_TOKEN_ID}" "${LOG_DIR}/reserved-list.json"; then
 	exit 1
 fi
 
-PORTHOOK_ADDR="127.0.0.1:${PUBLIC_PORT}" \
-PORTHOOK_AGENT_ADDR="127.0.0.1:${AGENT_PORT}" \
-PORTHOOK_ROOT_DOMAIN="localhost" \
-PORTHOOK_PUBLIC_URL="http://localhost:${PUBLIC_PORT}" \
-PORTHOOK_STATIC_TOKEN="unused-static-token" \
-PORTHOOK_CONTROL_PLANE_URL="http://127.0.0.1:${CONTROL_PORT}" \
-PORTHOOK_CONTROL_PLANE_TOKEN="${VALIDATOR_TOKEN}" \
-	"${BIN_DIR}/porthook-gateway" >"${LOG_DIR}/gateway.log" 2>&1 &
-pids+=("$!")
-wait_for_url "http://127.0.0.1:${PUBLIC_PORT}/healthz" "gateway"
+start_gateway
 
 printf '%s' "${AGENT_TOKEN}" | \
 PORTHOOK_CONFIG_PATH="${CONFIG_FILE}" \
@@ -415,6 +449,48 @@ if not any(
     raise SystemExit(f"missing completed query request log for {want_subdomain!r}: {payload}")
 ' "${SUBDOMAIN}"
 
+printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" history events \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--event "control_plane.token_created" \
+	--limit 20 \
+	--json \
+	>"${LOG_DIR}/history-events.json" 2>"${LOG_DIR}/history-events.err"
+python3 - "${LOG_DIR}/history-events.json" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+if not any(event.get("event") == "control_plane.token_created" for event in payload.get("events", [])):
+    raise SystemExit(f"missing token_created audit event: {payload}")
+PY
+
+"${BIN_DIR}/porthook" history requests \
+	--gateway "http://127.0.0.1:${PUBLIC_PORT}" \
+	--subdomain "${SUBDOMAIN}" \
+	--path "/smoke.txt" \
+	--status 200 \
+	--limit 20 \
+	--json \
+	>"${LOG_DIR}/history-requests.json" 2>"${LOG_DIR}/history-requests.err"
+python3 - "${LOG_DIR}/history-requests.json" "${SUBDOMAIN}" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+want_subdomain = sys.argv[2]
+if not any(
+    log.get("subdomain") == want_subdomain
+    and log.get("path") == "/smoke.txt"
+    and log.get("status") == 200
+    for log in payload.get("request_logs", [])
+):
+    raise SystemExit(f"missing history request log for {want_subdomain!r}: {payload}")
+PY
+
 curl -fsS \
 	-H "Host: ${SUBDOMAIN}.localhost" \
 	-u "${BASIC_USERNAME}:${BASIC_PASSWORD}" \
@@ -429,6 +505,51 @@ if ! cmp -s "${UPLOAD_FILE}" "${UPLOAD_RESPONSE_FILE}"; then
 fi
 
 wait_for_log "${LOG_DIR}/agent.log" "POST /echo -> 200" "agent upload request log"
+
+if [[ "${DURABLE_RESTART}" == "1" ]]; then
+	stop_process "${gateway_pid}" "gateway"
+	start_gateway
+
+	"${BIN_DIR}/porthook" history requests \
+		--gateway "http://127.0.0.1:${PUBLIC_PORT}" \
+		--subdomain "${SUBDOMAIN}" \
+		--path "/smoke.txt" \
+		--status 200 \
+		--limit 20 \
+		--json \
+		>"${LOG_DIR}/history-requests-after-gateway-restart.json" 2>"${LOG_DIR}/history-requests-after-gateway-restart.err"
+	python3 - "${LOG_DIR}/history-requests-after-gateway-restart.json" "${SUBDOMAIN}" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+want_subdomain = sys.argv[2]
+if not any(log.get("subdomain") == want_subdomain and log.get("path") == "/smoke.txt" for log in payload.get("request_logs", [])):
+    raise SystemExit(f"request logs did not persist after gateway restart: {payload}")
+PY
+
+	stop_process "${control_pid}" "control plane"
+	start_control_plane
+
+	printf '%s' "${ADMIN_TOKEN}" | \
+		"${BIN_DIR}/porthook" history events \
+		--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+		--admin-token-stdin \
+		--event "control_plane.token_created" \
+		--limit 20 \
+		--json \
+		>"${LOG_DIR}/history-events-after-control-restart.json" 2>"${LOG_DIR}/history-events-after-control-restart.err"
+	python3 - "${LOG_DIR}/history-events-after-control-restart.json" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+if not any(event.get("event") == "control_plane.token_created" for event in payload.get("events", [])):
+    raise SystemExit(f"audit events did not persist after control-plane restart: {payload}")
+PY
+fi
 
 printf '%s' "${ADMIN_TOKEN}" | \
 	"${BIN_DIR}/porthook" tokens revoke \
