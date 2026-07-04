@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -39,11 +40,13 @@ func run(args []string, stdout io.Writer) error {
 			return nil
 		case "healthcheck":
 			if len(args) > 1 {
-				return fmt.Errorf("usage: porthook-control-plane [version|--version|healthcheck]")
+				return fmt.Errorf("usage: porthook-control-plane [version|--version|healthcheck|configcheck]")
 			}
 			return runHealthcheck(context.Background(), stdout)
+		case "configcheck":
+			return runConfigCheck(args[1:], stdout)
 		default:
-			return fmt.Errorf("usage: porthook-control-plane [version|--version|healthcheck]")
+			return fmt.Errorf("usage: porthook-control-plane [version|--version|healthcheck|configcheck]")
 		}
 	}
 
@@ -73,6 +76,40 @@ func run(args []string, stdout io.Writer) error {
 	defer stop()
 
 	return server.Run(ctx)
+}
+
+func runConfigCheck(args []string, stdout io.Writer) error {
+	var production bool
+	fs := flag.NewFlagSet("configcheck", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.BoolVar(&production, "production", false, "validate production deployment requirements")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("usage: porthook-control-plane configcheck [--production]")
+	}
+
+	report := controlplane.ValidateConfig(controlplane.ConfigFromEnv(), controlplane.ConfigValidationOptions{
+		Production: production,
+	})
+	printControlPlaneConfigValidationReport(stdout, report)
+	if report.HasErrors() {
+		return fmt.Errorf("control-plane configuration check failed")
+	}
+	return nil
+}
+
+func printControlPlaneConfigValidationReport(stdout io.Writer, report controlplane.ConfigValidationReport) {
+	for _, warning := range report.Warnings {
+		fmt.Fprintf(stdout, "warning: %s: %s\n", warning.Field, warning.Message)
+	}
+	for _, issue := range report.Errors {
+		fmt.Fprintf(stdout, "error: %s: %s\n", issue.Field, issue.Message)
+	}
+	if !report.HasErrors() {
+		fmt.Fprintln(stdout, "ok")
+	}
 }
 
 func runHealthcheck(ctx context.Context, stdout io.Writer) error {

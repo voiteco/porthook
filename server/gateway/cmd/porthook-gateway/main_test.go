@@ -73,3 +73,48 @@ func TestRunHealthcheckReportsFailure(t *testing.T) {
 		t.Fatalf("error = %q, want status guidance", err.Error())
 	}
 }
+
+func TestRunConfigcheckAllowsDevelopmentDefaultsWithWarnings(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run([]string{"configcheck"}, &stdout); err != nil {
+		t.Fatalf("run configcheck returned error: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "warning: PORTHOOK_STATIC_TOKEN") {
+		t.Fatalf("stdout = %q, want static token warning", output)
+	}
+	if !strings.Contains(output, "ok") {
+		t.Fatalf("stdout = %q, want ok", output)
+	}
+}
+
+func TestRunConfigcheckReportsMissingControlPlaneToken(t *testing.T) {
+	t.Setenv("PORTHOOK_CONTROL_PLANE_URL", "http://control-plane:8082")
+	t.Setenv("PORTHOOK_CONTROL_PLANE_TOKEN", "")
+
+	var stdout bytes.Buffer
+	err := run([]string{"configcheck"}, &stdout)
+	if err == nil {
+		t.Fatal("run configcheck returned nil error")
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "error: PORTHOOK_CONTROL_PLANE_TOKEN") {
+		t.Fatalf("stdout = %q, want control-plane token error", output)
+	}
+}
+
+func TestRunConfigcheckProductionAcceptsControlPlaneConfig(t *testing.T) {
+	t.Setenv("PORTHOOK_ROOT_DOMAIN", "tunnels.example.com")
+	t.Setenv("PORTHOOK_PUBLIC_URL", "https://tunnels.example.com")
+	t.Setenv("PORTHOOK_CONTROL_PLANE_URL", "http://control-plane:8082")
+	t.Setenv("PORTHOOK_CONTROL_PLANE_TOKEN", "validator-secret")
+	t.Setenv("PORTHOOK_REQUEST_LOG_DATABASE_URL", "postgres://porthook:secret@postgres:5432/porthook?sslmode=disable")
+
+	var stdout bytes.Buffer
+	if err := run([]string{"configcheck", "--production"}, &stdout); err != nil {
+		t.Fatalf("run configcheck --production returned error: %v; stdout=%q", err, stdout.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "ok" {
+		t.Fatalf("stdout = %q, want ok", got)
+	}
+}

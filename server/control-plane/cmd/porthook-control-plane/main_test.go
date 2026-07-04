@@ -69,3 +69,53 @@ func TestRunHealthcheckReportsFailure(t *testing.T) {
 		t.Fatalf("error = %q, want status guidance", err.Error())
 	}
 }
+
+func TestRunConfigcheckAllowsDevelopmentDefaultsWithWarnings(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run([]string{"configcheck"}, &stdout); err != nil {
+		t.Fatalf("run configcheck returned error: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"warning: PORTHOOK_CONTROL_ADMIN_TOKEN",
+		"warning: PORTHOOK_CONTROL_VALIDATOR_TOKEN",
+		"warning: PORTHOOK_DATABASE_URL",
+		"ok",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestRunConfigcheckProductionRequiresDurableConfig(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run([]string{"configcheck", "--production"}, &stdout)
+	if err == nil {
+		t.Fatal("run configcheck --production returned nil error")
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"error: PORTHOOK_CONTROL_ADMIN_TOKEN",
+		"error: PORTHOOK_CONTROL_VALIDATOR_TOKEN",
+		"error: PORTHOOK_DATABASE_URL",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestRunConfigcheckProductionAcceptsDurableConfig(t *testing.T) {
+	t.Setenv("PORTHOOK_CONTROL_ADMIN_TOKEN", "admin-secret")
+	t.Setenv("PORTHOOK_CONTROL_VALIDATOR_TOKEN", "validator-secret")
+	t.Setenv("PORTHOOK_DATABASE_URL", "postgres://porthook:secret@postgres:5432/porthook?sslmode=disable")
+
+	var stdout bytes.Buffer
+	if err := run([]string{"configcheck", "--production"}, &stdout); err != nil {
+		t.Fatalf("run configcheck --production returned error: %v; stdout=%q", err, stdout.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "ok" {
+		t.Fatalf("stdout = %q, want ok", got)
+	}
+}
