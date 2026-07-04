@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/voiteco/porthook/server/control-plane/internal/access"
+	"github.com/voiteco/porthook/server/control-plane/internal/admintokens"
 	"github.com/voiteco/porthook/server/control-plane/internal/controlplane"
 	"github.com/voiteco/porthook/server/control-plane/internal/customdomains"
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
@@ -62,15 +63,16 @@ func run(args []string, stdout io.Writer) error {
 		_ = shutdownTelemetry(shutdownCtx)
 	}()
 
-	tokenStore, reservationStore, accessStore, customDomainStore, auditEventStore, err := stores(context.Background(), cfg)
+	tokenStore, adminTokenStore, reservationStore, accessStore, customDomainStore, auditEventStore, err := stores(context.Background(), cfg)
 	if err != nil {
 		return err
 	}
 	tokenService := tokens.NewService(tokenStore)
+	adminTokenService := admintokens.NewService(adminTokenStore)
 	reservationService := reserved.NewService(reservationStore)
 	accessPolicyService := access.NewService(accessStore)
 	customDomainService := customdomains.NewService(customDomainStore)
-	server := controlplane.NewServerWithAuditEvents(cfg, tokenService, reservationService, accessPolicyService, customDomainService, auditEventStore)
+	server := controlplane.NewServerWithAdminTokens(cfg, tokenService, reservationService, accessPolicyService, customDomainService, auditEventStore, adminTokenService)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -125,59 +127,68 @@ func runHealthcheck(ctx context.Context, stdout io.Writer) error {
 	return nil
 }
 
-func stores(ctx context.Context, cfg controlplane.Config) (tokens.Store, reserved.Store, access.Store, customdomains.Store, controlplane.AuditEventStore, error) {
+func stores(ctx context.Context, cfg controlplane.Config) (tokens.Store, admintokens.Store, reserved.Store, access.Store, customdomains.Store, controlplane.AuditEventStore, error) {
 	if cfg.DatabaseURL == "" {
-		return tokens.NewMemoryStore(), reserved.NewMemoryStore(), access.NewMemoryStore(), customdomains.NewMemoryStore(), controlplane.NewMemoryAuditEventStore(500), nil
+		return tokens.NewMemoryStore(), admintokens.NewMemoryStore(), reserved.NewMemoryStore(), access.NewMemoryStore(), customdomains.NewMemoryStore(), controlplane.NewMemoryAuditEventStore(500), nil
 	}
 
 	db, err := sql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("open database: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("open database: %w", err)
 	}
 	tokenStore, err := tokens.NewPostgresStore(db)
 	if err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if err := tokenStore.Migrate(ctx); err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	reservationStore, err := reserved.NewPostgresStore(db)
 	if err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if err := reservationStore.Migrate(ctx); err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	accessStore, err := access.NewPostgresStore(db)
 	if err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if err := accessStore.Migrate(ctx); err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	customDomainStore, err := customdomains.NewPostgresStore(db)
 	if err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if err := customDomainStore.Migrate(ctx); err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	auditEventStore, err := controlplane.NewPostgresAuditEventStore(db)
 	if err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if err := auditEventStore.Migrate(ctx); err != nil {
 		_ = db.Close()
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
-	return tokenStore, reservationStore, accessStore, customDomainStore, auditEventStore, nil
+	adminTokenStore, err := admintokens.NewPostgresStore(db)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, nil, nil, nil, nil, err
+	}
+	if err := adminTokenStore.Migrate(ctx); err != nil {
+		_ = db.Close()
+		return nil, nil, nil, nil, nil, nil, err
+	}
+	return tokenStore, adminTokenStore, reservationStore, accessStore, customDomainStore, auditEventStore, nil
 }
