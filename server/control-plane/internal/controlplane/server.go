@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/voiteco/porthook/server/control-plane/internal/access"
+	"github.com/voiteco/porthook/server/control-plane/internal/admintokens"
 	"github.com/voiteco/porthook/server/control-plane/internal/customdomains"
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
@@ -31,6 +32,7 @@ type Server struct {
 	reservations   *reserved.Service
 	accessPolicies *access.Service
 	customDomains  *customdomains.Service
+	adminTokens    *admintokens.Service
 	logger         *slog.Logger
 	metrics        metrics
 	startedAt      time.Time
@@ -82,6 +84,15 @@ type statusResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
+type adminAuthorization struct {
+	Authenticated bool
+	Authorized    bool
+	Source        string
+	TokenID       string
+	TokenName     string
+	Scopes        []string
+}
+
 const maxJSONBodyBytes = 1 << 20
 
 const readinessTimeout = 2 * time.Second
@@ -104,6 +115,10 @@ func NewServerWithCustomDomains(cfg Config, service *tokens.Service, reservation
 }
 
 func NewServerWithAuditEvents(cfg Config, service *tokens.Service, reservationService *reserved.Service, accessPolicyService *access.Service, customDomainService *customdomains.Service, auditEventStore AuditEventStore) *Server {
+	return NewServerWithAdminTokens(cfg, service, reservationService, accessPolicyService, customDomainService, auditEventStore, nil)
+}
+
+func NewServerWithAdminTokens(cfg Config, service *tokens.Service, reservationService *reserved.Service, accessPolicyService *access.Service, customDomainService *customdomains.Service, auditEventStore AuditEventStore, adminTokenService *admintokens.Service) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
 	}
@@ -125,12 +140,16 @@ func NewServerWithAuditEvents(cfg Config, service *tokens.Service, reservationSe
 	if auditEventStore == nil {
 		auditEventStore = NewMemoryAuditEventStore(defaultAuditEventLimit)
 	}
+	if adminTokenService == nil {
+		adminTokenService = admintokens.NewService(admintokens.NewMemoryStore())
+	}
 	return &Server{
 		cfg:            cfg,
 		service:        service,
 		reservations:   reservationService,
 		accessPolicies: accessPolicyService,
 		customDomains:  customDomainService,
+		adminTokens:    adminTokenService,
 		logger:         slog.Default(),
 		startedAt:      time.Now().UTC(),
 		auditEvents:    auditEventStore,
@@ -226,6 +245,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/dashboard/", dashboardHandler)
 	mux.HandleFunc("/api/v1/status", s.handleStatus)
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
+	mux.HandleFunc("/api/v1/admin-tokens", s.handleAdminTokens)
+	mux.HandleFunc("/api/v1/admin-tokens/", s.handleAdminTokenByID)
 	mux.HandleFunc("/api/v1/tokens", s.handleTokens)
 	mux.HandleFunc("/api/v1/tokens/", s.handleTokenByID)
 	mux.HandleFunc("/api/v1/tokens/validate", s.handleValidateToken)
@@ -284,13 +305,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, "GET")
 		return
 	}
-	if !s.authorized(r) {
-		s.metrics.authFailuresTotal.Add(1)
-		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
-			slog.String("surface", "admin"),
-			slog.Bool("token_configured", s.cfg.AdminToken != ""),
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeAuditHistory); !ok {
 		return
 	}
 
@@ -313,6 +328,51 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleAdminTokens(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/v1/admin-tokens" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		methodNotAllowed(w, "GET, POST")
+		return
+	}
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeAdminTokens); !ok {
+		return
+	}
+	if r.Method == http.MethodGet {
+		listed, err := s.adminTokens.ListTokens(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.logAudit(r, slog.LevelInfo, "control-plane admin tokens listed", "control_plane.admin_tokens_listed", slog.Int("count", len(listed.Tokens)))
+		writeJSON(w, http.StatusOK, listed)
+		return
+	}
+
+	var req admintokens.CreateTokenRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	created, err := s.adminTokens.CreateToken(r.Context(), req)
+	if err != nil {
+		status := http.StatusBadRequest
+		if !isAdminTokenRequestError(err) {
+			status = http.StatusInternalServerError
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	s.logAudit(r, slog.LevelInfo, "control-plane admin token created", "control_plane.admin_token_created",
+		slog.String("admin_token_id", created.ID),
+		slog.String("name", created.Name),
+		slog.Any("scopes", created.Scopes),
+	)
+	writeJSON(w, http.StatusCreated, created)
+}
+
 func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/api/v1/tokens" {
 		http.NotFound(w, r)
@@ -322,13 +382,7 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, "GET, POST")
 		return
 	}
-	if !s.authorized(r) {
-		s.metrics.authFailuresTotal.Add(1)
-		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
-			slog.String("surface", "admin"),
-			slog.Bool("token_configured", s.cfg.AdminToken != ""),
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeTokens); !ok {
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -427,13 +481,7 @@ func (s *Server) handleReservedSubdomains(w http.ResponseWriter, r *http.Request
 		methodNotAllowed(w, "GET, POST")
 		return
 	}
-	if !s.authorized(r) {
-		s.metrics.authFailuresTotal.Add(1)
-		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
-			slog.String("surface", "admin"),
-			slog.Bool("token_configured", s.cfg.AdminToken != ""),
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeReservations); !ok {
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -547,13 +595,7 @@ func (s *Server) handleAccessPolicies(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, "GET, POST")
 		return
 	}
-	if !s.authorized(r) {
-		s.metrics.authFailuresTotal.Add(1)
-		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
-			slog.String("surface", "admin"),
-			slog.Bool("token_configured", s.cfg.AdminToken != ""),
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeAccessPolicies); !ok {
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -606,13 +648,7 @@ func (s *Server) handleAccessPolicyByID(w http.ResponseWriter, r *http.Request) 
 		methodNotAllowed(w, "GET, PUT, DELETE")
 		return
 	}
-	if !s.authorized(r) {
-		s.metrics.authFailuresTotal.Add(1)
-		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
-			slog.String("surface", "admin"),
-			slog.Bool("token_configured", s.cfg.AdminToken != ""),
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeAccessPolicies); !ok {
 		return
 	}
 
@@ -750,13 +786,7 @@ func (s *Server) handleCustomDomains(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, "GET, POST")
 		return
 	}
-	if !s.authorized(r) {
-		s.metrics.authFailuresTotal.Add(1)
-		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
-			slog.String("surface", "admin"),
-			slog.Bool("token_configured", s.cfg.AdminToken != ""),
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeDomains); !ok {
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -810,13 +840,7 @@ func (s *Server) handleCustomDomainByID(w http.ResponseWriter, r *http.Request) 
 		methodNotAllowed(w, "GET, DELETE, POST")
 		return
 	}
-	if !s.authorized(r) {
-		s.metrics.authFailuresTotal.Add(1)
-		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
-			slog.String("surface", "admin"),
-			slog.Bool("token_configured", s.cfg.AdminToken != ""),
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeDomains); !ok {
 		return
 	}
 
@@ -1013,13 +1037,7 @@ func (s *Server) handleReservedSubdomainByID(w http.ResponseWriter, r *http.Requ
 		methodNotAllowed(w, "DELETE")
 		return
 	}
-	if !s.authorized(r) {
-		s.metrics.authFailuresTotal.Add(1)
-		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
-			slog.String("surface", "admin"),
-			slog.Bool("token_configured", s.cfg.AdminToken != ""),
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeReservations); !ok {
 		return
 	}
 
@@ -1046,13 +1064,7 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, "DELETE")
 		return
 	}
-	if !s.authorized(r) {
-		s.metrics.authFailuresTotal.Add(1)
-		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
-			slog.String("surface", "admin"),
-			slog.Bool("token_configured", s.cfg.AdminToken != ""),
-		)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeTokens); !ok {
 		return
 	}
 
@@ -1070,8 +1082,123 @@ func (s *Server) handleTokenByID(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) authorized(r *http.Request) bool {
-	return authorizedBearer(r, s.cfg.AdminToken)
+func (s *Server) handleAdminTokenByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		methodNotAllowed(w, "DELETE")
+		return
+	}
+	if _, ok := s.authorizeAdminRequest(w, r, admintokens.ScopeAdminTokens); !ok {
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/admin-tokens/")
+	if id == "" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	if err := s.adminTokens.RevokeToken(r.Context(), id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.logAudit(r, slog.LevelInfo, "control-plane admin token revoked", "control_plane.admin_token_revoked", slog.String("admin_token_id", id))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) authorizeAdminRequest(w http.ResponseWriter, r *http.Request, requiredScopes ...string) (adminAuthorization, bool) {
+	auth, err := s.authorizeAdmin(r, requiredScopes...)
+	if err != nil {
+		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.String("reason", "auth_store_error"),
+			slog.Bool("bootstrap_token_configured", s.cfg.AdminToken != ""),
+			slog.Bool("admin_token_store_available", s.adminTokens != nil),
+			slog.Any("required_scopes", requiredScopes),
+			slog.Any("error", err),
+		)
+		http.Error(w, "admin authorization failed", http.StatusInternalServerError)
+		return adminAuthorization{}, false
+	}
+	if !auth.Authenticated {
+		s.metrics.authFailuresTotal.Add(1)
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed",
+			slog.String("surface", "admin"),
+			slog.String("reason", "unauthorized"),
+			slog.Bool("bootstrap_token_configured", s.cfg.AdminToken != ""),
+			slog.Bool("admin_token_store_available", s.adminTokens != nil),
+			slog.Any("required_scopes", requiredScopes),
+		)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return adminAuthorization{}, false
+	}
+	if !auth.Authorized {
+		s.metrics.authFailuresTotal.Add(1)
+		attrs := []slog.Attr{
+			slog.String("surface", "admin"),
+			slog.String("reason", "insufficient_scope"),
+			slog.Bool("bootstrap_token_configured", s.cfg.AdminToken != ""),
+			slog.Bool("admin_token_store_available", s.adminTokens != nil),
+			slog.String("auth_source", auth.Source),
+			slog.Any("required_scopes", requiredScopes),
+			slog.Any("granted_scopes", auth.Scopes),
+		}
+		if auth.TokenID != "" {
+			attrs = append(attrs, slog.String("admin_token_id", auth.TokenID))
+		}
+		s.logAudit(r, slog.LevelWarn, "control-plane authorization failed", "control_plane.auth_failed", attrs...)
+		http.Error(w, "forbidden: admin token is missing a required scope", http.StatusForbidden)
+		return adminAuthorization{}, false
+	}
+	return auth, true
+}
+
+func (s *Server) authorizeAdmin(r *http.Request, requiredScopes ...string) (adminAuthorization, error) {
+	token, ok := bearerToken(r)
+	if !ok {
+		return adminAuthorization{}, nil
+	}
+	if s.cfg.AdminToken != "" && secretEqual(token, s.cfg.AdminToken) {
+		return adminAuthorization{
+			Authenticated: true,
+			Authorized:    true,
+			Source:        "bootstrap",
+			Scopes:        admintokens.DefaultScopes(),
+		}, nil
+	}
+	result, err := s.adminTokens.ValidateToken(r.Context(), token)
+	if err != nil {
+		return adminAuthorization{}, err
+	}
+	if !result.Valid {
+		return adminAuthorization{}, nil
+	}
+	auth := adminAuthorization{
+		Authenticated: true,
+		Authorized:    true,
+		Source:        "admin_token",
+		TokenID:       result.TokenID,
+		TokenName:     result.Name,
+		Scopes:        append([]string(nil), result.Scopes...),
+	}
+	for _, scope := range requiredScopes {
+		if scope == "" {
+			continue
+		}
+		if !adminAuthorizationHasScope(auth.Scopes, scope) {
+			auth.Authorized = false
+			return auth, nil
+		}
+	}
+	return auth, nil
+}
+
+func adminAuthorizationHasScope(scopes []string, required string) bool {
+	for _, scope := range scopes {
+		if scope == required {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) validatorAuthorized(r *http.Request) bool {
@@ -1082,12 +1209,20 @@ func authorizedBearer(r *http.Request, configuredToken string) bool {
 	if configuredToken == "" {
 		return false
 	}
-	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	token, ok := bearerToken(r)
 	return ok && secretEqual(token, configuredToken)
+}
+
+func bearerToken(r *http.Request) (string, bool) {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return strings.TrimSpace(token), ok && strings.TrimSpace(token) != ""
 }
 
 func (s *Server) ready(ctx context.Context) error {
 	if err := s.service.Ready(ctx); err != nil {
+		return err
+	}
+	if err := s.adminTokens.Ready(ctx); err != nil {
 		return err
 	}
 	if err := s.reservations.Ready(ctx); err != nil {
@@ -1231,6 +1366,10 @@ func methodNotAllowed(w http.ResponseWriter, allow string) {
 
 func isTokenRequestError(err error) bool {
 	return errors.Is(err, tokens.ErrTokenNameRequired) || errors.Is(err, tokens.ErrUnsupportedScope)
+}
+
+func isAdminTokenRequestError(err error) bool {
+	return errors.Is(err, admintokens.ErrTokenNameRequired) || errors.Is(err, admintokens.ErrUnsupportedScope)
 }
 
 func isReservationRequestError(err error) bool {

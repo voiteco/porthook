@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/voiteco/porthook/server/control-plane/internal/access"
+	"github.com/voiteco/porthook/server/control-plane/internal/admintokens"
 	"github.com/voiteco/porthook/server/control-plane/internal/customdomains"
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
@@ -610,6 +611,73 @@ func TestCreateTokenRequiresAdminAuthorization(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestAdminTokenEndpointsCreateListAndRevokeScopedTokens(t *testing.T) {
+	server := NewServer(Config{AdminToken: "bootstrap-secret"}, tokens.NewService(tokens.NewMemoryStore()))
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	createResp := postJSON(t, httpServer.Client(), httpServer.URL+"/api/v1/admin-tokens", "bootstrap-secret", map[string]any{
+		"name":   "history reader",
+		"scopes": []string{admintokens.ScopeAuditHistory},
+	})
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body=%q", createResp.StatusCode, readResponseBody(t, createResp))
+	}
+	var created admintokens.CreatedToken
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created admin token returned error: %v", err)
+	}
+	if created.Token == "" || !strings.HasPrefix(created.Token, "pat_") {
+		t.Fatalf("created token = %q, want pat_ plaintext token", created.Token)
+	}
+
+	listResp := getWithBearer(t, httpServer.Client(), httpServer.URL+"/api/v1/admin-tokens", "bootstrap-secret")
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listResp.StatusCode)
+	}
+	body := readResponseBody(t, listResp)
+	if !strings.Contains(body, created.ID) {
+		t.Fatalf("list body = %q, want created admin token id", body)
+	}
+	if strings.Contains(body, created.Token) {
+		t.Fatalf("list body leaked plaintext admin token: %q", body)
+	}
+
+	eventsResp := getWithBearer(t, httpServer.Client(), httpServer.URL+"/api/v1/events?limit=1", created.Token)
+	defer eventsResp.Body.Close()
+	if eventsResp.StatusCode != http.StatusOK {
+		t.Fatalf("events status = %d, want 200", eventsResp.StatusCode)
+	}
+
+	tokensResp := getWithBearer(t, httpServer.Client(), httpServer.URL+"/api/v1/tokens", created.Token)
+	defer tokensResp.Body.Close()
+	if tokensResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("tokens status = %d, want 403", tokensResp.StatusCode)
+	}
+
+	revokeReq, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, httpServer.URL+"/api/v1/admin-tokens/"+created.ID, nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	revokeReq.Header.Set("Authorization", "Bearer bootstrap-secret")
+	revokeResp, err := httpServer.Client().Do(revokeReq)
+	if err != nil {
+		t.Fatalf("Do revoke returned error: %v", err)
+	}
+	revokeResp.Body.Close()
+	if revokeResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke status = %d, want 204", revokeResp.StatusCode)
+	}
+
+	revokedResp := getWithBearer(t, httpServer.Client(), httpServer.URL+"/api/v1/events?limit=1", created.Token)
+	defer revokedResp.Body.Close()
+	if revokedResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("revoked token status = %d, want 401", revokedResp.StatusCode)
 	}
 }
 
@@ -1348,6 +1416,23 @@ func postJSON(t *testing.T, client *http.Client, url, bearer string, payload any
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do returned error: %v", err)
+	}
+	return resp
+}
+
+func getWithBearer(t *testing.T, client *http.Client, url, bearer string) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
