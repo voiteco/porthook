@@ -5,6 +5,10 @@ All notable changes to Porthook are documented here.
 ## [Unreleased]
 
 ### Added
+- Added scoped admin token storage, Postgres migration, validation, revocation, and admin-token APIs for self-hosted control-plane administration.
+- Added `porthook admin tokens create`, `porthook admin tokens list`, and `porthook admin tokens revoke`.
+- Added dashboard admin-token management with scoped token creation, revocation, and one-time plaintext display.
+- Added control-plane smoke coverage for scoped admin token creation, list redaction, scope-denied access, durable persistence, and revocation.
 - Added `configcheck` subcommands to `porthook-gateway` and `porthook-control-plane`, including production-mode validation for durable self-hosted deployments.
 - Added `make release-verify` and CI/release workflow checks for release asset completeness, checksums, embedded versions, and production configuration validation.
 - Added `make smoke-durable` for a Postgres-backed control-plane smoke test that verifies audit events and gateway request logs survive service restarts.
@@ -12,6 +16,9 @@ All notable changes to Porthook are documented here.
 - Added release binary installation and checksum verification documentation.
 
 ### Changed
+- Control-plane admin APIs now authorize requests with endpoint-specific admin scopes, while `PORTHOOK_CONTROL_ADMIN_TOKEN` remains a full-scope bootstrap and recovery token.
+- CLI and dashboard authorization errors now distinguish rejected admin tokens from valid tokens missing a required scope.
+- Production control-plane config checks now warn operators to keep the bootstrap admin token restricted and use scoped admin tokens for routine access.
 - Improved self-hosted operations, backup, restore, upgrade, release, and Compose documentation for production-oriented deployments.
 - Improved dashboard operational log usability with hash-backed audit/request-log filters, copyable request and tunnel IDs, and a request-log tunnel ID column.
 - Hardened Caddy control-plane examples with response security headers and extended production hardening checks to enforce them.

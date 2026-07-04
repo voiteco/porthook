@@ -32,7 +32,7 @@ Authentication uses the self-hosted bootstrap `PORTHOOK_CONTROL_ADMIN_TOKEN` or 
 
 The dashboard displays plaintext admin and agent tokens only from create responses. List responses contain summaries without plaintext token values.
 
-Admin token management uses `GET`, `POST`, and `DELETE /api/v1/admin-tokens`. A scoped admin token needs the `admin_tokens` scope to manage other admin tokens. Other dashboard sections require their matching scopes: `tokens`, `reservations`, `domains`, `access_policies`, `audit_history`, and `runtime_diagnostics`.
+Admin token management uses `GET`, `POST`, and `DELETE /api/v1/admin-tokens`. A scoped admin token needs the `admin_tokens` scope to manage other admin tokens. Other control-plane-backed dashboard sections require their matching scopes: `tokens`, `reservations`, `domains`, `access_policies`, and `audit_history`. The `runtime_diagnostics` scope is reserved for authenticated runtime diagnostics as that surface grows.
 
 Token tables include `last_used_at` metadata, updated when the gateway successfully validates an agent token through the control plane.
 
