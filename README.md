@@ -104,6 +104,12 @@ Run the control-plane-backed smoke test:
 make smoke-control-plane
 ```
 
+Run the Postgres-backed durable smoke test:
+
+```sh
+make smoke-durable
+```
+
 Out of scope for the first MVP:
 
 - Raw TCP and UDP tunnels.
@@ -152,10 +158,17 @@ Completed foundations:
 16. CLI operational history for audit events and gateway request logs.
 17. Durable audit and gateway request-log pagination.
 18. Operational export schema version 2 with embedded diagnostics.
+19. Configuration validation checks for gateway and control-plane services.
+20. Release artifact verification, checksum validation, and durable smoke coverage.
+21. Self-hosted deployment ergonomics, backup guidance, and control-plane proxy hardening.
 
 Next major public work:
 
-1. Release stability, packaging polish, and deployment ergonomics.
+1. Broader administrative authorization, operator access boundaries, and install/update polish.
+
+## Installation
+
+Release binaries are available for Linux and macOS on `amd64` and `arm64`. See [docs/INSTALL.md](./docs/INSTALL.md) for download, checksum verification, installation, version checks, and `configcheck` usage.
 
 ## Self-Hosted Quick Start
 

@@ -4,6 +4,18 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+### Added
+- Added `configcheck` subcommands to `porthook-gateway` and `porthook-control-plane`, including production-mode validation for durable self-hosted deployments.
+- Added `make release-verify` and CI/release workflow checks for release asset completeness, checksums, embedded versions, and production configuration validation.
+- Added `make smoke-durable` for a Postgres-backed control-plane smoke test that verifies audit events and gateway request logs survive service restarts.
+- Added local control-plane Compose Make targets for startup, shutdown, logs, status, and Postgres backups.
+- Added release binary installation and checksum verification documentation.
+
+### Changed
+- Improved self-hosted operations, backup, restore, upgrade, release, and Compose documentation for production-oriented deployments.
+- Improved dashboard operational log usability with hash-backed audit/request-log filters, copyable request and tunnel IDs, and a request-log tunnel ID column.
+- Hardened Caddy control-plane examples with response security headers and extended production hardening checks to enforce them.
+
 ## [0.12.0] - 2026-07-02
 
 ### Added
