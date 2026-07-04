@@ -74,6 +74,12 @@ button.danger:hover:not(:disabled) {
   background: #ffe2df;
 }
 
+button.copy-button {
+  font-size: 12px;
+  min-height: 28px;
+  padding: 0 8px;
+}
+
 input,
 select {
   width: 100%;
@@ -291,6 +297,27 @@ h3 {
 .detail-item strong {
   font-size: 15px;
   font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.detail-value,
+.copyable-value {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detail-value strong,
+.copyable-value span {
+  min-width: 0;
+}
+
+.copyable-value {
+  justify-content: space-between;
+}
+
+.copyable-value span {
   overflow-wrap: anywhere;
 }
 
@@ -540,6 +567,7 @@ tr.selected {
   .actions button,
   .inline-control button,
   .secret-row button,
+  .copyable-value button,
   .create-form button {
     width: 100%;
   }
@@ -554,6 +582,11 @@ tr.selected {
 
   .button-cell {
     justify-content: flex-start;
+  }
+
+  .copyable-value {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .bar-row {

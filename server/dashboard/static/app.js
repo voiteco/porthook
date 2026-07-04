@@ -1,5 +1,29 @@
 const storageKey = "porthook.dashboard.adminToken";
 const gatewayStorageKey = "porthook.dashboard.gatewayURL";
+const dashboardHashPrefix = "ops";
+
+const auditEventStateFields = [
+  ["ae_event", "auditEventEvent"],
+  ["ae_level", "auditEventLevel"],
+  ["ae_request_id", "auditEventRequestID"],
+  ["ae_remote_ip", "auditEventRemoteIP"],
+  ["ae_field", "auditEventField"],
+  ["ae_limit", "auditEventLimit"],
+];
+
+const requestLogStateFields = [
+  ["rl_subdomain", "requestLogSubdomain"],
+  ["rl_method", "requestLogMethod"],
+  ["rl_host", "requestLogHost"],
+  ["rl_path", "requestLogPath"],
+  ["rl_status", "requestLogStatus"],
+  ["rl_outcome", "requestLogOutcome"],
+  ["rl_request_id", "requestLogRequestID"],
+  ["rl_tunnel_id", "requestLogTunnelID"],
+  ["rl_since", "requestLogSince"],
+  ["rl_until", "requestLogUntil"],
+  ["rl_limit", "requestLogLimit"],
+];
 
 const elements = {
   loginPanel: document.querySelector("#login-panel"),
@@ -121,8 +145,10 @@ let auditEventNextCursor = "";
 let requestLogNextCursor = "";
 let editingAccessPolicyID = "";
 let selectedTunnelID = "";
+let restoringFilterState = false;
 
 elements.gatewayURL.value = sessionStorage.getItem(gatewayStorageKey) || defaultGatewayURL();
+restoreFilterStateFromHash();
 
 function setAuthenticated(authenticated) {
   elements.loginPanel.hidden = authenticated;
@@ -604,7 +630,7 @@ function renderAuditEventRow(event) {
     cell(event.message || "-"),
     cell(event.method || "-"),
     cell(event.path || "-"),
-    monoCell(event.request_id || "-"),
+    copyableMonoCell(event.request_id || "-"),
     cell(event.remote_ip || "-"),
     monoCell(auditEventFields(event)),
   );
@@ -1094,6 +1120,7 @@ function renderTunnelDetail(tunnel) {
   elements.tunnelDetailMeta.textContent = `${tunnel.tunnel_id || "-"} connected ${formatDuration((tunnel.connected_seconds || 0) * 1000)}`;
   elements.tunnelDetailGrid.replaceChildren(
     detailItem("Public URL", tunnel.public_url || "-"),
+    detailItem("Tunnel ID", tunnel.tunnel_id || "-", true, true),
     detailItem("Protocol", tunnel.protocol || "http"),
     detailItem("Agent version", tunnel.agent_version || "-"),
     detailItem("Protocol version", tunnel.protocol_version || "-"),
@@ -1103,7 +1130,7 @@ function renderTunnelDetail(tunnel) {
     detailItem("Recent errors", String(requests.error_count || 0)),
     detailItem("Last status", requests.last_status ? String(requests.last_status) : "-"),
     detailItem("Last outcome", requests.last_outcome || "-"),
-    detailItem("Last request ID", requests.last_request_id || "-", true),
+    detailItem("Last request ID", requests.last_request_id || "-", true, true),
     detailItem("Custom domains", (requests.custom_domains || []).join(", ") || "-"),
   );
 }
@@ -1225,7 +1252,8 @@ function renderRequestLogRow(entry) {
     cell(entry.path || "-"),
     cell(entry.status || "-"),
     cell(entry.outcome || "-"),
-    monoCell(entry.request_id || "-"),
+    copyableMonoCell(entry.request_id || "-"),
+    copyableMonoCell(entry.tunnel_id || "-"),
     cell(`${entry.duration_ms || 0} ms`),
     cell(`${entry.request_bytes || 0}/${entry.response_bytes || 0}`),
     cell(entry.remote_ip || "-"),
@@ -1471,6 +1499,22 @@ function monoCell(text) {
   return item;
 }
 
+function copyableMonoCell(text) {
+  const item = document.createElement("td");
+  const value = String(text || "-");
+  const wrapper = document.createElement("div");
+  wrapper.className = "copyable-value";
+  const label = document.createElement("span");
+  label.className = "mono";
+  label.textContent = value;
+  wrapper.append(label);
+  if (value !== "-") {
+    wrapper.append(copyButton(value));
+  }
+  item.append(wrapper);
+  return item;
+}
+
 function linkCell(href) {
   const item = document.createElement("td");
   if (!href) {
@@ -1485,7 +1529,7 @@ function linkCell(href) {
   return item;
 }
 
-function detailItem(label, value, mono = false) {
+function detailItem(label, value, mono = false, copyable = false) {
   const item = document.createElement("div");
   item.className = "detail-item";
   const labelEl = document.createElement("span");
@@ -1495,8 +1539,24 @@ function detailItem(label, value, mono = false) {
   if (mono) {
     valueEl.classList.add("mono");
   }
+  if (copyable && value && value !== "-") {
+    const wrapper = document.createElement("div");
+    wrapper.className = "detail-value";
+    wrapper.append(valueEl, copyButton(value));
+    item.append(labelEl, wrapper);
+    return item;
+  }
   item.append(labelEl, valueEl);
   return item;
+}
+
+function copyButton(value) {
+  const button = document.createElement("button");
+  button.className = "secondary copy-button";
+  button.type = "button";
+  button.textContent = "Copy";
+  button.addEventListener("click", () => copyText(value));
+  return button;
 }
 
 function statusCell(token) {
@@ -1803,11 +1863,15 @@ async function copyCreatedToken() {
   if (!value) {
     return;
   }
+  await copyText(value, "Copied plaintext token.");
+}
+
+async function copyText(value, successMessage = "Copied value.") {
   try {
     await navigator.clipboard.writeText(value);
-    showNotice("Copied plaintext token.", "success");
+    showNotice(successMessage, "success");
   } catch {
-    showNotice("Copy failed. Select the token manually.", "error");
+    showNotice("Copy failed. Select the value manually.", "error");
   }
 }
 
@@ -2021,6 +2085,7 @@ elements.accessPolicyCancel.addEventListener("click", resetAccessPolicyForm);
 elements.auditEventForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
+    syncFilterStateToHash();
     await loadAuditEvents();
   } catch (error) {
     elements.auditEventCount.textContent = "Audit events unavailable";
@@ -2050,6 +2115,7 @@ elements.gatewayForm.addEventListener("submit", async (event) => {
 });
 elements.requestLogForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  syncFilterStateToHash();
   await loadRequestLogs();
 });
 elements.requestLogLoadMore.addEventListener("click", async () => {
@@ -2067,6 +2133,7 @@ for (const input of [
   input.addEventListener("input", () => {
     resetAuditEventPagination();
     renderAuditEvents(currentAuditEvents);
+    syncFilterStateToHash();
   });
 }
 for (const input of [
@@ -2085,7 +2152,53 @@ for (const input of [
   input.addEventListener("input", () => {
     resetRequestLogPagination();
     renderRequestLogs(currentRequestLogs);
+    syncFilterStateToHash();
   });
+}
+
+function restoreFilterStateFromHash() {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash.startsWith(`${dashboardHashPrefix}?`)) {
+    return;
+  }
+  const params = new URLSearchParams(hash.slice(dashboardHashPrefix.length + 1));
+  restoringFilterState = true;
+  try {
+    applyFilterState(params, auditEventStateFields);
+    applyFilterState(params, requestLogStateFields);
+  } finally {
+    restoringFilterState = false;
+  }
+}
+
+function applyFilterState(params, fields) {
+  for (const [param, elementName] of fields) {
+    if (!params.has(param)) {
+      continue;
+    }
+    elements[elementName].value = params.get(param) || "";
+  }
+}
+
+function syncFilterStateToHash() {
+  if (restoringFilterState) {
+    return;
+  }
+  const params = new URLSearchParams();
+  appendFilterState(params, auditEventStateFields);
+  appendFilterState(params, requestLogStateFields);
+  const nextHash = params.toString() ? `#${dashboardHashPrefix}?${params}` : "";
+  const nextURL = `${window.location.pathname}${window.location.search}${nextHash}`;
+  window.history.replaceState(null, "", nextURL);
+}
+
+function appendFilterState(params, fields) {
+  for (const [param, elementName] of fields) {
+    const value = elements[elementName].value.trim();
+    if (value) {
+      params.set(param, value);
+    }
+  }
 }
 
 updateAccessPolicyFields();
