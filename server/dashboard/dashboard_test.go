@@ -104,6 +104,9 @@ func TestHandlerServesAssets(t *testing.T) {
 	if !strings.Contains(body, "requestLogNextCursor") || !strings.Contains(body, "next_cursor") {
 		t.Fatalf("asset body = %q, want request log cursor pagination", body)
 	}
+	if !strings.Contains(body, "syncFilterStateToHash") || !strings.Contains(body, "copyableMonoCell") {
+		t.Fatalf("asset body = %q, want dashboard filter state and copy helpers", body)
+	}
 	if !strings.Contains(body, "renderOperationalOverview") {
 		t.Fatalf("asset body = %q, want operational overview renderer", body)
 	}
