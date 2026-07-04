@@ -30,6 +30,14 @@ make smoke-control-plane
 
 The control-plane smoke test starts `porthook-control-plane`, creates an agent token with `porthook tokens create --admin-token-stdin`, saves it with `porthook login --token-stdin`, starts the gateway in control-plane validation mode, starts the agent from the saved login config, and verifies GET and POST round-trips through the tunnel.
 
+To verify the Postgres-backed production-like path:
+
+```sh
+make smoke-durable
+```
+
+The durable smoke test starts a temporary Postgres container, runs the control-plane smoke test with durable audit-event and gateway request-log storage, restarts the gateway and control plane, and verifies that operational history remains available after restart.
+
 Default automated ports can be overridden with:
 
 - `PORTHOOK_SMOKE_LOCAL_PORT`
