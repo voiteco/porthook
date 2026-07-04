@@ -21,6 +21,7 @@ PORTHOOK_CADDYFILE_PATH=../reverse-proxy/caddy/Caddyfile.control-allowlist \
 
 python3 - "$default_config" "$allowlist_config" <<'PY'
 import json
+from pathlib import Path
 import sys
 
 
@@ -88,6 +89,17 @@ def volume_source_for(service, target):
     fail(f"missing volume target {target!r}")
 
 
+def require_caddy_control_headers(path):
+    text = Path(path).read_text(encoding="utf-8")
+    for header in (
+        "X-Content-Type-Options nosniff",
+        "X-Frame-Options DENY",
+        "Referrer-Policy no-referrer",
+    ):
+        if header not in text:
+            fail(f"{path} must set control-plane security header {header!r}")
+
+
 default = load(sys.argv[1])
 allowlist = load(sys.argv[2])
 
@@ -133,6 +145,12 @@ if read_only is not True:
     fail("allowlist Caddyfile mount must be read-only")
 if not allowlist_proxy.get("environment", {}).get("PORTHOOK_CONTROL_ALLOWED_IPS"):
     fail("reverse-proxy must receive PORTHOOK_CONTROL_ALLOWED_IPS")
+
+require_caddy_control_headers("deploy/reverse-proxy/caddy/Caddyfile")
+require_caddy_control_headers("deploy/reverse-proxy/caddy/Caddyfile.control-allowlist")
+allowlist_text = Path("deploy/reverse-proxy/caddy/Caddyfile.control-allowlist").read_text(encoding="utf-8")
+if "@control_denied not remote_ip {$PORTHOOK_CONTROL_ALLOWED_IPS}" not in allowlist_text:
+    fail("allowlist Caddyfile must deny requests outside PORTHOOK_CONTROL_ALLOWED_IPS")
 
 gateway_env = gateway.get("environment", {})
 if gateway_env.get("PORTHOOK_CONTROL_PLANE_URL") != "http://porthook-control-plane:8082":

@@ -39,6 +39,8 @@ PORTHOOK_CADDYFILE_PATH=../reverse-proxy/caddy/Caddyfile
 
 That default Caddyfile includes a route for `PORTHOOK_CONTROL_DOMAIN`. If `PORTHOOK_CONTROL_DOMAIN` resolves publicly, add an external boundary before relying on the stack for production.
 
+The Caddy examples set `X-Content-Type-Options`, `X-Frame-Options`, and `Referrer-Policy` on the control-plane hostname. They do not set those headers on wildcard tunnel traffic because tunneled applications may need their own response policy.
+
 For a Caddy IP allowlist example, set:
 
 ```text
@@ -91,3 +93,9 @@ curl -i https://control.example.com/dashboard/
 - Rotate the validator token if gateway or control-plane configuration is exposed.
 
 Changing the validator token requires updating both the gateway and control plane together. Changing the admin token affects CLI token administration and dashboard login.
+
+## Diagnostics and Exports
+
+`porthook doctor`, `porthook history`, and `porthook export` are designed for operational handoff without plaintext token exposure. They omit plaintext agent tokens, policy secrets, local target URLs, raw query strings, and authorization headers.
+
+Treat exported files and copied diagnostics as operational data anyway. They can include hostnames, paths, statuses, request IDs, tunnel IDs, token IDs, remote IPs, timestamps, counters, and audit fields.

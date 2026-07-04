@@ -19,5 +19,10 @@
 {$PORTHOOK_CONTROL_DOMAIN} {
 	tls {$PORTHOOK_TLS_CERT_FILE} {$PORTHOOK_TLS_KEY_FILE}
 	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
 	reverse_proxy porthook-control-plane:8082
 }
