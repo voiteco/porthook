@@ -73,25 +73,6 @@ GitHub Actions will create a release and upload:
 
 ## Install a Binary
 
-Download the binary for the target operating system and architecture from the GitHub Release, make it executable, and check the version:
-
-```sh
-chmod +x porthook_darwin_arm64
-./porthook_darwin_arm64 version
-```
-
-The gateway binary supports the same version check:
-
-```sh
-chmod +x porthook-gateway_linux_amd64
-./porthook-gateway_linux_amd64 version
-```
-
-The control-plane binary does too:
-
-```sh
-chmod +x porthook-control-plane_linux_amd64
-./porthook-control-plane_linux_amd64 version
-```
+See [INSTALL.md](./INSTALL.md) for release downloads, checksum verification, install paths, version checks, and `configcheck` commands.
 
 For a full local tunnel verification after building from source, see [MVP_SMOKE_TEST.md](./MVP_SMOKE_TEST.md).

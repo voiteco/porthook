@@ -2,6 +2,22 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.12.x to 0.13.x
+
+Version 0.13.x focuses on release stability, packaging verification, and self-hosted deployment ergonomics. It adds gateway/control-plane `configcheck` commands, release artifact verification, durable smoke coverage, Make targets for the local control-plane Compose stack, stronger control-plane proxy examples, dashboard operational log usability improvements, and install/checksum documentation.
+
+Before upgrading a self-hosted deployment:
+
+1. Back up the Postgres volume or database and record the current `schema_migrations` state.
+2. Download release assets and verify `SHA256SUMS`, or build from source and run `make release-verify VERSION=<target-version>`.
+3. Run `porthook-gateway configcheck --production` and `porthook-control-plane configcheck --production` with the environment used by each service.
+4. Validate Compose config and hardening assumptions with `make compose-config` and `make production-hardening-check`.
+5. Deploy the new control-plane, gateway, dashboard assets, CLI binaries, and images together.
+6. Check `/readyz`, `/api/v1/status`, `porthook doctor`, `porthook history events`, and `porthook history requests`.
+7. Open `/dashboard/`, confirm saved filters/load-more behavior for audit events and request logs, and copy request/tunnel IDs for an operational handoff check.
+
+The 0.13.x line does not add required Postgres schema migrations. Rollback to 0.12.x should be code-only if no newer release has added data migrations.
+
 ## Upgrade from 0.11.x to 0.12.x
 
 Version 0.12.x adds durable operational history for self-hosted deployments: optional Postgres-backed control-plane audit events, optional Postgres-backed gateway request logs, cursor pagination for both APIs, dashboard pagination, `porthook history`, expanded `porthook doctor` checks, and operational export schema version 2.
