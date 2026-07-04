@@ -19,6 +19,11 @@
 {$PORTHOOK_CONTROL_DOMAIN} {
 	tls {$PORTHOOK_TLS_CERT_FILE} {$PORTHOOK_TLS_KEY_FILE}
 	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
 
 	@control_denied not remote_ip {$PORTHOOK_CONTROL_ALLOWED_IPS}
 	respond @control_denied "control plane access denied" 403
