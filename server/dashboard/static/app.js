@@ -44,6 +44,15 @@ const elements = {
   createdTokenPanel: document.querySelector("#created-token-panel"),
   createdTokenValue: document.querySelector("#created-token-value"),
   copyCreatedToken: document.querySelector("#copy-created-token"),
+  adminTokenForm: document.querySelector("#admin-token-form"),
+  adminTokenName: document.querySelector("#admin-token-name"),
+  adminTokenScopeInputs: [...document.querySelectorAll("[data-admin-scope]")],
+  adminTokensBody: document.querySelector("#admin-tokens-body"),
+  adminTokensEmptyState: document.querySelector("#admin-tokens-empty-state"),
+  adminTokenCount: document.querySelector("#admin-token-count"),
+  createdAdminTokenPanel: document.querySelector("#created-admin-token-panel"),
+  createdAdminTokenValue: document.querySelector("#created-admin-token-value"),
+  copyCreatedAdminToken: document.querySelector("#copy-created-admin-token"),
   readyStatus: document.querySelector("#ready-status"),
   versionStatus: document.querySelector("#version-status"),
   reservationForm: document.querySelector("#reservation-form"),
@@ -132,6 +141,7 @@ const elements = {
 
 let adminToken = sessionStorage.getItem(storageKey) || "";
 let currentTokens = [];
+let currentAdminTokens = [];
 let currentReservations = [];
 let currentCustomDomains = [];
 let currentAccessPolicies = [];
@@ -158,6 +168,7 @@ function setAuthenticated(authenticated) {
   elements.exportButton.disabled = !authenticated;
   if (!authenticated) {
     currentTokens = [];
+    currentAdminTokens = [];
     currentReservations = [];
     currentCustomDomains = [];
     currentAccessPolicies = [];
@@ -172,6 +183,7 @@ function setAuthenticated(authenticated) {
     editingAccessPolicyID = "";
     selectedTunnelID = "";
     elements.tokensBody.replaceChildren();
+    elements.adminTokensBody.replaceChildren();
     elements.reservationsBody.replaceChildren();
     elements.customDomainsBody.replaceChildren();
     elements.accessPoliciesBody.replaceChildren();
@@ -182,6 +194,7 @@ function setAuthenticated(authenticated) {
     elements.tunnelsBody.replaceChildren();
     elements.requestLogsBody.replaceChildren();
     elements.emptyState.hidden = true;
+    elements.adminTokensEmptyState.hidden = true;
     elements.reservationsEmptyState.hidden = true;
     elements.customDomainsEmptyState.hidden = true;
     elements.accessPoliciesEmptyState.hidden = true;
@@ -194,6 +207,7 @@ function setAuthenticated(authenticated) {
     updateAuditEventLoadMore();
     updateRequestLogLoadMore();
     elements.tokenCount.textContent = "No tokens loaded";
+    elements.adminTokenCount.textContent = "No admin tokens loaded";
     elements.reservationCount.textContent = "No reservations loaded";
     elements.customDomainCount.textContent = "No custom domains loaded";
     elements.accessPolicyCount.textContent = "No access policies loaded";
@@ -205,6 +219,8 @@ function setAuthenticated(authenticated) {
     elements.requestLogCount.textContent = "No request logs loaded";
     elements.exportCount.textContent = "No export downloaded";
     clearTunnelDetail();
+    clearCreatedAdminToken();
+    resetAdminTokenScopes();
     renderOperationalOverview();
     renderReservationTokenOptions();
     renderCustomDomainReservationOptions();
@@ -224,6 +240,11 @@ function clearCreatedToken() {
   elements.createdTokenPanel.hidden = true;
 }
 
+function clearCreatedAdminToken() {
+  elements.createdAdminTokenValue.textContent = "";
+  elements.createdAdminTokenPanel.hidden = true;
+}
+
 async function apiRequest(path, options = {}) {
   const headers = new Headers(options.headers || {});
   headers.set("Authorization", `Bearer ${adminToken}`);
@@ -238,8 +259,11 @@ async function apiRequest(path, options = {}) {
 
   const payload = await readPayload(response);
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("Admin token was rejected.");
+    if (response.status === 401) {
+      throw new Error("Admin token was rejected. Log in again with a valid token.");
+    }
+    if (response.status === 403) {
+      throw new Error("Admin token does not have permission for this action.");
     }
     throw new Error(typeof payload === "string" && payload ? payload : `Request failed with status ${response.status}.`);
   }
@@ -278,7 +302,8 @@ async function refreshStatus() {
 async function refreshApp() {
   showNotice("");
   clearCreatedToken();
-  await Promise.all([loadTokens(), loadAuditEvents(), refreshStatus(), loadTunnels({ silent: true }), loadGatewayRuntime({ silent: true }), loadGatewayMetrics({ silent: true }), loadRequestLogs({ silent: true })]);
+  clearCreatedAdminToken();
+  await Promise.all([loadTokens(), loadAdminTokens(), loadAuditEvents(), refreshStatus(), loadTunnels({ silent: true }), loadGatewayRuntime({ silent: true }), loadGatewayMetrics({ silent: true }), loadRequestLogs({ silent: true })]);
   await loadReservations();
   await loadCustomDomains();
   await loadAccessPolicies();
@@ -299,6 +324,40 @@ function renderTokens(tokens) {
   elements.tokensBody.replaceChildren(...tokens.map(renderTokenRow));
   elements.emptyState.hidden = tokens.length !== 0;
   elements.tokenCount.textContent = `${tokens.length} token${tokens.length === 1 ? "" : "s"}`;
+}
+
+async function loadAdminTokens() {
+  elements.adminTokenCount.textContent = "Loading admin tokens";
+  elements.adminTokensBody.replaceChildren();
+  elements.adminTokensEmptyState.hidden = true;
+
+  const payload = await apiRequest("/api/v1/admin-tokens");
+  currentAdminTokens = payload.tokens || [];
+  renderAdminTokens(currentAdminTokens);
+}
+
+function renderAdminTokens(tokens) {
+  elements.adminTokensBody.replaceChildren(...tokens.map(renderAdminTokenRow));
+  elements.adminTokensEmptyState.hidden = tokens.length !== 0;
+  elements.adminTokenCount.textContent = `${tokens.length} admin token${tokens.length === 1 ? "" : "s"}`;
+}
+
+function renderAdminTokenRow(token) {
+  const row = document.createElement("tr");
+  if (token.revoked_at) {
+    row.classList.add("revoked");
+  }
+
+  row.append(
+    cell(token.name),
+    monoCell(token.id),
+    cell((token.scopes || []).join(", ") || "none"),
+    cell(formatTime(token.created_at)),
+    cell(token.last_used_at ? formatTime(token.last_used_at) : "Never"),
+    statusCell(token),
+    adminTokenActionCell(token),
+  );
+  return row;
 }
 
 function renderTokenRow(token) {
@@ -1581,6 +1640,19 @@ function tokenActionCell(token) {
   return item;
 }
 
+function adminTokenActionCell(token) {
+  const item = document.createElement("td");
+  item.classList.add("right");
+  const button = document.createElement("button");
+  button.className = "danger";
+  button.type = "button";
+  button.textContent = "Revoke";
+  button.disabled = Boolean(token.revoked_at);
+  button.addEventListener("click", () => revokeAdminToken(token));
+  item.append(button);
+  return item;
+}
+
 function reservationActionCell(reservation) {
   const item = document.createElement("td");
   item.classList.add("right");
@@ -1638,6 +1710,38 @@ async function createToken(event) {
   }
 }
 
+async function createAdminToken(event) {
+  event.preventDefault();
+  showNotice("");
+  clearCreatedAdminToken();
+
+  const name = elements.adminTokenName.value.trim();
+  const scopes = selectedAdminTokenScopes();
+  if (!name) {
+    showNotice("Admin token name is required.", "error");
+    return;
+  }
+  if (scopes.length === 0) {
+    showNotice("Select at least one admin token scope.", "error");
+    return;
+  }
+
+  try {
+    const created = await apiRequest("/api/v1/admin-tokens", {
+      method: "POST",
+      body: JSON.stringify({ name, scopes }),
+    });
+    elements.adminTokenName.value = "";
+    resetAdminTokenScopes();
+    await loadAdminTokens();
+    elements.createdAdminTokenValue.textContent = created.token;
+    elements.createdAdminTokenPanel.hidden = false;
+    showNotice(`Created admin token ${created.id}.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
 async function revokeToken(token) {
   if (!window.confirm(`Revoke token ${token.id}?`)) {
     return;
@@ -1648,6 +1752,29 @@ async function revokeToken(token) {
     showNotice(`Revoked token ${token.id}.`, "success");
   } catch (error) {
     showNotice(error.message, "error");
+  }
+}
+
+async function revokeAdminToken(token) {
+  if (!window.confirm(`Revoke admin token ${token.id}?`)) {
+    return;
+  }
+  try {
+    await apiRequest(`/api/v1/admin-tokens/${encodeURIComponent(token.id)}`, { method: "DELETE" });
+    await loadAdminTokens();
+    showNotice(`Revoked admin token ${token.id}.`, "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+function selectedAdminTokenScopes() {
+  return elements.adminTokenScopeInputs.filter((input) => input.checked).map((input) => input.value);
+}
+
+function resetAdminTokenScopes() {
+  for (const input of elements.adminTokenScopeInputs) {
+    input.checked = true;
   }
 }
 
@@ -1866,6 +1993,14 @@ async function copyCreatedToken() {
   await copyText(value, "Copied plaintext token.");
 }
 
+async function copyCreatedAdminToken() {
+  const value = elements.createdAdminTokenValue.textContent;
+  if (!value) {
+    return;
+  }
+  await copyText(value, "Copied plaintext admin token.");
+}
+
 async function copyText(value, successMessage = "Copied value.") {
   try {
     await navigator.clipboard.writeText(value);
@@ -1930,6 +2065,7 @@ async function buildOperationalExport() {
     },
     control_plane: {
       tokens: [],
+      admin_tokens: [],
       reserved_subdomains: [],
       custom_domains: [],
       access_policies: [],
@@ -1955,6 +2091,8 @@ async function buildOperationalExport() {
   }
   const tokens = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/tokens", () => apiRequest("/api/v1/tokens"));
   snapshot.control_plane.tokens = (tokens && tokens.tokens) || [];
+  const adminTokens = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/admin-tokens", () => apiRequest("/api/v1/admin-tokens"));
+  snapshot.control_plane.admin_tokens = (adminTokens && adminTokens.tokens) || [];
   const reservations = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/reserved-subdomains", () => apiRequest("/api/v1/reserved-subdomains"));
   snapshot.control_plane.reserved_subdomains = (reservations && reservations.reserved_subdomains) || [];
   const domains = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/custom-domains", () => apiRequest("/api/v1/custom-domains"));
@@ -2077,6 +2215,8 @@ elements.refreshButton.addEventListener("click", async () => {
 elements.exportButton.addEventListener("click", downloadOperationalExport);
 elements.createForm.addEventListener("submit", createToken);
 elements.copyCreatedToken.addEventListener("click", copyCreatedToken);
+elements.adminTokenForm.addEventListener("submit", createAdminToken);
+elements.copyCreatedAdminToken.addEventListener("click", copyCreatedAdminToken);
 elements.reservationForm.addEventListener("submit", createReservation);
 elements.customDomainForm.addEventListener("submit", createCustomDomain);
 elements.accessPolicyForm.addEventListener("submit", saveAccessPolicy);

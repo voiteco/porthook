@@ -99,6 +99,89 @@
           <div class="subsection">
             <div class="section-heading">
               <div>
+                <h2>Admin tokens</h2>
+                <p class="muted" id="admin-token-count">No admin tokens loaded</p>
+              </div>
+            </div>
+
+            <form class="create-form admin-token-form" id="admin-token-form">
+              <div class="field">
+                <label for="admin-token-name">Admin token name</label>
+                <input id="admin-token-name" name="admin-token-name" type="text" maxlength="120" placeholder="operator" required>
+              </div>
+              <fieldset class="field scope-field">
+                <legend>Scopes</legend>
+                <div class="scope-grid">
+                  <label class="checkbox-row">
+                    <input type="checkbox" data-admin-scope value="admin_tokens" checked>
+                    <span>admin_tokens</span>
+                  </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" data-admin-scope value="tokens" checked>
+                    <span>tokens</span>
+                  </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" data-admin-scope value="reservations" checked>
+                    <span>reservations</span>
+                  </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" data-admin-scope value="domains" checked>
+                    <span>domains</span>
+                  </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" data-admin-scope value="access_policies" checked>
+                    <span>access_policies</span>
+                  </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" data-admin-scope value="audit_history" checked>
+                    <span>audit_history</span>
+                  </label>
+                  <label class="checkbox-row">
+                    <input type="checkbox" data-admin-scope value="runtime_diagnostics" checked>
+                    <span>runtime_diagnostics</span>
+                  </label>
+                </div>
+              </fieldset>
+              <button type="submit">Create admin token</button>
+            </form>
+
+            <div class="secret-output" id="created-admin-token-panel" hidden>
+              <div>
+                <p class="eyebrow">Plaintext admin token</p>
+                <p class="muted">This value is only returned by the create response.</p>
+              </div>
+              <div class="secret-row">
+                <code id="created-admin-token-value"></code>
+                <button class="secondary" id="copy-created-admin-token" type="button">Copy</button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>ID</th>
+                    <th>Scopes</th>
+                    <th>Created</th>
+                    <th>Last used</th>
+                    <th>Status</th>
+                    <th class="right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="admin-tokens-body"></tbody>
+              </table>
+            </div>
+
+            <div class="empty-state" id="admin-tokens-empty-state" hidden>
+              <h3>No admin tokens</h3>
+              <p class="muted">Create scoped operator tokens for control-plane API access.</p>
+            </div>
+          </div>
+
+          <div class="subsection">
+            <div class="section-heading">
+              <div>
                 <h2>Reserved subdomains</h2>
                 <p class="muted" id="reservation-count">No reservations loaded</p>
               </div>
