@@ -41,7 +41,7 @@ Copy the example environment file and replace every `change-me` value before usi
 cp deploy/compose/.env.control-plane.example deploy/compose/.env.control-plane
 ```
 
-Generate separate values for the Postgres password, control-plane admin token, and gateway validator token:
+Generate separate values for the Postgres password, bootstrap control-plane admin token, and gateway validator token:
 
 ```sh
 openssl rand -base64 32
@@ -60,7 +60,7 @@ Required local environment values:
 | Environment variable | Purpose |
 | --- | --- |
 | `PORTHOOK_POSTGRES_PASSWORD` | Password for the Compose Postgres user and database URL. |
-| `PORTHOOK_CONTROL_ADMIN_TOKEN` | Admin bearer token for token creation, listing, and revocation. |
+| `PORTHOOK_CONTROL_ADMIN_TOKEN` | Full-scope bootstrap/recovery admin bearer token. Use it to create scoped admin tokens for routine operations. |
 | `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | Shared bearer token used by the gateway when validating agent tokens through the control plane. |
 | `PORTHOOK_ROOT_DOMAIN` | Root domain used for tunnel subdomains. Use `localhost` for local smoke testing. |
 | `PORTHOOK_PUBLIC_URL` | Public base URL printed by the gateway when a tunnel is registered. |
@@ -163,14 +163,28 @@ Open the dashboard after the control-plane stack starts:
 http://localhost:8082/dashboard/
 ```
 
-Use the configured `PORTHOOK_CONTROL_ADMIN_TOKEN` to log in. The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token.
+Use the configured bootstrap token or a scoped admin token to log in. The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token.
 
-The dashboard can create, list, and revoke agent tokens, reserve requested subdomains for tokens, manage custom domains and access policies, and show active gateway tunnels and request logs from the gateway public API. The plaintext agent token is displayed only from the create response. Token tables include creation time, last successful validation time, and revocation status.
+The dashboard can create, list, and revoke scoped admin tokens and agent tokens, reserve requested subdomains for tokens, manage custom domains and access policies, and show active gateway tunnels and request logs from the gateway public API. Plaintext admin and agent tokens are displayed only from create responses. Token tables include creation time, last successful validation time, and revocation status.
+
+Create a scoped admin token for routine use:
+
+```sh
+admin_token_json="$(printf '%s' '<bootstrap-admin-token>' | porthook admin tokens create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --name 'local operator' \
+  --scope tokens \
+  --scope reservations \
+  --scope audit_history \
+  --json)"
+admin_token="$(printf '%s' "${admin_token_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+```
 
 Create an agent token through the control plane:
 
 ```sh
-created_token_json="$(printf '%s' '<admin-token>' | porthook tokens create \
+created_token_json="$(printf '%s' "${admin_token}" | porthook tokens create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --name 'local agent' \
@@ -182,7 +196,7 @@ agent_token="$(printf '%s' "${created_token_json}" | python3 -c 'import json,sys
 Reserve a requested subdomain for the token:
 
 ```sh
-reservation_json="$(printf '%s' '<admin-token>' | porthook reserved create \
+reservation_json="$(printf '%s' "${admin_token}" | porthook reserved create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --name demo \
@@ -194,7 +208,7 @@ reservation_id="$(printf '%s' "${reservation_json}" | python3 -c 'import json,sy
 Optionally map a custom hostname to the reserved subdomain:
 
 ```sh
-printf '%s' '<admin-token>' | porthook domains create \
+printf '%s' '<admin-token-with-domains-scope>' | porthook domains create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --hostname demo.example.test \

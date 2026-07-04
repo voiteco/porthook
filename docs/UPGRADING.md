@@ -2,6 +2,36 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.13.x to 0.14.x
+
+Version 0.14.x adds scoped admin tokens for self-hosted control-plane administration. The existing `PORTHOOK_CONTROL_ADMIN_TOKEN` remains a full-scope bootstrap and recovery token, while routine CLI and dashboard sessions can use scoped admin tokens.
+
+Before upgrading a self-hosted deployment:
+
+1. Back up the Postgres volume or database and record the current `schema_migrations` state.
+2. Deploy the new control-plane, gateway, dashboard assets, CLI binaries, and images together.
+3. Start the control plane and check `GET /readyz`.
+4. Use the bootstrap token to create scoped admin tokens for routine operators:
+
+   ```sh
+   printf '%s' '<bootstrap-admin-token>' | porthook admin tokens create \
+     --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+     --admin-token-stdin \
+     --name '<operator-name>' \
+     --scope tokens \
+     --scope reservations \
+     --scope audit_history
+   ```
+
+5. Open `/dashboard/`, log in with a scoped admin token, and confirm admin-token list, agent-token list, audit events, and diagnostics behave according to the token scopes.
+6. Run `make smoke-control-plane` or the equivalent deployment smoke path after configuration changes.
+
+The 0.14.x control-plane migration is additive:
+
+- create `admin_tokens` and supporting indexes if they do not exist
+
+Rollback to 0.13.x should not require removing the `admin_tokens` table, but a 0.13.x control plane, CLI, and dashboard will not create, validate, or revoke scoped admin tokens. Keep the bootstrap `PORTHOOK_CONTROL_ADMIN_TOKEN` available for rollback recovery.
+
 ## Upgrade from 0.12.x to 0.13.x
 
 Version 0.13.x focuses on release stability, packaging verification, and self-hosted deployment ergonomics. It adds gateway/control-plane `configcheck` commands, release artifact verification, durable smoke coverage, Make targets for the local control-plane Compose stack, stronger control-plane proxy examples, dashboard operational log usability improvements, and install/checksum documentation.

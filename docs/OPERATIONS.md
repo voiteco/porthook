@@ -255,7 +255,7 @@ porthook history requests \
 
 ## Token Rotation
 
-### Admin Token
+### Bootstrap Admin Token
 
 1. Generate a new `PORTHOOK_CONTROL_ADMIN_TOKEN`.
 2. Update `deploy/compose/.env.production`.
@@ -268,7 +268,40 @@ porthook history requests \
      up -d porthook-control-plane
    ```
 
-4. Verify CLI token administration and dashboard login with the new value.
+4. Verify recovery access with the new value by listing scoped admin tokens:
+
+   ```sh
+   printf '%s' '<new-bootstrap-admin-token>' | porthook admin tokens list \
+     --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+     --admin-token-stdin
+   ```
+
+5. Keep the bootstrap token restricted after creating scoped admin tokens for routine operators.
+
+### Scoped Admin Tokens
+
+1. Create a replacement scoped admin token:
+
+   ```sh
+   printf '%s' '<bootstrap-or-admin-token>' | porthook admin tokens create \
+     --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+     --admin-token-stdin \
+     --name '<operator-or-automation-name>' \
+     --scope audit_history \
+     --scope tokens
+   ```
+
+2. Move the operator or automation to the new plaintext token returned by the create response.
+3. Revoke the old admin token:
+
+   ```sh
+   printf '%s' '<bootstrap-or-admin-token>' | porthook admin tokens revoke \
+     --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+     --admin-token-stdin \
+     adm_...
+   ```
+
+4. Confirm the old token no longer works and review `control_plane.admin_token_created`, `control_plane.admin_token_revoked`, and `control_plane.auth_failed` audit events.
 
 ### Validator Token
 
@@ -380,11 +413,13 @@ Schema migrations in the current pre-1.0 line are intended to be additive, but a
 
 ### Suspected Admin Token Exposure
 
-1. Rotate `PORTHOOK_CONTROL_ADMIN_TOKEN`.
-2. Review recent control-plane audit events through `/api/v1/events`, plus `control_plane.auth_failed`, `control_plane.token_created`, `control_plane.token_revoked`, `control_plane.reservation_created`, and `control_plane.reservation_deleted` logs.
-3. Revoke unknown or unused agent tokens.
-4. Review reserved subdomains for unexpected ownership.
-5. Confirm the control-plane access boundary still blocks untrusted networks.
+1. Identify whether the exposed value is the bootstrap admin token or a scoped admin token.
+2. If the bootstrap token was exposed, rotate `PORTHOOK_CONTROL_ADMIN_TOKEN`.
+3. If a scoped admin token was exposed, revoke it with `porthook admin tokens revoke`.
+4. Review recent control-plane audit events through `/api/v1/events`, plus `control_plane.auth_failed`, `control_plane.admin_token_created`, `control_plane.admin_token_revoked`, `control_plane.token_created`, `control_plane.token_revoked`, `control_plane.reservation_created`, and `control_plane.reservation_deleted` logs.
+5. Revoke unknown or unused agent tokens.
+6. Review scoped admin token summaries and reserved subdomains for unexpected ownership.
+7. Confirm the control-plane access boundary still blocks untrusted networks.
 
 ### Suspected Validator Token Exposure
 
