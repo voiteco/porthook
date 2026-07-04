@@ -235,6 +235,10 @@ if [[ "${dashboard_html}" != *"Token management"* ]]; then
 	echo "Dashboard index did not include token management UI" >&2
 	exit 1
 fi
+if [[ "${dashboard_html}" != *"Admin tokens"* ]]; then
+	echo "Dashboard index did not include admin token management UI" >&2
+	exit 1
+fi
 
 dashboard_js="$(curl -fsS "http://127.0.0.1:${CONTROL_PORT}/dashboard/app.js")"
 if [[ "${dashboard_js}" != *"/api/v1/status"* ]]; then
@@ -243,6 +247,10 @@ if [[ "${dashboard_js}" != *"/api/v1/status"* ]]; then
 fi
 if [[ "${dashboard_js}" != *"/api/v1/reserved-subdomains"* ]]; then
 	echo "Dashboard JavaScript did not include reserved subdomain API client" >&2
+	exit 1
+fi
+if [[ "${dashboard_js}" != *"/api/v1/admin-tokens"* ]]; then
+	echo "Dashboard JavaScript did not include admin token API client" >&2
 	exit 1
 fi
 if [[ "${dashboard_js}" != *"/api/v1/access-policies"* ]]; then
@@ -299,6 +307,63 @@ printf '%s' "${ADMIN_TOKEN}" | \
 	>"${LOG_DIR}/tokens-list.json" 2>"${LOG_DIR}/tokens-list.err"
 if ! grep -q "${AGENT_TOKEN_ID}" "${LOG_DIR}/tokens-list.json"; then
 	echo "Created token was not listed: ${AGENT_TOKEN_ID}" >&2
+	exit 1
+fi
+
+created_admin_token_json="$(printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" admin tokens create \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--name "smoke audit reader" \
+	--scope "audit_history" \
+	--json)"
+SCOPED_ADMIN_TOKEN_ID="$(printf '%s' "${created_admin_token_json}" | extract_json_field id)"
+SCOPED_ADMIN_TOKEN="$(printf '%s' "${created_admin_token_json}" | extract_json_field token)"
+
+printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" admin tokens list \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--json \
+	>"${LOG_DIR}/admin-tokens-list.json" 2>"${LOG_DIR}/admin-tokens-list.err"
+if ! grep -q "${SCOPED_ADMIN_TOKEN_ID}" "${LOG_DIR}/admin-tokens-list.json"; then
+	echo "Created admin token was not listed: ${SCOPED_ADMIN_TOKEN_ID}" >&2
+	exit 1
+fi
+if grep -q "${SCOPED_ADMIN_TOKEN}" "${LOG_DIR}/admin-tokens-list.json"; then
+	echo "Admin token list exposed a plaintext admin token" >&2
+	exit 1
+fi
+
+printf '%s' "${SCOPED_ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" history events \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--event "control_plane.admin_token_created" \
+	--limit 20 \
+	--json \
+	>"${LOG_DIR}/history-events-scoped-admin-token.json" 2>"${LOG_DIR}/history-events-scoped-admin-token.err"
+python3 - "${LOG_DIR}/history-events-scoped-admin-token.json" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+if not any(event.get("event") == "control_plane.admin_token_created" for event in payload.get("events", [])):
+    raise SystemExit(f"missing admin_token_created audit event: {payload}")
+PY
+
+if printf '%s' "${SCOPED_ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" tokens list \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--json \
+	>"${LOG_DIR}/tokens-list-scoped-admin-token.json" 2>"${LOG_DIR}/tokens-list-scoped-admin-token.err"; then
+	echo "Audit-only admin token unexpectedly listed agent tokens" >&2
+	exit 1
+fi
+if ! grep -q "missing the required admin scope" "${LOG_DIR}/tokens-list-scoped-admin-token.err"; then
+	echo "Scoped admin token failure did not explain missing scope" >&2
 	exit 1
 fi
 
@@ -549,6 +614,17 @@ payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
 if not any(event.get("event") == "control_plane.token_created" for event in payload.get("events", [])):
     raise SystemExit(f"audit events did not persist after control-plane restart: {payload}")
 PY
+
+	printf '%s' "${ADMIN_TOKEN}" | \
+		"${BIN_DIR}/porthook" admin tokens list \
+		--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+		--admin-token-stdin \
+		--json \
+		>"${LOG_DIR}/admin-tokens-list-after-control-restart.json" 2>"${LOG_DIR}/admin-tokens-list-after-control-restart.err"
+	if ! grep -q "${SCOPED_ADMIN_TOKEN_ID}" "${LOG_DIR}/admin-tokens-list-after-control-restart.json"; then
+		echo "Admin tokens did not persist after control-plane restart: ${SCOPED_ADMIN_TOKEN_ID}" >&2
+		exit 1
+	fi
 fi
 
 printf '%s' "${ADMIN_TOKEN}" | \
@@ -557,5 +633,27 @@ printf '%s' "${ADMIN_TOKEN}" | \
 	--admin-token-stdin \
 	"${AGENT_TOKEN_ID}" \
 	>"${LOG_DIR}/tokens-revoke.log" 2>"${LOG_DIR}/tokens-revoke.err"
+
+printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" admin tokens revoke \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	"${SCOPED_ADMIN_TOKEN_ID}" \
+	>"${LOG_DIR}/admin-tokens-revoke.log" 2>"${LOG_DIR}/admin-tokens-revoke.err"
+
+if printf '%s' "${SCOPED_ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" history events \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
+	--limit 1 \
+	--json \
+	>"${LOG_DIR}/history-events-revoked-admin-token.json" 2>"${LOG_DIR}/history-events-revoked-admin-token.err"; then
+	echo "Revoked admin token unexpectedly read audit events" >&2
+	exit 1
+fi
+if ! grep -q "401 Unauthorized" "${LOG_DIR}/history-events-revoked-admin-token.err"; then
+	echo "Revoked admin token failure did not report unauthorized" >&2
+	exit 1
+fi
 
 echo "Control-plane smoke test passed: http://${SUBDOMAIN}.localhost:${PUBLIC_PORT}/smoke.txt"
