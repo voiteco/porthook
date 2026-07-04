@@ -4,7 +4,7 @@ Porthook is an open-source reverse tunnel service for exposing local development
 
 This repository is the public self-hosted product. Private commercial, hosted-cloud, pricing, and operating plans should live in separate private repositories.
 
-Project status: pre-1.0. The local HTTP tunnel path, self-hosted control-plane token management, gateway token validation, reserved subdomains, access policies, custom domain mappings, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs and operational defaults can still change before 1.0.
+Project status: pre-1.0. The local HTTP tunnel path, self-hosted control-plane token management, scoped admin tokens, gateway token validation, reserved subdomains, access policies, custom domain mappings, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs and operational defaults can still change before 1.0.
 
 ## What It Does
 
@@ -41,6 +41,7 @@ The first product shape is intentionally narrow:
 - CLI agent for macOS, Linux, and Windows.
 - Wildcard subdomain routing.
 - Token-based tunnel authentication.
+- Scoped admin tokens for self-hosted control-plane operations.
 - Optional control-plane token validation for self-hosted deployments.
 - Reserved subdomains, access policies, and custom domain mappings for control-plane-backed deployments.
 - Health, readiness, and Prometheus text metrics endpoints.
@@ -130,11 +131,11 @@ The public edge service that terminates HTTP or HTTPS, routes hostnames to activ
 
 ### Control Plane
 
-The API layer for users, tokens, tunnel sessions, reserved names, custom domain mappings, and limits. The current implementation includes `porthook-control-plane` for self-hosted token creation, validation, revocation, reserved subdomain ownership, access policies, and custom domains.
+The API layer for users, scoped admin tokens, agent tokens, tunnel sessions, reserved names, custom domain mappings, and limits. The current implementation includes `porthook-control-plane` for self-hosted admin token management, agent token creation, validation, revocation, reserved subdomain ownership, access policies, and custom domains.
 
 ### Dashboard
 
-A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login, token administration, reserved subdomain administration, custom domain management, access policy management, operational charts, active gateway tunnel visibility, diagnostics, audit events, runtime and metrics views, gateway request logs, and operational JSON export.
+A self-hosted web UI for control-plane administration. The current dashboard is served by `porthook-control-plane` at `/dashboard/` and supports admin token login, scoped admin token management, agent token administration, reserved subdomain administration, custom domain management, access policy management, operational charts, active gateway tunnel visibility, diagnostics, audit events, runtime and metrics views, gateway request logs, and operational JSON export.
 
 ## Development Roadmap
 
@@ -161,10 +162,11 @@ Completed foundations:
 19. Configuration validation checks for gateway and control-plane services.
 20. Release artifact verification, checksum validation, and durable smoke coverage.
 21. Self-hosted deployment ergonomics, backup guidance, and control-plane proxy hardening.
+22. Scoped admin tokens with CLI, dashboard, audit, and smoke coverage.
 
 Next major public work:
 
-1. Broader administrative authorization, operator access boundaries, and install/update polish.
+1. Operator UX polish, update/upgrade automation, and broader deployment packaging.
 
 ## Installation
 
@@ -178,7 +180,7 @@ The quickest control-plane-backed local stack uses Docker Compose:
 cp deploy/compose/.env.control-plane.example deploy/compose/.env.control-plane
 ```
 
-Replace every `change-me` value in `deploy/compose/.env.control-plane`. Generate separate local secrets for the Postgres password, control-plane admin token, and gateway validator token:
+Replace every `change-me` value in `deploy/compose/.env.control-plane`. Generate separate local secrets for the Postgres password, bootstrap control-plane admin token, and gateway validator token:
 
 ```sh
 openssl rand -base64 32
@@ -199,12 +201,30 @@ Open the self-hosted dashboard:
 http://localhost:8082/dashboard/
 ```
 
-Log in with the configured control-plane admin token. The dashboard can create, list, and revoke agent tokens, reserve subdomains for tokens, manage custom domains and access policies, show active gateway tunnels, runtime, and metrics, run diagnostics, inspect audit events, inspect recent gateway request logs, and download an operational JSON export.
+Log in with the configured bootstrap token or a scoped admin token. The dashboard can create, list, and revoke scoped admin tokens and agent tokens, reserve subdomains for tokens, manage custom domains and access policies, show active gateway tunnels, runtime, and metrics, run diagnostics, inspect audit events, inspect recent gateway request logs, and download an operational JSON export.
+
+Create a scoped admin token for routine local operations:
+
+```sh
+admin_token_json="$(printf '%s' '<bootstrap-admin-token>' | porthook admin tokens create \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
+  --name 'local operator' \
+  --scope admin_tokens \
+  --scope tokens \
+  --scope reservations \
+  --scope domains \
+  --scope access_policies \
+  --scope audit_history \
+  --scope runtime_diagnostics \
+  --json)"
+admin_token="$(printf '%s' "${admin_token_json}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+```
 
 Check the local gateway and control-plane operational endpoints:
 
 ```sh
-printf '%s' '<admin-token>' | porthook doctor \
+printf '%s' "${admin_token}" | porthook doctor \
   --gateway http://localhost:8080 \
   --control-plane http://localhost:8082 \
   --admin-token-stdin
@@ -213,7 +233,7 @@ printf '%s' '<admin-token>' | porthook doctor \
 Capture a best-effort operational JSON export:
 
 ```sh
-printf '%s' '<admin-token>' | porthook export \
+printf '%s' "${admin_token}" | porthook export \
   --gateway http://localhost:8080 \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
@@ -229,7 +249,7 @@ porthook tunnels list --gateway http://localhost:8080
 Inspect recent operational history from the CLI:
 
 ```sh
-printf '%s' '<admin-token>' | porthook history events \
+printf '%s' "${admin_token}" | porthook history events \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --limit 50
@@ -243,7 +263,7 @@ porthook history requests \
 Create an agent token:
 
 ```sh
-created_token_json="$(printf '%s' '<admin-token>' | porthook tokens create \
+created_token_json="$(printf '%s' "${admin_token}" | porthook tokens create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --name 'local agent' \
@@ -255,7 +275,7 @@ agent_token="$(printf '%s' "${created_token_json}" | python3 -c 'import json,sys
 Reserve the requested subdomain for that token:
 
 ```sh
-reservation_json="$(printf '%s' '<admin-token>' | porthook reserved create \
+reservation_json="$(printf '%s' "${admin_token}" | porthook reserved create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --name demo \
@@ -267,7 +287,7 @@ reservation_id="$(printf '%s' "${reservation_json}" | python3 -c 'import json,sy
 Optionally map a custom hostname to that reserved subdomain:
 
 ```sh
-domain_json="$(printf '%s' '<admin-token>' | porthook domains create \
+domain_json="$(printf '%s' "${admin_token}" | porthook domains create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --hostname demo.example.test \
@@ -281,7 +301,7 @@ verification_token="$(printf '%s' "${domain_json}" | python3 -c 'import json,sys
 Create a TXT record named `${verification_name}` with value `porthook-domain-verification=${verification_token}`, then activate the mapping:
 
 ```sh
-printf '%s' '<admin-token>' | porthook domains verify \
+printf '%s' "${admin_token}" | porthook domains verify \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   "${domain_id}"
@@ -290,7 +310,7 @@ printf '%s' '<admin-token>' | porthook domains verify \
 Optionally protect that reserved subdomain before exposing it publicly:
 
 ```sh
-printf '%s' '<admin-token>' | porthook access create \
+printf '%s' "${admin_token}" | porthook access create \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --reserved-subdomain-id "${reservation_id}" \
