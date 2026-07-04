@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -36,11 +37,13 @@ func run(args []string, stdout io.Writer) error {
 			return nil
 		case "healthcheck":
 			if len(args) > 1 {
-				return fmt.Errorf("usage: porthook-gateway [version|--version|healthcheck]")
+				return fmt.Errorf("usage: porthook-gateway [version|--version|healthcheck|configcheck]")
 			}
 			return runHealthcheck(context.Background(), stdout)
+		case "configcheck":
+			return runConfigCheck(args[1:], stdout)
 		default:
-			return fmt.Errorf("usage: porthook-gateway [version|--version|healthcheck]")
+			return fmt.Errorf("usage: porthook-gateway [version|--version|healthcheck|configcheck]")
 		}
 	}
 
@@ -77,6 +80,40 @@ func run(args []string, stdout io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+func runConfigCheck(args []string, stdout io.Writer) error {
+	var production bool
+	fs := flag.NewFlagSet("configcheck", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.BoolVar(&production, "production", false, "validate production deployment requirements")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("usage: porthook-gateway configcheck [--production]")
+	}
+
+	report := gateway.ValidateConfig(gateway.ConfigFromEnv(), gateway.ConfigValidationOptions{
+		Production: production,
+	})
+	printGatewayConfigValidationReport(stdout, report)
+	if report.HasErrors() {
+		return fmt.Errorf("gateway configuration check failed")
+	}
+	return nil
+}
+
+func printGatewayConfigValidationReport(stdout io.Writer, report gateway.ConfigValidationReport) {
+	for _, warning := range report.Warnings {
+		fmt.Fprintf(stdout, "warning: %s: %s\n", warning.Field, warning.Message)
+	}
+	for _, issue := range report.Errors {
+		fmt.Fprintf(stdout, "error: %s: %s\n", issue.Field, issue.Message)
+	}
+	if !report.HasErrors() {
+		fmt.Fprintln(stdout, "ok")
+	}
 }
 
 func openRequestLogStore(ctx context.Context, cfg gateway.Config) (*gateway.PostgresRequestLogStore, io.Closer, error) {
