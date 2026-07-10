@@ -31,6 +31,9 @@ jobs:
       - name: Run tests
         run: make test
 
+      - name: Run race detector
+        run: make race
+
       - name: Run vet
         run: make vet
 
