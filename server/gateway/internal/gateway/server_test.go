@@ -1980,7 +1980,7 @@ func TestPublicRequestRejectsWhenRateLimitExceeded(t *testing.T) {
 }
 
 func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
-	var logs bytes.Buffer
+	var logs logBuffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	server := NewServer(testConfig(), logger)
 	httpServer := httptest.NewServer(server.AgentHandler())
@@ -2021,7 +2021,24 @@ func TestAgentWebSocketRejectsInvalidToken(t *testing.T) {
 	}
 }
 
-func waitForLog(t *testing.T, logs *bytes.Buffer, want string) string {
+type logBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(p)
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
+}
+
+func waitForLog(t *testing.T, logs *logBuffer, want string) string {
 	t.Helper()
 
 	deadline := time.Now().Add(time.Second)
