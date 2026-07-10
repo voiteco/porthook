@@ -10,6 +10,10 @@ POSTGRES_CONTAINER="porthook-smoke-postgres-$$"
 cleanup() {
 	status=$?
 	if docker ps -a --format '{{.Names}}' | grep -qx "${POSTGRES_CONTAINER}"; then
+		if [[ "${status}" -ne 0 ]]; then
+			echo "Durable smoke Postgres logs:" >&2
+			docker logs "${POSTGRES_CONTAINER}" >&2 || true
+		fi
 		docker stop "${POSTGRES_CONTAINER}" >/dev/null 2>&1 || true
 	fi
 	exit "${status}"
