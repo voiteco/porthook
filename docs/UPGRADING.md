@@ -2,9 +2,9 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
-## Upgrade from 0.13.x to 0.14.x
+## Upgrade from 0.12.x to 0.14.x
 
-Version 0.14.x adds scoped admin tokens for self-hosted control-plane administration. The existing `PORTHOOK_CONTROL_ADMIN_TOKEN` remains a full-scope bootstrap and recovery token, while routine CLI and dashboard sessions can use scoped admin tokens.
+Version 0.14.x combines the release-stability, deployment-ergonomics, and scoped-admin-token changes after `0.12.x`. The existing `PORTHOOK_CONTROL_ADMIN_TOKEN` remains a full-scope bootstrap and recovery token, while routine CLI and dashboard sessions can use scoped admin tokens.
 
 Before upgrading a self-hosted deployment:
 
@@ -30,23 +30,7 @@ The 0.14.x control-plane migration is additive:
 
 - create `admin_tokens` and supporting indexes if they do not exist
 
-Rollback to 0.13.x should not require removing the `admin_tokens` table, but a 0.13.x control plane, CLI, and dashboard will not create, validate, or revoke scoped admin tokens. Keep the bootstrap `PORTHOOK_CONTROL_ADMIN_TOKEN` available for rollback recovery.
-
-## Upgrade from 0.12.x to 0.13.x
-
-Version 0.13.x focuses on release stability, packaging verification, and self-hosted deployment ergonomics. It adds gateway/control-plane `configcheck` commands, release artifact verification, durable smoke coverage, Make targets for the local control-plane Compose stack, stronger control-plane proxy examples, dashboard operational log usability improvements, and install/checksum documentation.
-
-Before upgrading a self-hosted deployment:
-
-1. Back up the Postgres volume or database and record the current `schema_migrations` state.
-2. Download release assets and verify `SHA256SUMS`, or build from source and run `make release-verify VERSION=<target-version>`.
-3. Run `porthook-gateway configcheck --production` and `porthook-control-plane configcheck --production` with the environment used by each service.
-4. Validate Compose config and hardening assumptions with `make compose-config` and `make production-hardening-check`.
-5. Deploy the new control-plane, gateway, dashboard assets, CLI binaries, and images together.
-6. Check `/readyz`, `/api/v1/status`, `porthook doctor`, `porthook history events`, and `porthook history requests`.
-7. Open `/dashboard/`, confirm saved filters/load-more behavior for audit events and request logs, and copy request/tunnel IDs for an operational handoff check.
-
-The 0.13.x line does not add required Postgres schema migrations. Rollback to 0.12.x should be code-only if no newer release has added data migrations.
+Rollback to 0.12.x should not require removing the `admin_tokens` table or other additive release-stability tables, but a 0.12.x control plane, CLI, and dashboard will not create, validate, or revoke scoped admin tokens and will not use the newer operational workflows. Keep the bootstrap `PORTHOOK_CONTROL_ADMIN_TOKEN` available for rollback recovery.
 
 ## Upgrade from 0.11.x to 0.12.x
 

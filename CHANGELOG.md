@@ -4,6 +4,10 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.14.0] - 2026-07-10
+
 ### Added
 - Added scoped admin token storage, Postgres migration, validation, revocation, and admin-token APIs for self-hosted control-plane administration.
 - Added `porthook admin tokens create`, `porthook admin tokens list`, and `porthook admin tokens revoke`.
