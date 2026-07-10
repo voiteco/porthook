@@ -164,9 +164,7 @@ Completed foundations:
 21. Self-hosted deployment ergonomics, backup guidance, and control-plane proxy hardening.
 22. Scoped admin tokens with CLI, dashboard, audit, and smoke coverage.
 
-Next major public work:
-
-1. Operator UX polish, update/upgrade automation, and broader deployment packaging.
+The detailed production-stability plan, ordered implementation blocks, and `v1.0.0` release gates live in [docs/PRODUCTION_ROADMAP.md](./docs/PRODUCTION_ROADMAP.md).
 
 ## Installation
 
