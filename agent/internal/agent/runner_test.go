@@ -966,8 +966,24 @@ func TestRunnerCancelsLocalRequestOnStreamCancel(t *testing.T) {
 	if err := runner.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if !strings.Contains(output.String(), "GET /cancel-me -> error") {
-		t.Fatalf("output = %q, want canceled request log", output.String())
+	waitForRunnerOutput(t, runner, &output, "GET /cancel-me -> error")
+}
+
+func waitForRunnerOutput(t *testing.T, runner *Runner, output *bytes.Buffer, want string) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		runner.outputMu.Lock()
+		got := output.String()
+		runner.outputMu.Unlock()
+		if strings.Contains(got, want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
