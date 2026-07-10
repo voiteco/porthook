@@ -6,7 +6,7 @@ The objective of this roadmap is to take the public self-hosted Porthook product
 
 This document is the execution source of truth for that work. Tasks are ordered by dependency and risk. A task is complete only after its implementation, tests, documentation, commit, push, and required CI checks are complete.
 
-Current phase: Block 1 is ready to start. No production-readiness block is complete yet.
+Current phase: Block 1 is complete. Block 2 is ready to start.
 
 ## Supported v1 Scope
 
@@ -65,23 +65,23 @@ Only mark a checkbox complete after its code and documentation are pushed and CI
 
 Target: `v0.14.0`
 
-The repository currently has `v0.12.0` as its latest release, while `main` contains the release-stability and scoped-admin-token work described as `0.13.x` and `0.14.x`. Release the current state as one honest baseline instead of synthesizing a historical `v0.13.0` release.
+When this roadmap was created, `v0.12.0` was the latest release while `main` contained the release-stability and scoped-admin-token work described as `0.13.x` and `0.14.x`. That state was released as one honest baseline instead of synthesizing a historical `v0.13.0` release.
 
 Tasks:
 
-- [ ] Move the current `Unreleased` changelog entries into a dated `0.14.0` section.
-- [ ] Replace the draft `0.12 -> 0.13 -> 0.14` upgrade sequence with a direct `0.12 -> 0.14` procedure.
-- [ ] Update `SECURITY.md` to identify `0.14.x` and `main` as the supported lines.
-- [ ] Add a concise known-limitations section covering the public management endpoints, proxy client IP behavior, supported traffic, single-node topology, packaging, and TLS expectations.
-- [ ] Ensure README status and installation claims match the release artifacts, especially Windows support.
-- [ ] Run the complete existing test, smoke, Compose, image, and release-verification suite.
-- [ ] Prepare, tag, push, and verify `v0.14.0`, including checksums and embedded versions.
-- [ ] Verify the published release from a clean directory using only release documentation and assets.
+- [x] Move the current `Unreleased` changelog entries into a dated `0.14.0` section.
+- [x] Replace the draft `0.12 -> 0.13 -> 0.14` upgrade sequence with a direct `0.12 -> 0.14` procedure.
+- [x] Update `SECURITY.md` to identify `0.14.x` and `main` as the supported lines.
+- [x] Add a concise known-limitations section covering the public management endpoints, proxy client IP behavior, supported traffic, single-node topology, packaging, and TLS expectations.
+- [x] Ensure README status and installation claims match the release artifacts, especially Windows support.
+- [x] Run the complete existing test, smoke, Compose, image, and release-verification suite.
+- [x] Prepare, tag, push, and verify `v0.14.0`, including checksums and embedded versions.
+- [x] Verify the published release from a clean directory using only release documentation and assets.
 
 Exit gate:
 
-- [ ] `v0.14.0` is published, installable, documented as pre-production, and has a green release workflow.
-- [ ] No public documentation refers to an unreleased `v0.13.0` as an available upgrade step.
+- [x] `v0.14.0` is published, installable, documented as pre-production, and has a green release workflow.
+- [x] No public documentation refers to an unreleased `v0.13.0` as an available upgrade step.
 
 ## Block 2: Make Quality and Security Checks Mandatory
 
