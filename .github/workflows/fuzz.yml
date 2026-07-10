@@ -1,0 +1,46 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "17 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Protocol envelope
+            package: ./protocol/messages
+            target: FuzzDecodeEnvelope
+          - name: Binary body frame
+            package: ./protocol/messages
+            target: FuzzDecodeBinaryBodyFrame
+          - name: Forwarded headers
+            package: ./protocol/httpwire
+            target: FuzzForwardedHeaders
+          - name: Custom-domain hostname
+            package: ./server/control-plane/internal/customdomains
+            target: FuzzNormalizeHostname
+          - name: Request-log filters
+            package: ./server/gateway/internal/gateway
+            target: FuzzRequestLogListOptions
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run bounded fuzz target
+        run: go test ${{ matrix.package }} -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime=1m
