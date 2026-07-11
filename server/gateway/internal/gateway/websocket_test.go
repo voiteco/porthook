@@ -372,6 +372,56 @@ func TestPublicWebSocketIdleTimeoutClosesStalledStream(t *testing.T) {
 	}
 }
 
+func TestPublicWebSocketRejectsOversizedMessage(t *testing.T) {
+	cfg := testConfig()
+	cfg.WSMessageMaxBytes = 16
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+	waitForSession(t, ctx, server, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		agentErr <- simulateAgentWSEcho(ctx, conn, wsproxy.Accept{})
+	}()
+
+	publicConn, _, err := websocket.Dial(ctx, websocketURL(publicServer.URL, "/socket"), &websocket.DialOptions{Host: "demo.localhost"})
+	if err != nil {
+		t.Fatalf("public websocket dial returned error: %v", err)
+	}
+	defer publicConn.CloseNow()
+
+	oversized := bytes.Repeat([]byte{0x01}, 64)
+	// The write itself is not bounded; the gateway enforces the limit when
+	// it reads the message back from the public connection.
+	if err := publicConn.Write(ctx, websocket.MessageBinary, oversized); err != nil {
+		t.Fatalf("write oversized message returned error: %v", err)
+	}
+
+	_, _, readErr := publicConn.Read(ctx)
+	if readErr == nil {
+		t.Fatal("read returned nil error, want the gateway to reject the oversized message")
+	}
+	if status := websocket.CloseStatus(readErr); status != websocket.StatusMessageTooBig {
+		t.Fatalf("close status = %v, want StatusMessageTooBig", status)
+	}
+
+	<-agentErr
+}
+
 // simulateAgentWSEcho plays the agent's role for a single tunneled
 // WebSocket stream: it accepts the open request with accept, then echoes
 // every text/binary message back until the gateway signals close or cancel.
