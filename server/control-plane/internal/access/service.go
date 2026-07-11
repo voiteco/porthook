@@ -195,8 +195,12 @@ func (s *Service) CheckPolicy(ctx context.Context, req CheckPolicyRequest) (Chec
 	case ModePublic:
 		return CheckPolicyResult{Allowed: true, Mode: record.Mode, Reason: "public"}, nil
 	case ModeBasicAuth:
-		if !basicAuthMatches(record, req.BasicUsername, req.BasicPassword) {
+		matched, needsUpgrade := basicAuthMatches(record, req.BasicUsername, req.BasicPassword)
+		if !matched {
 			return CheckPolicyResult{Allowed: false, Mode: record.Mode, Reason: "basic_auth_required"}, nil
+		}
+		if needsUpgrade {
+			s.upgradeBasicAuthHash(ctx, record, req.BasicPassword)
 		}
 		return CheckPolicyResult{Allowed: true, Mode: record.Mode}, nil
 	case ModeBearerToken:
@@ -244,7 +248,11 @@ func newPolicyRecord(req CreatePolicyRequest, now time.Time) (PolicyRecord, erro
 			return PolicyRecord{}, ErrPolicySecretRequired
 		}
 		record.BasicUsername = username
-		record.SecretHash = HashSecret(password)
+		hash, err := HashPassword(password)
+		if err != nil {
+			return PolicyRecord{}, err
+		}
+		record.SecretHash = hash
 	case ModeBearerToken:
 		token := strings.TrimSpace(req.BearerToken)
 		if token == "" {
@@ -294,7 +302,11 @@ func updatedPolicyRecord(existing PolicyRecord, req UpdatePolicyRequest, now tim
 		record.BasicUsername = username
 		password := strings.TrimSpace(req.BasicPassword)
 		if password != "" {
-			record.SecretHash = HashSecret(password)
+			hash, err := HashPassword(password)
+			if err != nil {
+				return PolicyRecord{}, err
+			}
+			record.SecretHash = hash
 		} else if existing.Mode == ModeBasicAuth && existing.SecretHash != "" {
 			record.SecretHash = existing.SecretHash
 		} else {
@@ -377,13 +389,36 @@ func HashSecret(secret string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func basicAuthMatches(record PolicyRecord, username, password string) bool {
+// basicAuthMatches reports whether username/password satisfy record, and
+// whether the stored hash is a legacy unsalted SHA-256 hash that should be
+// upgraded to Argon2id now that authentication has succeeded.
+func basicAuthMatches(record PolicyRecord, username, password string) (matched, needsUpgrade bool) {
 	username = strings.TrimSpace(username)
 	password = strings.TrimSpace(password)
 	if username == "" || password == "" || record.BasicUsername == "" || record.SecretHash == "" {
-		return false
+		return false, false
 	}
-	return secretEqual(username, record.BasicUsername) && secretHashEqual(HashSecret(password), record.SecretHash)
+	if !secretEqual(username, record.BasicUsername) {
+		return false, false
+	}
+
+	if IsPasswordHash(record.SecretHash) {
+		ok, err := VerifyPassword(record.SecretHash, password)
+		return err == nil && ok, false
+	}
+
+	// Legacy hash predates Argon2id password storage: verify with the old
+	// scheme and flag for a lazy upgrade on success.
+	return secretHashEqual(HashSecret(password), record.SecretHash), true
+}
+
+func (s *Service) upgradeBasicAuthHash(ctx context.Context, record PolicyRecord, password string) {
+	hash, err := HashPassword(strings.TrimSpace(password))
+	if err != nil {
+		return
+	}
+	record.SecretHash = hash
+	_ = s.store.Update(ctx, record)
 }
 
 func secretEqual(got, want string) bool {

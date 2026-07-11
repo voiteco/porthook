@@ -4,7 +4,9 @@ package access
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,6 +70,156 @@ func TestServiceHashesBasicAuthSecret(t *testing.T) {
 	}
 	if record.SecretHash == "" || record.SecretHash == "secret-password" {
 		t.Fatalf("secret hash = %q, want hashed secret", record.SecretHash)
+	}
+	if !IsPasswordHash(record.SecretHash) {
+		t.Fatalf("secret hash = %q, want a versioned Argon2id password hash", record.SecretHash)
+	}
+}
+
+func TestServiceKeepsFastHashForBearerTokens(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(store)
+
+	created, err := service.CreatePolicy(ctx, CreatePolicyRequest{
+		ReservedSubdomainID: "rs_bearer",
+		Mode:                "bearer_token",
+		BearerToken:         "high-entropy-generated-token",
+	})
+	if err != nil {
+		t.Fatalf("CreatePolicy returned error: %v", err)
+	}
+
+	record, ok, err := store.LookupByID(ctx, created.ID)
+	if err != nil || !ok {
+		t.Fatalf("LookupByID = ok %v err %v, want ok", ok, err)
+	}
+	if record.SecretHash != HashSecret("high-entropy-generated-token") {
+		t.Fatalf("secret hash = %q, want fast SHA-256 lookup hash for bearer tokens", record.SecretHash)
+	}
+	if IsPasswordHash(record.SecretHash) {
+		t.Fatal("bearer token hash used the memory-hard Argon2id scheme, want fast SHA-256")
+	}
+}
+
+func TestServiceUpgradesLegacyBasicAuthHashOnSuccess(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(store)
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+
+	legacyRecord := PolicyRecord{
+		ID:                  "ap_legacy",
+		ReservedSubdomainID: "rs_legacy",
+		Mode:                ModeBasicAuth,
+		BasicUsername:       "admin",
+		SecretHash:          HashSecret("legacy-password"),
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	if err := store.Create(ctx, legacyRecord); err != nil {
+		t.Fatalf("store.Create returned error: %v", err)
+	}
+
+	wrongResult, err := service.CheckPolicy(ctx, CheckPolicyRequest{
+		ReservedSubdomainID: "rs_legacy",
+		BasicUsername:       "admin",
+		BasicPassword:       "wrong-password",
+	})
+	if err != nil {
+		t.Fatalf("CheckPolicy wrong password returned error: %v", err)
+	}
+	if wrongResult.Allowed {
+		t.Fatal("CheckPolicy allowed an incorrect password against a legacy hash")
+	}
+	unchanged, _, err := store.LookupByID(ctx, "ap_legacy")
+	if err != nil {
+		t.Fatalf("LookupByID returned error: %v", err)
+	}
+	if unchanged.SecretHash != legacyRecord.SecretHash {
+		t.Fatal("a failed authentication attempt upgraded the legacy hash")
+	}
+
+	allowedResult, err := service.CheckPolicy(ctx, CheckPolicyRequest{
+		ReservedSubdomainID: "rs_legacy",
+		BasicUsername:       "admin",
+		BasicPassword:       "legacy-password",
+	})
+	if err != nil {
+		t.Fatalf("CheckPolicy correct password returned error: %v", err)
+	}
+	if !allowedResult.Allowed {
+		t.Fatal("CheckPolicy denied a correct password against a legacy hash")
+	}
+
+	upgraded, ok, err := store.LookupByID(ctx, "ap_legacy")
+	if err != nil || !ok {
+		t.Fatalf("LookupByID = ok %v err %v, want ok", ok, err)
+	}
+	if !IsPasswordHash(upgraded.SecretHash) {
+		t.Fatalf("secret hash after successful legacy auth = %q, want an upgraded Argon2id hash", upgraded.SecretHash)
+	}
+	if upgraded.SecretHash == legacyRecord.SecretHash {
+		t.Fatal("secret hash was not upgraded after a successful legacy authentication")
+	}
+
+	secondResult, err := service.CheckPolicy(ctx, CheckPolicyRequest{
+		ReservedSubdomainID: "rs_legacy",
+		BasicUsername:       "admin",
+		BasicPassword:       "legacy-password",
+	})
+	if err != nil {
+		t.Fatalf("CheckPolicy after upgrade returned error: %v", err)
+	}
+	if !secondResult.Allowed {
+		t.Fatal("CheckPolicy denied a correct password after the hash was upgraded")
+	}
+}
+
+func TestPolicySummaryNeverExposesSecrets(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+
+	cases := []CreatePolicyRequest{
+		{ReservedSubdomainID: "rs_basic", Mode: "basic_auth", BasicUsername: "admin", BasicPassword: "correct-horse-battery-staple"},
+		{ReservedSubdomainID: "rs_bearer", Mode: "bearer_token", BearerToken: "highly-secret-bearer-token"},
+	}
+	for _, req := range cases {
+		created, err := service.CreatePolicy(ctx, req)
+		if err != nil {
+			t.Fatalf("CreatePolicy(%q) returned error: %v", req.Mode, err)
+		}
+
+		encoded, err := json.Marshal(created)
+		if err != nil {
+			t.Fatalf("Marshal returned error: %v", err)
+		}
+		body := string(encoded)
+		if req.BasicPassword != "" && strings.Contains(body, req.BasicPassword) {
+			t.Fatalf("policy summary JSON leaked the plaintext password: %s", body)
+		}
+		if req.BearerToken != "" && strings.Contains(body, req.BearerToken) {
+			t.Fatalf("policy summary JSON leaked the plaintext bearer token: %s", body)
+		}
+		if strings.Contains(body, "secret_hash") || strings.Contains(body, "SecretHash") {
+			t.Fatalf("policy summary JSON exposed a secret_hash field: %s", body)
+		}
+
+		listed, err := service.ListPolicies(ctx)
+		if err != nil {
+			t.Fatalf("ListPolicies returned error: %v", err)
+		}
+		listedEncoded, err := json.Marshal(listed)
+		if err != nil {
+			t.Fatalf("Marshal returned error: %v", err)
+		}
+		listedBody := string(listedEncoded)
+		if req.BasicPassword != "" && strings.Contains(listedBody, req.BasicPassword) {
+			t.Fatalf("policy list JSON leaked the plaintext password: %s", listedBody)
+		}
+		if req.BearerToken != "" && strings.Contains(listedBody, req.BearerToken) {
+			t.Fatalf("policy list JSON leaked the plaintext bearer token: %s", listedBody)
+		}
 	}
 }
 
