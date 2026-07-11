@@ -6,7 +6,7 @@ The objective of this roadmap is to take the public self-hosted Porthook product
 
 This document is the execution source of truth for that work. Tasks are ordered by dependency and risk. A task is complete only after its implementation, tests, documentation, commit, push, and required CI checks are complete.
 
-Current phase: Block 1 is complete. Block 2 is ready to start.
+Current phase: Block 1 is complete. Block 2 release qualification is in progress.
 
 ## Supported v1 Scope
 
@@ -89,16 +89,16 @@ Target: `v0.15.0`
 
 Tasks:
 
-- [ ] Fix the concurrent test log-buffer access reported by `go test -race ./...`.
-- [ ] Add a `make race` target and make a complete race run a required CI and release check.
-- [ ] Add fuzz targets for protocol envelopes, binary body frames, forwarded headers, hostname parsing, and cursor/filter parsing.
-- [ ] Run fuzz seed corpora in normal CI and provide a bounded extended fuzz workflow.
-- [ ] Add `govulncheck` for Go dependencies and reachable vulnerable code.
-- [ ] Add CodeQL or an equivalent maintained static-analysis workflow.
-- [ ] Add automated dependency update configuration for Go modules and GitHub Actions.
-- [ ] Add repository secret scanning and fail CI on committed test credentials that are not explicit fixtures.
-- [ ] Add `docs/THREAT_MODEL.md` covering trust boundaries, assets, attacker capabilities, abuse cases, and accepted v1 risks.
-- [ ] Configure the new checks as required release gates.
+- [x] Fix the concurrent test log-buffer access reported by `go test -race ./...`.
+- [x] Add a `make race` target and make a complete race run a required CI and release check.
+- [x] Add fuzz targets for protocol envelopes, binary body frames, forwarded headers, hostname parsing, and cursor/filter parsing.
+- [x] Run fuzz seed corpora in normal CI and provide a bounded extended fuzz workflow.
+- [x] Add `govulncheck` for Go dependencies and reachable vulnerable code.
+- [x] Add CodeQL or an equivalent maintained static-analysis workflow.
+- [x] Add automated dependency update configuration for Go modules and GitHub Actions.
+- [x] Add repository secret scanning and fail CI on committed test credentials that are not explicit fixtures.
+- [x] Add `docs/THREAT_MODEL.md` covering trust boundaries, assets, attacker capabilities, abuse cases, and accepted v1 risks.
+- [x] Configure the new checks as required release gates.
 
 Exit gate:
 

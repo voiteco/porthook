@@ -9,7 +9,7 @@ The release workflow is intentionally conservative for the pre-1.0 stage: it run
 Use semantic version tags:
 
 ```sh
-v0.14.0
+v0.15.0
 ```
 
 The tag name is injected into the CLI, gateway, and control-plane binaries. After download, users can verify the embedded version:
@@ -30,14 +30,14 @@ make test
 make race
 make vulncheck
 make vet
-make smoke-local VERSION=v0.14.0
-make smoke-control-plane VERSION=v0.14.0
-make release-build VERSION=v0.14.0
+make smoke-local VERSION=v0.15.0
+make smoke-control-plane VERSION=v0.15.0
+make release-build VERSION=v0.15.0
 make release-checksums
-make release-verify VERSION=v0.14.0
+make release-verify VERSION=v0.15.0
 make compose-config
 make production-hardening-check
-make docker-build VERSION=v0.14.0
+make docker-build VERSION=v0.15.0
 ```
 
 `make release-verify` checks that the expected binary assets are present, checks `SHA256SUMS`, verifies the embedded version in the local OS/architecture binaries, and runs production `configcheck` for the gateway and control plane.
@@ -47,8 +47,8 @@ make docker-build VERSION=v0.14.0
 Create and push an annotated tag:
 
 ```sh
-git tag -a v0.14.0 -m "v0.14.0"
-git push origin v0.14.0
+git tag -a v0.15.0 -m "v0.15.0"
+git push origin v0.15.0
 ```
 
 Before tagging, move the relevant `CHANGELOG.md` entries from `Unreleased` into a dated version section such as:

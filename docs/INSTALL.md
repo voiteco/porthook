@@ -7,7 +7,7 @@ Use release binaries for self-hosted deployments and local agents when you do no
 Pick the release version and the target operating system/architecture:
 
 ```sh
-VERSION=v0.14.0
+VERSION=v0.15.0
 OS=linux
 ARCH=amd64
 ```
@@ -96,7 +96,7 @@ From a source checkout:
 
 ```sh
 make build VERSION=dev
-make release-build VERSION=v0.14.0
+make release-build VERSION=v0.15.0
 make release-checksums
-make release-verify VERSION=v0.14.0
+make release-verify VERSION=v0.15.0
 ```

@@ -6,6 +6,21 @@ All notable changes to Porthook are documented here.
 
 No changes yet.
 
+## [0.15.0] - 2026-07-11
+
+### Added
+- Added mandatory full-suite race detection, seeded protocol fuzz tests, a bounded scheduled fuzz workflow, and durable smoke diagnostics for asynchronous request-log persistence.
+- Added pinned `govulncheck` dependency analysis, CodeQL static analysis, Gitleaks full-history secret scanning, and Dependabot updates for Go modules and GitHub Actions.
+- Added a public v1 threat model covering trust boundaries, assets, attacker capabilities, abuse cases, security requirements, and accepted self-hosted risks.
+
+### Changed
+- Updated the required Go toolchain and server build images to Go 1.26.5 and upgraded `github.com/jackc/pgx/v5` to 5.9.2 to remediate reachable vulnerability findings.
+- Release workflows now gate publication on vulnerability, secret, and CodeQL checks as well as existing test, race, smoke, packaging, and deployment validation.
+
+### Fixed
+- Synchronized concurrent test output and log capture so the full race detector suite is stable.
+- Made the durable control-plane smoke test wait for asynchronous request-log persistence without weakening query-redaction checks.
+
 ## [0.14.0] - 2026-07-10
 
 ### Added

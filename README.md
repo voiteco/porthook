@@ -4,7 +4,7 @@ Porthook is an open-source reverse tunnel service for exposing local development
 
 This repository is the public self-hosted product. Private commercial, hosted-cloud, pricing, and operating plans should live in separate private repositories.
 
-Project status: `v0.14.0` pre-production. The local HTTP tunnel path, self-hosted control-plane token management, scoped admin tokens, gateway token validation, reserved subdomains, access policies, custom domain mappings, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs, operational defaults, and deployment boundaries can still change before 1.0.
+Project status: `v0.15.0` pre-production. The local HTTP tunnel path, self-hosted control-plane token management, scoped admin tokens, gateway token validation, reserved subdomains, access policies, custom domain mappings, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs, operational defaults, and deployment boundaries can still change before 1.0.
 
 ## What It Does
 
@@ -168,11 +168,11 @@ The detailed production-stability plan, ordered implementation blocks, and `v1.0
 
 ## Known Limitations
 
-The `v0.14.0` release is pre-production. The gateway exposes operational endpoints on the same listener as wildcard tunnel traffic, proxy client IP handling depends on the deployment path, and supported public traffic is HTTP with reverse-proxy-provided HTTPS. The reference topology is a single gateway and control-plane node with Postgres. Release images are built locally from source, and release binaries are published for Linux and macOS only. TLS certificates, wildcard DNS, and reverse-proxy routing remain operator responsibilities.
+The `v0.15.0` release is pre-production. The gateway exposes operational endpoints on the same listener as wildcard tunnel traffic, proxy client IP handling depends on the deployment path, and supported public traffic is HTTP with reverse-proxy-provided HTTPS. The reference topology is a single gateway and control-plane node with Postgres. Release images are built locally from source, and release binaries are published for Linux and macOS only. TLS certificates, wildcard DNS, and reverse-proxy routing remain operator responsibilities.
 
 ## Installation
 
-Release binaries for `v0.14.0` are available for Linux and macOS on `amd64` and `arm64`. Windows users can build the CLI agent from source until Windows release packaging is added. See [docs/INSTALL.md](./docs/INSTALL.md) for download, checksum verification, installation, version checks, and `configcheck` usage.
+Release binaries for `v0.15.0` are available for Linux and macOS on `amd64` and `arm64`. Windows users can build the CLI agent from source until Windows release packaging is added. See [docs/INSTALL.md](./docs/INSTALL.md) for download, checksum verification, installation, version checks, and `configcheck` usage.
 
 ## Self-Hosted Quick Start
 

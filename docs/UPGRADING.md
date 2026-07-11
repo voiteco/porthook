@@ -2,6 +2,20 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.14.x to 0.15.x
+
+Version 0.15.x adds mandatory quality and security verification gates. It upgrades the source and container build toolchain to Go 1.26.5 and updates the Postgres driver dependency. It does not introduce a database migration or a public API change.
+
+Before upgrading a self-hosted deployment:
+
+1. Back up the Postgres volume or database and record the current `schema_migrations` state.
+2. Download release assets and verify `SHA256SUMS`, or build with Go 1.26.5 and run `make release-verify VERSION=<target-version>`.
+3. Deploy the control plane, gateway, dashboard assets, and CLI binaries together.
+4. Run `porthook-gateway configcheck --production` and `porthook-control-plane configcheck --production` with the environment used by each service.
+5. Run `make smoke-control-plane`, `make smoke-durable`, `make race`, and `make vulncheck` from the release source when validating a source-based deployment.
+
+Rollback to 0.14.x is code-only. No 0.15.x database migration needs to be reverted, but use the previous release artifacts and Go toolchain only for a deliberate rollback after preserving a current backup.
+
 ## Upgrade from 0.12.x to 0.14.x
 
 Version 0.14.x combines the release-stability, deployment-ergonomics, and scoped-admin-token changes after `0.12.x`. The existing `PORTHOOK_CONTROL_ADMIN_TOKEN` remains a full-scope bootstrap and recovery token, while routine CLI and dashboard sessions can use scoped admin tokens.
