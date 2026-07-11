@@ -38,6 +38,8 @@ Security-sensitive areas include:
 - TLS, reverse proxy, and deployment defaults
 - handling of secrets, logs, headers, and request metadata
 
+See [docs/THREAT_MODEL.md](./docs/THREAT_MODEL.md) for the supported v1 trust boundaries, attacker model, security requirements, and accepted risks.
+
 ## Disclosure Expectations
 
 Please give maintainers time to investigate and fix confirmed issues before public disclosure. Do not access, modify, or exfiltrate data that is not yours, and do not perform destructive testing against systems you do not control.
