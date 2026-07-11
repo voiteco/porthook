@@ -38,6 +38,14 @@ make smoke-durable
 
 The durable smoke test starts a temporary Postgres container, runs the control-plane smoke test with durable audit-event and gateway request-log storage, restarts the gateway and control plane, and verifies that operational history remains available after restart.
 
+To verify that `ip_allowlist` access policies use the original client address through a real reverse proxy:
+
+```sh
+make smoke-caddy-edge
+```
+
+The Caddy edge smoke test starts the control-plane-backed stack behind a local Caddy instance configured the same way as [deploy/reverse-proxy/caddy/Caddyfile](../deploy/reverse-proxy/caddy/Caddyfile), sends requests with a forged `X-Forwarded-For` header, and verifies that access decisions and request-log entries use the address Caddy actually observed rather than the header a client injects. Requires a `caddy` binary on `PATH` (`go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4`).
+
 Default automated ports can be overridden with:
 
 - `PORTHOOK_SMOKE_LOCAL_PORT`

@@ -12,7 +12,7 @@ PRODUCTION_COMPOSE_ENV ?= deploy/compose/.env.production
 BACKUP_DIR ?= backups
 BACKUP_FILE ?= $(BACKUP_DIR)/porthook_$(shell date -u +%Y%m%dT%H%M%SZ).sql
 
-.PHONY: build clean compose-backup compose-config compose-down compose-logs compose-ps compose-up compose-up-detached configcheck configcheck-production docker-build docker-build-control-plane docker-build-gateway fmt fmt-check production-hardening-check race release-build release-checksums release-verify smoke-control-plane smoke-durable smoke-local test vet vulncheck
+.PHONY: build clean compose-backup compose-config compose-down compose-logs compose-ps compose-up compose-up-detached configcheck configcheck-production docker-build docker-build-control-plane docker-build-gateway fmt fmt-check production-hardening-check race release-build release-checksums release-verify smoke-caddy-edge smoke-control-plane smoke-durable smoke-local test vet vulncheck
 
 build:
 	mkdir -p $(BIN_DIR)
@@ -106,6 +106,9 @@ smoke-control-plane:
 
 smoke-durable:
 	VERSION=$(VERSION) ./scripts/smoke-durable.sh
+
+smoke-caddy-edge:
+	VERSION=$(VERSION) ./scripts/smoke-caddy-edge.sh
 
 test:
 	$(GO) test ./...

@@ -16,7 +16,7 @@ import (
 
 const accessUsageText = `usage: porthook access create --control-plane URL --reserved-subdomain-id ID --mode MODE [policy options] [--admin-token TOKEN | --admin-token-stdin] [--json]
        porthook access list --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--json]
-       porthook access update --control-plane URL [--admin-token TOKEN | --admin-token-stdin] POLICY_ID [policy options] [--json]
+       porthook access update --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [policy options] POLICY_ID [--json]
        porthook access delete --control-plane URL [--admin-token TOKEN | --admin-token-stdin] POLICY_ID [--json]
        porthook access help`
 
@@ -248,7 +248,7 @@ func parseAccessUpdateConfig(args []string, stdin io.Reader, stderr io.Writer) (
 		return accessPolicyUpdateConfig{}, err
 	}
 	if fs.NArg() != 1 {
-		return accessPolicyUpdateConfig{}, fmt.Errorf("usage: porthook access update --control-plane URL [--admin-token TOKEN | --admin-token-stdin] POLICY_ID [policy options]")
+		return accessPolicyUpdateConfig{}, fmt.Errorf("usage: porthook access update --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [policy options] POLICY_ID")
 	}
 	cfg.id = strings.TrimSpace(fs.Arg(0))
 	if cfg.id == "" {
@@ -462,7 +462,7 @@ Options:
 }
 
 func printAccessUpdateHelp(w io.Writer) {
-	fmt.Fprintln(w, `usage: porthook access update --control-plane URL [--admin-token TOKEN | --admin-token-stdin] POLICY_ID [policy options] [--json]
+	fmt.Fprintln(w, `usage: porthook access update --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [policy options] POLICY_ID [--json]
 
 Update an access policy. Omitted secret values are preserved when the mode stays unchanged.
 

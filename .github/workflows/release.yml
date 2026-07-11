@@ -66,6 +66,12 @@ jobs:
       - name: Run durable smoke test
         run: make smoke-durable VERSION="$VERSION"
 
+      - name: Install Caddy
+        run: go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4
+
+      - name: Run Caddy edge smoke test
+        run: make smoke-caddy-edge VERSION="$VERSION"
+
       - name: Build release binaries
         run: make release-build VERSION="$VERSION"
 
