@@ -26,7 +26,7 @@ COPY --from=build /out/porthook-gateway /porthook-gateway
 
 USER 65532:65532
 
-EXPOSE 8080 8081
+EXPOSE 8080 8081 8082
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD ["/porthook-gateway", "healthcheck"]
 

@@ -26,11 +26,11 @@ The gateway can run in two authentication modes:
 Minimal production shape:
 
 1. Run Postgres.
-2. Run `porthook-control-plane` with `PORTHOOK_DATABASE_URL`, `PORTHOOK_CONTROL_ADMIN_TOKEN`, and `PORTHOOK_CONTROL_VALIDATOR_TOKEN`.
+2. Run `porthook-control-plane` with `PORTHOOK_DATABASE_URL`, `PORTHOOK_CONTROL_ADMIN_TOKEN`, `PORTHOOK_CONTROL_VALIDATOR_TOKEN`, and private gateway management configuration.
 3. Create a scoped routine admin token with `printf '%s' '<bootstrap-admin-token>' | porthook admin tokens create --control-plane <control-plane-url> --admin-token-stdin --name '<operator-name>' --scope tokens --scope reservations --scope audit_history`.
 4. Create an agent token with `printf '%s' '<admin-token>' | porthook tokens create --control-plane <control-plane-url> --admin-token-stdin --name '<agent-name>'`.
 5. Reserve any requested subdomain with `printf '%s' '<admin-token>' | porthook reserved create --control-plane <control-plane-url> --admin-token-stdin --name <subdomain> --token-id <token-id>`.
-6. Run `porthook-gateway` with `PORTHOOK_CONTROL_PLANE_URL` pointing at the control plane and `PORTHOOK_CONTROL_PLANE_TOKEN` matching the control-plane validator token.
+6. Run `porthook-gateway` with `PORTHOOK_CONTROL_PLANE_URL` pointing at the control plane, `PORTHOOK_CONTROL_PLANE_TOKEN` matching the validator token, and a private `PORTHOOK_MANAGEMENT_ADDR` protected by the management token shared only with the control plane.
 7. Save the local agent login with `printf '%s' '<created-token>' | porthook login --server <gateway-agent-url> --token-stdin`.
 
 The control-plane process also serves the self-hosted dashboard at `/dashboard/` on the control-plane listener. It accepts the bootstrap admin token or scoped admin tokens.
@@ -51,7 +51,7 @@ Operators still need to configure wildcard DNS and TLS in front of the public ga
 
 Before using the Compose control-plane stack beyond local testing:
 
-- Replace every `change-me` value with a generated secret. Use separate values for `PORTHOOK_POSTGRES_PASSWORD`, bootstrap `PORTHOOK_CONTROL_ADMIN_TOKEN`, and `PORTHOOK_CONTROL_VALIDATOR_TOKEN`.
+- Replace every `change-me` value with a generated secret. Use separate values for `PORTHOOK_POSTGRES_PASSWORD`, bootstrap `PORTHOOK_CONTROL_ADMIN_TOKEN`, `PORTHOOK_CONTROL_VALIDATOR_TOKEN`, and `PORTHOOK_GATEWAY_MANAGEMENT_TOKEN`.
 - Treat `PORTHOOK_CONTROL_ADMIN_TOKEN` as a full-scope bootstrap/recovery token and use scoped admin tokens for routine operations.
 - Keep `.env.control-plane` out of Git. The repository ignores `.env.*` files except checked-in examples.
 - Configure `PORTHOOK_ROOT_DOMAIN` for the wildcard domain routed to the public gateway.

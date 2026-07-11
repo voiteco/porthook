@@ -91,6 +91,8 @@ def volume_source_for(service, target):
 
 def require_caddy_control_headers(path):
     text = Path(path).read_text(encoding="utf-8")
+    if "reverse_proxy porthook-gateway:8082" in text:
+        fail(f"{path} must not route the private gateway management listener")
     for header in (
         "X-Content-Type-Options nosniff",
         "X-Frame-Options DENY",
@@ -111,7 +113,7 @@ proxy = require_service(default, "reverse-proxy")
 require_no_host_ports(gateway, "porthook-gateway")
 require_no_host_ports(control, "porthook-control-plane")
 require_no_host_ports(postgres, "postgres")
-require_exposes(gateway, "porthook-gateway", {"8080", "8081"})
+require_exposes(gateway, "porthook-gateway", {"8080", "8081", "8082"})
 require_exposes(control, "porthook-control-plane", {"8082"})
 require_hardened_service(gateway, "porthook-gateway")
 require_hardened_service(control, "porthook-control-plane")
@@ -156,14 +158,25 @@ gateway_env = gateway.get("environment", {})
 control_env = control.get("environment", {})
 admin_token = control_env.get("PORTHOOK_CONTROL_ADMIN_TOKEN")
 validator_token = control_env.get("PORTHOOK_CONTROL_VALIDATOR_TOKEN")
+management_token = control_env.get("PORTHOOK_GATEWAY_MANAGEMENT_TOKEN")
 if not admin_token:
     fail("control plane must receive PORTHOOK_CONTROL_ADMIN_TOKEN")
 if not validator_token:
     fail("control plane must receive PORTHOOK_CONTROL_VALIDATOR_TOKEN")
 if admin_token == validator_token:
     fail("control-plane admin and validator tokens must be different")
+if not management_token:
+    fail("control plane must receive PORTHOOK_GATEWAY_MANAGEMENT_TOKEN")
+if management_token in {admin_token, validator_token}:
+    fail("gateway management token must differ from admin and validator tokens")
 if not control_env.get("PORTHOOK_DATABASE_URL"):
     fail("control plane must use a durable PORTHOOK_DATABASE_URL")
+if control_env.get("PORTHOOK_GATEWAY_MANAGEMENT_URL") != "http://porthook-gateway:8082":
+    fail("control plane must use the internal gateway management URL")
+if gateway_env.get("PORTHOOK_MANAGEMENT_ADDR") != ":8082":
+    fail("gateway must bind its management listener on the private Compose port")
+if gateway_env.get("PORTHOOK_MANAGEMENT_TOKEN") != management_token:
+    fail("gateway and control plane must use the same management token")
 if gateway_env.get("PORTHOOK_CONTROL_PLANE_TOKEN") != validator_token:
     fail("gateway must use the same validator token as the control plane")
 if gateway_env.get("PORTHOOK_CONTROL_PLANE_URL") != "http://porthook-control-plane:8082":

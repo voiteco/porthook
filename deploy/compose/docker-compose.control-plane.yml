@@ -25,6 +25,8 @@ services:
       PORTHOOK_CONTROL_ADDR: ":8082"
       PORTHOOK_CONTROL_ADMIN_TOKEN: ${PORTHOOK_CONTROL_ADMIN_TOKEN:-change-me-admin-token}
       PORTHOOK_CONTROL_VALIDATOR_TOKEN: ${PORTHOOK_CONTROL_VALIDATOR_TOKEN:-change-me-validator-token}
+      PORTHOOK_GATEWAY_MANAGEMENT_URL: http://gateway:8082
+      PORTHOOK_GATEWAY_MANAGEMENT_TOKEN: ${PORTHOOK_GATEWAY_MANAGEMENT_TOKEN:-change-me-management-token}
       PORTHOOK_DATABASE_URL: postgres://porthook:${PORTHOOK_POSTGRES_PASSWORD:-change-me-postgres-password}@postgres:5432/porthook?sslmode=disable
       PORTHOOK_OTEL_ENABLED: ${PORTHOOK_OTEL_ENABLED:-}
       PORTHOOK_OTEL_EXPORTER: ${PORTHOOK_OTEL_EXPORTER:-}
@@ -57,6 +59,8 @@ services:
     environment:
       PORTHOOK_ADDR: ":8080"
       PORTHOOK_AGENT_ADDR: ":8081"
+      PORTHOOK_MANAGEMENT_ADDR: ":8082"
+      PORTHOOK_MANAGEMENT_TOKEN: ${PORTHOOK_GATEWAY_MANAGEMENT_TOKEN:-change-me-management-token}
       PORTHOOK_ROOT_DOMAIN: ${PORTHOOK_ROOT_DOMAIN:-localhost}
       PORTHOOK_PUBLIC_URL: ${PORTHOOK_PUBLIC_URL:-http://localhost:8080}
       PORTHOOK_STATIC_TOKEN: unused-static-token
@@ -76,6 +80,8 @@ services:
     ports:
       - "${PORTHOOK_PUBLIC_PORT:-8080}:8080"
       - "${PORTHOOK_AGENT_PORT:-8081}:8081"
+    expose:
+      - "8082"
     read_only: true
     cap_drop:
       - ALL

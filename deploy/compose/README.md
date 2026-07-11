@@ -41,7 +41,7 @@ Copy the example environment file and replace every `change-me` value before usi
 cp deploy/compose/.env.control-plane.example deploy/compose/.env.control-plane
 ```
 
-Generate separate values for the Postgres password, bootstrap control-plane admin token, and gateway validator token:
+Generate separate values for the Postgres password, bootstrap control-plane admin token, gateway validator token, and gateway management token:
 
 ```sh
 openssl rand -base64 32
@@ -62,6 +62,7 @@ Required local environment values:
 | `PORTHOOK_POSTGRES_PASSWORD` | Password for the Compose Postgres user and database URL. |
 | `PORTHOOK_CONTROL_ADMIN_TOKEN` | Full-scope bootstrap/recovery admin bearer token. Use it to create scoped admin tokens for routine operations. |
 | `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | Shared bearer token used by the gateway when validating agent tokens through the control plane. |
+| `PORTHOOK_GATEWAY_MANAGEMENT_TOKEN` | Service bearer token used only by the control plane for private gateway management requests. |
 | `PORTHOOK_ROOT_DOMAIN` | Root domain used for tunnel subdomains. Use `localhost` for local smoke testing. |
 | `PORTHOOK_PUBLIC_URL` | Public base URL printed by the gateway when a tunnel is registered. |
 | `PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL` | Gateway cache TTL for active custom-domain mappings. |
@@ -90,6 +91,7 @@ The stack listens on:
 - dashboard: `http://localhost:8082/dashboard/`
 
 Postgres is available only inside the Compose network as `postgres:5432`.
+Gateway management is available only inside that network as `gateway:8082`; the control plane proxies scoped operator requests to it.
 The gateway and control-plane containers define readiness healthchecks, and the gateway waits for a healthy control plane before starting.
 
 ## Production Stack
@@ -152,7 +154,7 @@ The stack listens externally on:
 - agent WebSocket endpoint: `https://<PORTHOOK_AGENT_DOMAIN>/agent/connect`
 - control-plane API and dashboard: `https://<PORTHOOK_CONTROL_DOMAIN>`
 
-The gateway, control plane, and Postgres are only reachable inside the Compose network.
+The gateway, control plane, and Postgres are only reachable inside the Compose network. Caddy does not route the gateway management listener.
 The gateway and control-plane services expose container healthchecks, and the reverse proxy waits for both services to become healthy.
 
 ## Dashboard
@@ -165,7 +167,7 @@ http://localhost:8082/dashboard/
 
 Use the configured bootstrap token or a scoped admin token to log in. The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token.
 
-The dashboard can create, list, and revoke scoped admin tokens and agent tokens, reserve requested subdomains for tokens, manage custom domains and access policies, and show active gateway tunnels and request logs from the gateway public API. Plaintext admin and agent tokens are displayed only from create responses. Token tables include creation time, last successful validation time, and revocation status.
+The dashboard can create, list, and revoke scoped admin tokens and agent tokens, reserve requested subdomains for tokens, manage custom domains and access policies, and show active gateway tunnels and request logs through authenticated control-plane operator APIs. Plaintext admin and agent tokens are displayed only from create responses. Token tables include creation time, last successful validation time, and revocation status.
 
 Create a scoped admin token for routine use:
 

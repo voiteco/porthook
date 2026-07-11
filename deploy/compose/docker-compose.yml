@@ -7,6 +7,7 @@ services:
     environment:
       PORTHOOK_ADDR: ":8080"
       PORTHOOK_AGENT_ADDR: ":8081"
+      PORTHOOK_MANAGEMENT_ADDR: ":8082"
       PORTHOOK_ROOT_DOMAIN: localhost
       PORTHOOK_PUBLIC_URL: http://localhost:8080
       PORTHOOK_STATIC_TOKEN: dev-token
@@ -15,6 +16,8 @@ services:
     ports:
       - "8080:8080"
       - "8081:8081"
+    expose:
+      - "8082"
     read_only: true
     cap_drop:
       - ALL
