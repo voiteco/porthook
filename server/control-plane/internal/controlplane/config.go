@@ -21,6 +21,7 @@ type Config struct {
 	GatewayManagementURL     string
 	GatewayManagementToken   string
 	GatewayManagementTimeout time.Duration
+	TrustedProxies           string
 	DatabaseURL              string
 	Version                  string
 	AuditEventRetention      time.Duration
@@ -35,6 +36,7 @@ func ConfigFromEnv() Config {
 		GatewayManagementURL:     os.Getenv("PORTHOOK_GATEWAY_MANAGEMENT_URL"),
 		GatewayManagementToken:   os.Getenv("PORTHOOK_GATEWAY_MANAGEMENT_TOKEN"),
 		GatewayManagementTimeout: envDuration("PORTHOOK_GATEWAY_MANAGEMENT_TIMEOUT", defaultGatewayManagementTimeout),
+		TrustedProxies:           os.Getenv("PORTHOOK_TRUSTED_PROXIES"),
 		DatabaseURL:              os.Getenv("PORTHOOK_DATABASE_URL"),
 		AuditEventRetention:      envDuration("PORTHOOK_AUDIT_EVENT_RETENTION", defaultAuditEventRetention),
 		AuditEventPruneInterval:  envDuration("PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL", defaultAuditEventPruneInterval),

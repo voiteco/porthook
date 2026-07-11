@@ -25,6 +25,7 @@ import (
 	"github.com/voiteco/porthook/protocol/names"
 	"github.com/voiteco/porthook/protocol/wswire"
 	"github.com/voiteco/porthook/server/gateway/internal/registry"
+	"github.com/voiteco/porthook/server/internal/clientip"
 	"github.com/voiteco/porthook/server/internal/requestid"
 	"github.com/voiteco/porthook/server/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -49,6 +50,7 @@ type Server struct {
 	startedAt       time.Time
 	requestLogs     *requestLogBuffer
 	requestLogStore requestLogWriter
+	clientIPs       clientip.Resolver
 
 	sessionsMu sync.RWMutex
 	sessions   map[string]*agentSession
@@ -93,6 +95,11 @@ func newServerWithRequestLogWriter(cfg Config, logger *slog.Logger, requestLogSt
 		logger.Warn("gateway custom domain resolver configuration failed", "event", "gateway.custom_domain_resolver_config_failed", "error", err)
 		customDomainResolver = errorCustomDomainResolver{err: err}
 	}
+	trustedProxies, err := clientip.ParseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		logger.Warn("gateway trusted proxy configuration failed", "event", "gateway.trusted_proxy_config_failed", "error", err)
+		trustedProxies = nil
+	}
 
 	return &Server{
 		cfg:             cfg,
@@ -105,6 +112,7 @@ func newServerWithRequestLogWriter(cfg Config, logger *slog.Logger, requestLogSt
 		startedAt:       time.Now().UTC(),
 		requestLogs:     newRequestLogBuffer(cfg.RequestLogLimit),
 		requestLogStore: requestLogStore,
+		clientIPs:       clientip.New(trustedProxies),
 		sessions:        make(map[string]*agentSession),
 
 		generateSubdomain: names.RandomSubdomain,
@@ -223,13 +231,13 @@ func (s *Server) pruneRequestLogs(ctx context.Context, pruner requestLogPruner) 
 func (s *Server) PublicHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handlePublicRequest)
-	return requestid.Middleware(telemetry.HTTPHandler(mux, "gateway.public"))
+	return requestid.Middleware(telemetry.HTTPHandler(s.withClientIPTrace(mux), "gateway.public"))
 }
 
 func (s *Server) AgentHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(agentWebSocketPath, s.handleAgentWebSocket)
-	return requestid.Middleware(telemetry.HTTPHandler(mux, "gateway.agent"))
+	return requestid.Middleware(telemetry.HTTPHandler(s.withClientIPTrace(mux), "gateway.agent"))
 }
 
 func (s *Server) ManagementHandler() http.Handler {
@@ -251,7 +259,7 @@ func (s *Server) ManagementHandler() http.Handler {
 	mux.HandleFunc("/api/v1/runtime", s.requireManagementAuth(s.handleRuntimeSummary))
 	mux.HandleFunc("/api/v1/request-logs", s.requireManagementAuth(s.handleRequestLogs))
 	mux.HandleFunc("/metrics", s.requireManagementAuth(s.handleMetrics))
-	return requestid.Middleware(telemetry.HTTPHandler(mux, "gateway.management"))
+	return requestid.Middleware(telemetry.HTTPHandler(s.withClientIPTrace(mux), "gateway.management"))
 }
 
 func (s *Server) requireManagementAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -272,7 +280,7 @@ func (s *Server) requireManagementAuth(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
-		attrs := requestAuditAttrs(r, "gateway.agent_websocket_accept_failed")
+		attrs := s.requestAuditAttrs(r, "gateway.agent_websocket_accept_failed")
 		attrs = append(attrs, slog.Any("error", err))
 		s.logger.LogAttrs(r.Context(), slog.LevelWarn, "agent websocket accept failed", attrs...)
 		return
@@ -286,7 +294,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	identity, err := s.authenticateAgent(ctx, conn)
 	if err != nil {
 		s.metrics.authFailuresTotal.Add(1)
-		attrs := requestAuditAttrs(r, "gateway.agent_auth_failed")
+		attrs := s.requestAuditAttrs(r, "gateway.agent_auth_failed")
 		attrs = append(attrs, slog.Any("error", err))
 		s.logger.LogAttrs(r.Context(), slog.LevelWarn, "agent authentication failed", attrs...)
 		_ = conn.Close(websocket.StatusPolicyViolation, "authentication failed")
@@ -296,7 +304,7 @@ func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
 	session, err := s.registerTunnel(ctx, conn, identity)
 	if err != nil {
 		s.metrics.tunnelRegistrationFailuresTotal.Add(1)
-		attrs := requestAuditAttrs(r, "gateway.tunnel_registration_failed")
+		attrs := s.requestAuditAttrs(r, "gateway.tunnel_registration_failed")
 		attrs = append(attrs, slog.String("token_id", identity.TokenID), slog.Any("error", err))
 		s.logger.LogAttrs(r.Context(), slog.LevelWarn, "tunnel registration failed", attrs...)
 		_ = conn.Close(websocket.StatusPolicyViolation, "registration failed")
@@ -910,7 +918,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 			ResponseBytes: responseBytes,
 			Error:         requestErr,
 		}
-		logEntry := requestLogEntryFromPublicRequest(r, entry)
+		logEntry := requestLogEntryFromPublicRequest(r, entry, s.clientIP(r))
 		s.logPublicRequest(r, entry)
 		s.recordRequestLog(logEntry)
 		s.recordPublicRequestMetrics(status, outcome)
@@ -997,7 +1005,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		session.tunnel.TunnelID,
 		r.Host,
 		requestProto(r),
-		remoteIP(r.RemoteAddr),
+		s.clientIP(r),
 	)
 
 	contentLength := r.ContentLength
@@ -1097,7 +1105,7 @@ func (s *Server) evaluatePublicAccess(r *http.Request, subdomain string) (access
 	username, password, _ := r.BasicAuth()
 	evaluation := accessPolicyEvaluationRequest{
 		Subdomain:     subdomain,
-		RemoteIP:      remoteIP(r.RemoteAddr),
+		RemoteIP:      s.clientIP(r),
 		BasicUsername: username,
 		BasicPassword: password,
 		BearerToken:   bearerToken(r),
@@ -1212,7 +1220,7 @@ func (s *Server) logPublicRequest(r *http.Request, entry publicRequestLog) {
 		slog.String("host", r.Host),
 		slog.String("path", r.URL.Path),
 		slog.Bool("query_present", r.URL.RawQuery != ""),
-		slog.String("remote_ip", remoteIP(r.RemoteAddr)),
+		slog.String("remote_ip", s.clientIP(r)),
 		slog.String("subdomain", entry.Subdomain),
 		slog.String("custom_domain", entry.CustomDomain),
 		slog.String("tunnel_id", entry.TunnelID),
@@ -1514,20 +1522,23 @@ func serveHTTP(errCh chan<- error, server *http.Server) {
 	}
 }
 
-func remoteIP(remoteAddr string) string {
-	host, _, err := net.SplitHostPort(remoteAddr)
-	if err == nil {
-		return host
-	}
-	return remoteAddr
+func (s *Server) clientIP(r *http.Request) string {
+	return s.clientIPs.ResolveString(r)
 }
 
-func requestAuditAttrs(r *http.Request, event string) []slog.Attr {
+func (s *Server) withClientIPTrace(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		telemetry.SetSpanAttributes(r.Context(), attribute.String("porthook.client_ip", s.clientIP(r)))
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) requestAuditAttrs(r *http.Request, event string) []slog.Attr {
 	attrs := []slog.Attr{
 		slog.String("event", event),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
-		slog.String("remote_ip", remoteIP(r.RemoteAddr)),
+		slog.String("remote_ip", s.clientIP(r)),
 	}
 	if id := requestID(r); id != "" {
 		attrs = append(attrs, slog.String("request_id", id))

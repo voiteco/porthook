@@ -37,6 +37,26 @@ func TestConfigFromEnvSupportsGatewayManagement(t *testing.T) {
 	}
 }
 
+func TestConfigFromEnvSupportsTrustedProxies(t *testing.T) {
+	t.Setenv("PORTHOOK_TRUSTED_PROXIES", "10.0.0.0/8,2001:db8::/32")
+
+	if got := ConfigFromEnv().TrustedProxies; got != "10.0.0.0/8,2001:db8::/32" {
+		t.Fatalf("TrustedProxies = %q", got)
+	}
+}
+
+func TestValidateConfigRejectsInvalidTrustedProxies(t *testing.T) {
+	cfg := Config{TrustedProxies: "invalid"}
+
+	report := ValidateConfig(cfg, ConfigValidationOptions{})
+	for _, issue := range report.Errors {
+		if issue.Field == "PORTHOOK_TRUSTED_PROXIES" {
+			return
+		}
+	}
+	t.Fatalf("errors = %+v, want PORTHOOK_TRUSTED_PROXIES error", report.Errors)
+}
+
 func TestValidateConfigRequiresGatewayManagementToken(t *testing.T) {
 	cfg := Config{
 		GatewayManagementURL:     "http://gateway:8082",

@@ -236,14 +236,14 @@ func (b *requestLogBuffer) PruneBefore(_ context.Context, cutoff time.Time) (int
 	return int64(count - len(retained)), nil
 }
 
-func requestLogEntryFromPublicRequest(r *http.Request, entry publicRequestLog) requestLogEntry {
+func requestLogEntryFromPublicRequest(r *http.Request, entry publicRequestLog, clientIP string) requestLogEntry {
 	out := requestLogEntry{
 		Time:          entry.Started,
 		Method:        r.Method,
 		Host:          r.Host,
 		Path:          r.URL.Path,
 		QueryPresent:  r.URL.RawQuery != "",
-		RemoteIP:      remoteIP(r.RemoteAddr),
+		RemoteIP:      clientIP,
 		RequestID:     requestID(r),
 		Subdomain:     entry.Subdomain,
 		CustomDomain:  entry.CustomDomain,

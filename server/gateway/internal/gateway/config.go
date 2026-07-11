@@ -44,6 +44,7 @@ type Config struct {
 	AgentAddr                  string
 	ManagementAddr             string
 	ManagementToken            string
+	TrustedProxies             string
 	RootDomain                 string
 	PublicURL                  string
 	StaticToken                string
@@ -80,6 +81,7 @@ func ConfigFromEnv() Config {
 		AgentAddr:                  envString("PORTHOOK_AGENT_ADDR", defaultAgentAddr),
 		ManagementAddr:             envString("PORTHOOK_MANAGEMENT_ADDR", defaultManagementAddr),
 		ManagementToken:            envString("PORTHOOK_MANAGEMENT_TOKEN", ""),
+		TrustedProxies:             envString("PORTHOOK_TRUSTED_PROXIES", ""),
 		RootDomain:                 envString("PORTHOOK_ROOT_DOMAIN", defaultRootDomain),
 		PublicURL:                  envString("PORTHOOK_PUBLIC_URL", defaultPublicURL),
 		StaticToken:                envString("PORTHOOK_STATIC_TOKEN", defaultStaticToken),

@@ -59,6 +59,34 @@ func TestHandlerReturnsRequestIDHeader(t *testing.T) {
 	}
 }
 
+func TestAuditLogUsesResolvedClientIP(t *testing.T) {
+	store := NewMemoryAuditEventStore(10)
+	server := NewServerWithAuditEvents(
+		Config{AdminToken: "admin-secret", TrustedProxies: "10.0.0.0/8"},
+		tokens.NewService(tokens.NewMemoryStore()),
+		reserved.NewService(reserved.NewMemoryStore()),
+		access.NewService(access.NewMemoryStore()),
+		customdomains.NewService(customdomains.NewMemoryStore()),
+		store,
+	)
+	req := httptest.NewRequest(http.MethodGet, "http://control.example.test/api/v1/tokens", nil)
+	req.RemoteAddr = "10.0.0.3:443"
+	req.Header.Set("X-Forwarded-For", "198.51.100.10, 10.0.0.2")
+
+	server.Handler().ServeHTTP(httptest.NewRecorder(), req)
+
+	page, err := store.List(context.Background(), AuditEventListOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("List returned error: %v", err)
+	}
+	if len(page.Events) != 1 {
+		t.Fatalf("events = %d, want 1", len(page.Events))
+	}
+	if got := page.Events[0].RemoteIP; got != "198.51.100.10" {
+		t.Fatalf("RemoteIP = %q, want resolved client", got)
+	}
+}
+
 func TestAuditEventsEndpointReturnsRecentEvents(t *testing.T) {
 	server := NewServer(Config{AdminToken: "admin-secret"}, tokens.NewService(tokens.NewMemoryStore()))
 	httpServer := httptest.NewServer(server.Handler())

@@ -35,6 +35,7 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_AGENT_ADDR` | `:8081` | Agent WebSocket listener address. |
 | `PORTHOOK_MANAGEMENT_ADDR` | `:8082` | Management HTTP listener address. Keep this listener on a private network. |
 | `PORTHOOK_MANAGEMENT_TOKEN` | empty | Bearer token required by management data and metrics endpoints. Required by production configuration validation. |
+| `PORTHOOK_TRUSTED_PROXIES` | empty | Comma- or space-separated proxy IPs/CIDRs allowed to supply `X-Forwarded-For` or `X-Real-IP`. Forwarded client headers are ignored when the direct peer is not trusted. |
 | `PORTHOOK_ROOT_DOMAIN` | `localhost` | Root domain used for subdomain routing. |
 | `PORTHOOK_PUBLIC_URL` | `http://localhost:8080` | Base public URL printed by the agent. |
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` | Static agent authentication token. |
@@ -93,6 +94,8 @@ The container image includes `porthook-gateway healthcheck`, which calls `/ready
 Gateway logs are structured text logs written to stdout. Operational logs include an `event` field such as `gateway.public_request`, `gateway.tunnel_registered`, `gateway.agent_auth_failed`, and `gateway.agent_keepalive_failed`.
 
 Public request logs include method, host, path, whether a query string was present, route outcome, custom-domain routing state, status, tunnel ID, stream ID, byte counts, duration, remote IP, and optional `request_id` from `X-Request-ID` or `X-Correlation-ID`. Raw query strings and token values are not logged.
+
+Client IP resolution starts with the direct TCP peer. When that peer matches `PORTHOOK_TRUSTED_PROXIES`, the gateway walks `X-Forwarded-For` from right to left and selects the first untrusted address, with `X-Real-IP` as a fallback when no forwarded chain is present. The resolved address is used for access policies, forwarded application headers, request logs, audit logs, and trace attributes.
 
 When `PORTHOOK_CONTROL_PLANE_URL` is configured, requested subdomains require an existing control-plane reservation owned by the validated token. Agents that omit `--subdomain` still receive random subdomains without a reservation.
 

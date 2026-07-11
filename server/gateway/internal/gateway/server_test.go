@@ -683,7 +683,9 @@ func TestAgentWebSocketRetriesRandomSubdomainCollision(t *testing.T) {
 }
 
 func TestPublicRequestRoundTrip(t *testing.T) {
-	server := NewServer(testConfig(), slog.Default())
+	cfg := testConfig()
+	cfg.TrustedProxies = "127.0.0.0/8"
+	server := NewServer(cfg, slog.Default())
 	agentServer := httptest.NewServer(server.AgentHandler())
 	defer agentServer.Close()
 	publicServer := httptest.NewServer(server.PublicHandler())
@@ -725,6 +727,10 @@ func TestPublicRequestRoundTrip(t *testing.T) {
 			agentErr <- errString("tunnel header was not added")
 			return
 		}
+		if payload.Header.Get("X-Forwarded-For") != "198.51.100.10" {
+			agentErr <- errString("resolved client IP was not forwarded")
+			return
+		}
 		if string(body) != "payload" {
 			agentErr <- errString("request body was not forwarded")
 			return
@@ -751,6 +757,7 @@ func TestPublicRequestRoundTrip(t *testing.T) {
 	}
 	req.Host = "demo.localhost"
 	req.Header.Set("Connection", "close")
+	req.Header.Set("X-Forwarded-For", "198.51.100.10")
 
 	resp, err := publicServer.Client().Do(req)
 	if err != nil {
@@ -1670,6 +1677,53 @@ func TestPublicRequestRejectsLargeBody(t *testing.T) {
 
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+}
+
+func TestPublicRequestLogsResolvedClientIP(t *testing.T) {
+	tests := []struct {
+		name           string
+		trustedProxies string
+		remoteAddr     string
+		forwardedFor   string
+		want           string
+	}{
+		{
+			name:           "trusted proxy chain",
+			trustedProxies: "10.0.0.0/8",
+			remoteAddr:     "10.0.0.3:443",
+			forwardedFor:   "198.51.100.10, 10.0.0.2",
+			want:           "198.51.100.10",
+		},
+		{
+			name:         "untrusted spoof",
+			remoteAddr:   "203.0.113.9:443",
+			forwardedFor: "198.51.100.10",
+			want:         "203.0.113.9",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := testConfig()
+			cfg.TrustedProxies = tt.trustedProxies
+			cfg.RequestLogLimit = 10
+			server := NewServer(cfg, slog.Default())
+			req := httptest.NewRequest(http.MethodGet, "http://missing.localhost/client-ip", nil)
+			req.Host = "missing.localhost"
+			req.RemoteAddr = tt.remoteAddr
+			req.Header.Set("X-Forwarded-For", tt.forwardedFor)
+
+			server.PublicHandler().ServeHTTP(httptest.NewRecorder(), req)
+
+			logs := server.requestLogs.list(1)
+			if len(logs) != 1 {
+				t.Fatalf("request logs = %d, want 1", len(logs))
+			}
+			if got := logs[0].RemoteIP; got != tt.want {
+				t.Fatalf("RemoteIP = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

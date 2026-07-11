@@ -72,6 +72,7 @@ Health, readiness, metrics, tunnel inventory, and runtime require `runtime_diagn
 | `PORTHOOK_GATEWAY_MANAGEMENT_URL` | empty | Private gateway management base URL used by authenticated operator APIs. Required by production configuration validation. |
 | `PORTHOOK_GATEWAY_MANAGEMENT_TOKEN` | empty | Service bearer token used only for control-plane-to-gateway management requests. Required when the management URL is configured. |
 | `PORTHOOK_GATEWAY_MANAGEMENT_TIMEOUT` | `5s` | Timeout for gateway management requests. |
+| `PORTHOOK_TRUSTED_PROXIES` | empty | Comma- or space-separated proxy IPs/CIDRs allowed to supply `X-Forwarded-For` or `X-Real-IP`. Forwarded client headers are ignored when the direct peer is not trusted. |
 | `PORTHOOK_DATABASE_URL` | empty | Postgres connection URL. If empty, the process uses in-memory storage for development. |
 | `PORTHOOK_AUDIT_EVENT_RETENTION` | `2160h` | Control-plane audit event retention window. Set `0s` to disable audit event pruning. |
 | `PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL` | `1h` | How often the control plane prunes audit events older than the retention window. Set `0s` to disable the pruning worker. |
@@ -82,6 +83,8 @@ Health, readiness, metrics, tunnel inventory, and runtime require `runtime_diagn
 | `PORTHOOK_OTEL_PROTOCOL` | `http/protobuf` | OTLP protocol when using `PORTHOOK_OTEL_EXPORTER=otlp`: `http/protobuf` or `grpc`. |
 
 When Postgres is configured, `porthook-control-plane` applies embedded versioned migrations at startup and records applied versions in `schema_migrations`.
+
+Control-plane audit events and trace attributes use the direct TCP peer by default. When the peer matches `PORTHOOK_TRUSTED_PROXIES`, the control plane walks `X-Forwarded-For` from right to left and records the first untrusted address, with `X-Real-IP` as a fallback.
 
 OpenTelemetry tracing is disabled by default. See [../../docs/OBSERVABILITY.md](../../docs/OBSERVABILITY.md) for OTLP and stdout trace exporter configuration.
 

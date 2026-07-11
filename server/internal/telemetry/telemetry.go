@@ -111,6 +111,13 @@ func HTTPTransport(base http.RoundTripper) http.RoundTripper {
 	return otelhttp.NewTransport(base)
 }
 
+func SetSpanAttributes(ctx context.Context, attrs ...attribute.KeyValue) {
+	span := trace.SpanFromContext(ctx)
+	if span.IsRecording() {
+		span.SetAttributes(attrs...)
+	}
+}
+
 func RecordSpan(ctx context.Context, status int, outcome string, err error, attrs ...attribute.KeyValue) {
 	span := trace.SpanFromContext(ctx)
 	if !span.IsRecording() {

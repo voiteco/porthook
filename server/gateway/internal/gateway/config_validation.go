@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/voiteco/porthook/server/internal/clientip"
 )
 
 type ConfigValidationOptions struct {
@@ -47,6 +49,9 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	}
 	if err := validateListenAddr(cfg.ManagementAddr); err != nil {
 		addError("PORTHOOK_MANAGEMENT_ADDR", err.Error())
+	}
+	if _, err := clientip.ParseTrustedProxies(cfg.TrustedProxies); err != nil {
+		addError("PORTHOOK_TRUSTED_PROXIES", err.Error())
 	}
 	if strings.TrimSpace(cfg.ManagementToken) == "" {
 		if opts.Production {

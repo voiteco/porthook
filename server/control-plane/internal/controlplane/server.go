@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -22,8 +21,10 @@ import (
 	"github.com/voiteco/porthook/server/control-plane/internal/reserved"
 	"github.com/voiteco/porthook/server/control-plane/internal/tokens"
 	"github.com/voiteco/porthook/server/dashboard"
+	"github.com/voiteco/porthook/server/internal/clientip"
 	"github.com/voiteco/porthook/server/internal/requestid"
 	"github.com/voiteco/porthook/server/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type Server struct {
@@ -38,6 +39,7 @@ type Server struct {
 	startedAt         time.Time
 	auditEvents       AuditEventStore
 	gatewayHTTPClient *http.Client
+	clientIPs         clientip.Resolver
 }
 
 type validateTokenRequest struct {
@@ -147,6 +149,11 @@ func NewServerWithAdminTokens(cfg Config, service *tokens.Service, reservationSe
 	if adminTokenService == nil {
 		adminTokenService = admintokens.NewService(admintokens.NewMemoryStore())
 	}
+	trustedProxies, err := clientip.ParseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		slog.Default().Warn("control-plane trusted proxy configuration failed", "event", "control_plane.trusted_proxy_config_failed", "error", err)
+		trustedProxies = nil
+	}
 	return &Server{
 		cfg:               cfg,
 		service:           service,
@@ -158,6 +165,7 @@ func NewServerWithAdminTokens(cfg Config, service *tokens.Service, reservationSe
 		startedAt:         time.Now().UTC(),
 		auditEvents:       auditEventStore,
 		gatewayHTTPClient: &http.Client{Timeout: cfg.GatewayManagementTimeout},
+		clientIPs:         clientip.New(trustedProxies),
 	}
 }
 
@@ -265,7 +273,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/reserved-subdomains", s.handleReservedSubdomains)
 	mux.HandleFunc("/api/v1/reserved-subdomains/", s.handleReservedSubdomainByID)
 	mux.HandleFunc("/api/v1/reserved-subdomains/authorize", s.handleAuthorizeReservedSubdomain)
-	return requestid.Middleware(telemetry.HTTPHandler(mux, "control_plane.http"))
+	return requestid.Middleware(telemetry.HTTPHandler(s.withClientIPTrace(mux), "control_plane.http"))
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -742,7 +750,7 @@ func (s *Server) handleEvaluateAccessPolicy(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if req.RemoteIP == "" {
-		req.RemoteIP = remoteIP(r.RemoteAddr)
+		req.RemoteIP = s.clientIP(r)
 	}
 
 	s.metrics.accessPolicyEvaluationsTotal.Add(1)
@@ -1257,7 +1265,7 @@ func (s *Server) logAudit(r *http.Request, level slog.Level, msg, event string, 
 		slog.String("event", event),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
-		slog.String("remote_ip", remoteIP(r.RemoteAddr)),
+		slog.String("remote_ip", s.clientIP(r)),
 	}
 	if id := requestID(r); id != "" {
 		base = append(base, slog.String("request_id", id))
@@ -1271,7 +1279,7 @@ func (s *Server) logAudit(r *http.Request, level slog.Level, msg, event string, 
 		Event:     event,
 		Method:    r.Method,
 		Path:      r.URL.Path,
-		RemoteIP:  remoteIP(r.RemoteAddr),
+		RemoteIP:  s.clientIP(r),
 		RequestID: requestID(r),
 		Fields:    auditEventFields(attrs),
 	}); err != nil {
@@ -1321,12 +1329,15 @@ func auditEventFieldValue(value slog.Value) string {
 	}
 }
 
-func remoteIP(remoteAddr string) string {
-	host, _, err := net.SplitHostPort(remoteAddr)
-	if err == nil {
-		return host
-	}
-	return remoteAddr
+func (s *Server) clientIP(r *http.Request) string {
+	return s.clientIPs.ResolveString(r)
+}
+
+func (s *Server) withClientIPTrace(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		telemetry.SetSpanAttributes(r.Context(), attribute.String("porthook.client_ip", s.clientIP(r)))
+		next.ServeHTTP(w, r)
+	})
 }
 
 func requestID(r *http.Request) string {
