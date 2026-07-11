@@ -222,23 +222,6 @@ func (s *Server) pruneRequestLogs(ctx context.Context, pruner requestLogPruner) 
 
 func (s *Server) PublicHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok\n"))
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.ready(r.Context()); err != nil {
-			http.Error(w, "not ready: "+err.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ready\n"))
-	})
-	mux.HandleFunc("/api/v1/tunnels/", s.handleTunnelDetail)
-	mux.HandleFunc("/api/v1/tunnels", s.handleTunnelList)
-	mux.HandleFunc("/api/v1/runtime", s.handleRuntimeSummary)
-	mux.HandleFunc("/api/v1/request-logs", s.handleRequestLogs)
-	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/", s.handlePublicRequest)
 	return requestid.Middleware(telemetry.HTTPHandler(mux, "gateway.public"))
 }
@@ -428,15 +411,8 @@ type runtimeCounters struct {
 }
 
 func (s *Server) handleTunnelList(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	if r.Method != http.MethodGet {
-		methodNotAllowed(w, "GET, OPTIONS")
+		methodNotAllowed(w, http.MethodGet)
 		return
 	}
 
@@ -455,15 +431,8 @@ func (s *Server) handleTunnelList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTunnelDetail(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	if r.Method != http.MethodGet {
-		methodNotAllowed(w, "GET, OPTIONS")
+		methodNotAllowed(w, http.MethodGet)
 		return
 	}
 
@@ -482,15 +451,8 @@ func (s *Server) handleTunnelDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRuntimeSummary(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	if r.Method != http.MethodGet {
-		methodNotAllowed(w, "GET, OPTIONS")
+		methodNotAllowed(w, http.MethodGet)
 		return
 	}
 
@@ -498,15 +460,8 @@ func (s *Server) handleRuntimeSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRequestLogs(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type")
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	if r.Method != http.MethodGet {
-		methodNotAllowed(w, "GET, OPTIONS")
+		methodNotAllowed(w, http.MethodGet)
 		return
 	}
 

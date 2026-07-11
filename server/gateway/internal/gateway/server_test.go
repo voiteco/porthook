@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -779,6 +780,74 @@ func TestPublicRequestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPublicHandlerForwardsOperationalPaths(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+	waitForSession(t, ctx, server, "demo")
+
+	paths := []string{"/healthz", "/metrics", "/api/v1/example"}
+	agentErr := make(chan error, 1)
+	go func() {
+		for _, wantPath := range paths {
+			reqEnv, payload, _, err := readStreamedRequest(ctx, conn)
+			if err != nil {
+				agentErr <- err
+				return
+			}
+			if payload.Path != wantPath {
+				agentErr <- fmt.Errorf("forwarded path = %q, want %q", payload.Path, wantPath)
+				return
+			}
+			if err := writeStreamedResponse(ctx, conn, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+				Status: http.StatusOK,
+				Body:   []byte(wantPath),
+			}); err != nil {
+				agentErr <- err
+				return
+			}
+		}
+		agentErr <- nil
+	}()
+
+	for _, path := range paths {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+path, nil)
+		if err != nil {
+			t.Fatalf("NewRequest(%s) returned error: %v", path, err)
+		}
+		req.Host = "demo.localhost"
+		resp, err := publicServer.Client().Do(req)
+		if err != nil {
+			t.Fatalf("GET %s returned error: %v", path, err)
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			t.Fatalf("read %s response: %v", path, readErr)
+		}
+		if resp.StatusCode != http.StatusOK || string(body) != path {
+			t.Fatalf("GET %s = %d %q, want 200 %q", path, resp.StatusCode, body, path)
+		}
+	}
+
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
 func TestPublicRequestStreamsBodyAcrossChunks(t *testing.T) {
 	cfg := testConfig()
 	cfg.StreamChunkBytes = 4
@@ -1034,6 +1103,8 @@ func TestPublicRequestRoutesCustomDomainThroughControlPlane(t *testing.T) {
 	defer agentServer.Close()
 	publicServer := httptest.NewServer(server.PublicHandler())
 	defer publicServer.Close()
+	managementServer := httptest.NewServer(server.ManagementHandler())
+	defer managementServer.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1087,7 +1158,7 @@ func TestPublicRequestRoutesCustomDomainThroughControlPlane(t *testing.T) {
 		t.Fatalf("lookup calls = %d, want 1", lookupCalls)
 	}
 
-	logResp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?limit=1")
+	logResp, err := managementServer.Client().Get(managementServer.URL + "/api/v1/request-logs?limit=1")
 	if err != nil {
 		t.Fatalf("GET request logs returned error: %v", err)
 	}
@@ -1182,6 +1253,8 @@ func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
 	server := NewServer(cfg, slog.Default())
 	publicServer := httptest.NewServer(server.PublicHandler())
 	defer publicServer.Close()
+	managementServer := httptest.NewServer(server.ManagementHandler())
+	defer managementServer.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1201,7 +1274,7 @@ func TestRequestLogsEndpointReturnsRecentPublicRequests(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 
-	logResp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?limit=1")
+	logResp, err := managementServer.Client().Get(managementServer.URL + "/api/v1/request-logs?limit=1")
 	if err != nil {
 		t.Fatalf("GET request logs returned error: %v", err)
 	}
@@ -1274,7 +1347,7 @@ func TestRequestLogsEndpointFiltersPublicRequests(t *testing.T) {
 	cfg := testConfig()
 	cfg.RequestLogLimit = 5
 	server := NewServer(cfg, slog.Default())
-	publicServer := httptest.NewServer(server.PublicHandler())
+	publicServer := httptest.NewServer(server.ManagementHandler())
 	defer publicServer.Close()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1348,7 +1421,7 @@ func TestRequestLogsEndpointPaginatesPublicRequests(t *testing.T) {
 	cfg := testConfig()
 	cfg.RequestLogLimit = 5
 	server := NewServer(cfg, slog.Default())
-	publicServer := httptest.NewServer(server.PublicHandler())
+	publicServer := httptest.NewServer(server.ManagementHandler())
 	defer publicServer.Close()
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1435,7 +1508,7 @@ func TestRequestLogsEndpointReadsDurableStore(t *testing.T) {
 		},
 	}
 	server := newServerWithRequestLogWriter(testConfig(), slog.Default(), store)
-	publicServer := httptest.NewServer(server.PublicHandler())
+	publicServer := httptest.NewServer(server.ManagementHandler())
 	defer publicServer.Close()
 
 	resp, err := publicServer.Client().Get(publicServer.URL + "/api/v1/request-logs?limit=10")
@@ -1460,7 +1533,7 @@ func TestRequestLogsEndpointReadsDurableStore(t *testing.T) {
 
 func TestRequestLogsEndpointRejectsInvalidFilters(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
-	publicServer := httptest.NewServer(server.PublicHandler())
+	publicServer := httptest.NewServer(server.ManagementHandler())
 	defer publicServer.Close()
 
 	cases := []struct {
@@ -1488,7 +1561,7 @@ func TestRequestLogsEndpointRejectsInvalidFilters(t *testing.T) {
 func TestReadyzReportsRequestLogStoreFailure(t *testing.T) {
 	store := &captureRequestLogStore{pingErr: errors.New("database unavailable")}
 	server := newServerWithRequestLogWriter(testConfig(), slog.Default(), store)
-	publicServer := httptest.NewServer(server.PublicHandler())
+	publicServer := httptest.NewServer(server.ManagementHandler())
 	defer publicServer.Close()
 
 	resp, err := publicServer.Client().Get(publicServer.URL + "/readyz")
@@ -2168,23 +2241,6 @@ func waitForSession(t *testing.T, ctx context.Context, server *Server, subdomain
 	}
 }
 
-func TestPublicHandlerHealthEndpoints(t *testing.T) {
-	server := NewServer(testConfig(), slog.Default())
-	httpServer := httptest.NewServer(server.PublicHandler())
-	defer httpServer.Close()
-
-	for _, path := range []string{"/healthz", "/readyz"} {
-		resp, err := httpServer.Client().Get(httpServer.URL + path)
-		if err != nil {
-			t.Fatalf("GET %s returned error: %v", path, err)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != 200 {
-			t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
-		}
-	}
-}
-
 func TestManagementHandlerHealthEndpoints(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	httpServer := httptest.NewServer(server.ManagementHandler())
@@ -2202,7 +2258,7 @@ func TestManagementHandlerHealthEndpoints(t *testing.T) {
 	}
 }
 
-func TestPublicHandlerListsActiveTunnels(t *testing.T) {
+func TestManagementHandlerListsActiveTunnels(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	connectedAt := time.Date(2026, 6, 30, 11, 0, 0, 0, time.UTC)
 	if err := server.registry.Register(&registry.Session{
@@ -2216,14 +2272,13 @@ func TestPublicHandlerListsActiveTunnels(t *testing.T) {
 		t.Fatalf("Register returned error: %v", err)
 	}
 
-	httpServer := httptest.NewServer(server.PublicHandler())
+	httpServer := httptest.NewServer(server.ManagementHandler())
 	defer httpServer.Close()
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/api/v1/tunnels", nil)
 	if err != nil {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
-	req.Header.Set("Origin", "http://127.0.0.1:8082")
 	resp, err := httpServer.Client().Do(req)
 	if err != nil {
 		t.Fatalf("GET tunnels returned error: %v", err)
@@ -2232,8 +2287,8 @@ func TestPublicHandlerListsActiveTunnels(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
-		t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
 	}
 	var listed tunnelListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
@@ -2251,7 +2306,7 @@ func TestPublicHandlerListsActiveTunnels(t *testing.T) {
 	}
 }
 
-func TestPublicHandlerShowsTunnelDetail(t *testing.T) {
+func TestManagementHandlerShowsTunnelDetail(t *testing.T) {
 	cfg := testConfig()
 	cfg.RequestLogLimit = 10
 	server := NewServer(cfg, slog.Default())
@@ -2284,7 +2339,7 @@ func TestPublicHandlerShowsTunnelDetail(t *testing.T) {
 		Outcome:      "proxied",
 	})
 
-	httpServer := httptest.NewServer(server.PublicHandler())
+	httpServer := httptest.NewServer(server.ManagementHandler())
 	defer httpServer.Close()
 
 	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/tunnels/tun_active")
@@ -2319,7 +2374,7 @@ func TestPublicHandlerShowsTunnelDetail(t *testing.T) {
 	}
 }
 
-func TestPublicHandlerTunnelDetailDoesNotExposeLocalTarget(t *testing.T) {
+func TestManagementHandlerTunnelDetailDoesNotExposeLocalTarget(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	tunnel := &registry.Session{
 		TunnelID:    "tun_secret",
@@ -2334,7 +2389,7 @@ func TestPublicHandlerTunnelDetailDoesNotExposeLocalTarget(t *testing.T) {
 	}
 	server.addSession(newAgentSession(nil, tunnel, time.Second, 4, 60, 120))
 
-	httpServer := httptest.NewServer(server.PublicHandler())
+	httpServer := httptest.NewServer(server.ManagementHandler())
 	defer httpServer.Close()
 
 	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/tunnels/tun_secret")
@@ -2351,9 +2406,9 @@ func TestPublicHandlerTunnelDetailDoesNotExposeLocalTarget(t *testing.T) {
 	}
 }
 
-func TestPublicHandlerTunnelDetailNotFound(t *testing.T) {
+func TestManagementHandlerTunnelDetailNotFound(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
-	httpServer := httptest.NewServer(server.PublicHandler())
+	httpServer := httptest.NewServer(server.ManagementHandler())
 	defer httpServer.Close()
 
 	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/tunnels/missing")
@@ -2366,7 +2421,7 @@ func TestPublicHandlerTunnelDetailNotFound(t *testing.T) {
 	}
 }
 
-func TestPublicHandlerShowsRuntimeSummary(t *testing.T) {
+func TestManagementHandlerShowsRuntimeSummary(t *testing.T) {
 	cfg := testConfig()
 	cfg.ControlPlaneURL = "http://control-plane.internal"
 	cfg.ControlPlaneToken = "control-secret"
@@ -2401,7 +2456,7 @@ func TestPublicHandlerShowsRuntimeSummary(t *testing.T) {
 	server.metrics.publicRequestErrorsTotal.Add(1)
 	server.metrics.tokenValidationsTotal.Add(2)
 
-	httpServer := httptest.NewServer(server.PublicHandler())
+	httpServer := httptest.NewServer(server.ManagementHandler())
 	defer httpServer.Close()
 
 	resp, err := httpServer.Client().Get(httpServer.URL + "/api/v1/runtime")
@@ -2441,17 +2496,19 @@ func TestPublicHandlerShowsRuntimeSummary(t *testing.T) {
 	}
 }
 
-func TestPublicHandlerMetricsEndpoint(t *testing.T) {
+func TestManagementHandlerMetricsEndpoint(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
-	httpServer := httptest.NewServer(server.PublicHandler())
-	defer httpServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+	managementServer := httptest.NewServer(server.ManagementHandler())
+	defer managementServer.Close()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+"/missing", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, publicServer.URL+"/missing", nil)
 	if err != nil {
 		t.Fatalf("NewRequest returned error: %v", err)
 	}
 	req.Host = "demo.localhost"
-	resp, err := httpServer.Client().Do(req)
+	resp, err := publicServer.Client().Do(req)
 	if err != nil {
 		t.Fatalf("public request returned error: %v", err)
 	}
@@ -2460,7 +2517,7 @@ func TestPublicHandlerMetricsEndpoint(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 
-	resp, err = httpServer.Client().Get(httpServer.URL + "/metrics")
+	resp, err = managementServer.Client().Get(managementServer.URL + "/metrics")
 	if err != nil {
 		t.Fatalf("GET metrics returned error: %v", err)
 	}
@@ -2472,8 +2529,8 @@ func TestPublicHandlerMetricsEndpoint(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("metrics status = %d, want 200; body = %q", resp.StatusCode, string(body))
 	}
-	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
-		t.Fatalf("metrics CORS = %q, want *", got)
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("metrics CORS = %q, want empty", got)
 	}
 	for _, want := range []string{
 		"porthook_gateway_active_tunnels 0",
@@ -2488,17 +2545,17 @@ func TestPublicHandlerMetricsEndpoint(t *testing.T) {
 		}
 	}
 
-	req, err = http.NewRequestWithContext(context.Background(), http.MethodOptions, httpServer.URL+"/metrics", nil)
+	req, err = http.NewRequestWithContext(context.Background(), http.MethodOptions, managementServer.URL+"/metrics", nil)
 	if err != nil {
 		t.Fatalf("NewRequest metrics OPTIONS returned error: %v", err)
 	}
-	resp, err = httpServer.Client().Do(req)
+	resp, err = managementServer.Client().Do(req)
 	if err != nil {
 		t.Fatalf("OPTIONS metrics returned error: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("OPTIONS metrics status = %d, want 204", resp.StatusCode)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("OPTIONS metrics status = %d, want 405", resp.StatusCode)
 	}
 }
 

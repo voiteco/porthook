@@ -447,7 +447,7 @@ PORTHOOK_TOKEN="" \
 pids+=("$!")
 wait_for_log "${LOG_DIR}/agent.log" "Tunnel established" "agent registration"
 
-tunnels_json="$(curl -fsS "http://127.0.0.1:${PUBLIC_PORT}/api/v1/tunnels")"
+tunnels_json="$(curl -fsS "http://127.0.0.1:${MANAGEMENT_PORT}/api/v1/tunnels")"
 printf '%s' "${tunnels_json}" | python3 -c '
 import json
 import sys
@@ -496,7 +496,7 @@ fi
 
 request_log_found=0
 for _ in $(seq 1 20); do
-	request_logs_json="$(curl -fsS "http://127.0.0.1:${PUBLIC_PORT}/api/v1/request-logs?limit=20")"
+	request_logs_json="$(curl -fsS "http://127.0.0.1:${MANAGEMENT_PORT}/api/v1/request-logs?limit=20")"
 	if printf '%s' "${request_logs_json}" | python3 -c '
 import json
 import sys
@@ -553,7 +553,7 @@ if not any(event.get("event") == "control_plane.token_created" for event in payl
 PY
 
 "${BIN_DIR}/porthook" history requests \
-	--gateway "http://127.0.0.1:${PUBLIC_PORT}" \
+	--gateway "http://127.0.0.1:${MANAGEMENT_PORT}" \
 	--subdomain "${SUBDOMAIN}" \
 	--path "/smoke.txt" \
 	--status 200 \
@@ -596,7 +596,7 @@ if [[ "${DURABLE_RESTART}" == "1" ]]; then
 	start_gateway
 
 	"${BIN_DIR}/porthook" history requests \
-		--gateway "http://127.0.0.1:${PUBLIC_PORT}" \
+		--gateway "http://127.0.0.1:${MANAGEMENT_PORT}" \
 		--subdomain "${SUBDOMAIN}" \
 		--path "/smoke.txt" \
 		--status 200 \
