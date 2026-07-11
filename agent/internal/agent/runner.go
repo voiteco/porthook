@@ -34,6 +34,7 @@ type Runner struct {
 
 	activeMu      sync.Mutex
 	activeStreams map[string]*activeStream
+	activeWG      sync.WaitGroup
 }
 
 type activeStream struct {
@@ -130,7 +131,16 @@ func (r *Runner) runOnce(ctx context.Context, wsURL string, restored bool) (bool
 	stopKeepalive := r.startKeepalive(sessionCtx, conn, registered.TunnelID)
 	defer stopKeepalive()
 
-	return true, r.serve(sessionCtx, conn, registered.TunnelID)
+	serveErr := r.serve(sessionCtx, conn, registered.TunnelID)
+
+	// Cancel any still-active per-stream goroutines and wait for them to
+	// finish before returning, so a caller observing Run's return (or
+	// reading the configured output writer) never races their trailing
+	// writes.
+	stopSession()
+	r.activeWG.Wait()
+
+	return true, serveErr
 }
 
 func (r *Runner) authenticate(ctx context.Context, conn *websocket.Conn) error {
@@ -257,7 +267,9 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 		case messages.TypeHTTPRequest:
 			streamCtx, cancelStream := context.WithCancel(ctx)
 			r.addActiveStream(env.StreamID, newActiveStream(cancelStream, nil))
+			r.activeWG.Add(1)
 			go func(env messages.Envelope) {
+				defer r.activeWG.Done()
 				defer r.removeActiveStream(env.StreamID)
 				defer cancelStream()
 				_ = r.handleHTTPRequest(streamCtx, conn, tunnelID, env)
@@ -271,7 +283,9 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 			streamCtx, cancelStream := context.WithCancel(ctx)
 			stream := newActiveStream(cancelStream, make(chan requestBodyChunk, 32))
 			r.addActiveStream(env.StreamID, stream)
+			r.activeWG.Add(1)
 			go func(env messages.Envelope, req httpwire.RequestStart, stream *activeStream) {
+				defer r.activeWG.Done()
 				defer r.removeActiveStream(env.StreamID)
 				defer cancelStream()
 				_ = r.handleHTTPStream(streamCtx, conn, tunnelID, env, req, stream.chunks)
