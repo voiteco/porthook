@@ -10,6 +10,13 @@ func FuzzDecodeBinaryBodyFrame(f *testing.F) {
 		f.Fatalf("build binary body frame seed: %v", err)
 	}
 	f.Add(valid)
+
+	validWS, err := NewBinaryBodyFrame(TypeWSMessageBinary, "str_ws", "tun_ws", []byte("payload"))
+	if err != nil {
+		f.Fatalf("build WS binary body frame seed: %v", err)
+	}
+	f.Add(validWS)
+
 	f.Add([]byte("PHB1"))
 	f.Add([]byte("not-a-porthook-frame"))
 

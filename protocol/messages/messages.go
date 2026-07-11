@@ -32,6 +32,27 @@ const (
 	TypeHTTPResponseEnd   Type = "http.response.end"
 	TypeHTTPStreamError   Type = "http.stream.error"
 	TypeHTTPStreamCancel  Type = "http.stream.cancel"
+
+	// WebSocket tunnel messages. A public WebSocket upgrade is relayed as
+	// ws.open (gateway to agent), answered with ws.accept or ws.error
+	// (agent to gateway), followed by any number of WebSocket binary body
+	// frames (see binary.go) carrying text or binary application messages
+	// in either direction, and terminated by ws.close (graceful, either
+	// direction) or ws.cancel (abnormal, either direction). Ping/pong are
+	// handled transparently per hop by the underlying WebSocket connection
+	// and are not relayed as distinct messages.
+	TypeWSOpen   Type = "ws.open"
+	TypeWSAccept Type = "ws.accept"
+	TypeWSError  Type = "ws.error"
+	TypeWSClose  Type = "ws.close"
+	TypeWSCancel Type = "ws.cancel"
+
+	// TypeWSMessageText and TypeWSMessageBinary tag a WebSocket binary body
+	// frame (binary.go) carrying one complete tunneled WebSocket message in
+	// either direction, preserving whether the original message was a text
+	// or binary WebSocket frame.
+	TypeWSMessageText   Type = "ws.message.text"
+	TypeWSMessageBinary Type = "ws.message.binary"
 )
 
 // ProtocolVersion is the protocol revision this build speaks. It is
@@ -173,6 +194,8 @@ type TunnelRegistered struct {
 	Subdomain string `json:"subdomain"`
 }
 
+// StreamCancel also doubles as the ws.cancel payload: both mean "abort this
+// stream abnormally, for Reason."
 type StreamCancel struct {
 	Reason string `json:"reason"`
 }

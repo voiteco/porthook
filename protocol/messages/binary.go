@@ -9,10 +9,12 @@ import (
 )
 
 const (
-	binaryBodyMagic    = "PHB1"
-	binaryBodyHeader   = len(binaryBodyMagic) + 1 + 2 + 2
-	binaryRequestBody  = byte(1)
-	binaryResponseBody = byte(2)
+	binaryBodyMagic       = "PHB1"
+	binaryBodyHeader      = len(binaryBodyMagic) + 1 + 2 + 2
+	binaryRequestBody     = byte(1)
+	binaryResponseBody    = byte(2)
+	binaryWSMessageText   = byte(3)
+	binaryWSMessageBinary = byte(4)
 )
 
 type BinaryBodyFrame struct {
@@ -93,6 +95,10 @@ func binaryBodyFrameType(typ Type) (byte, error) {
 		return binaryRequestBody, nil
 	case TypeHTTPResponseBody:
 		return binaryResponseBody, nil
+	case TypeWSMessageText:
+		return binaryWSMessageText, nil
+	case TypeWSMessageBinary:
+		return binaryWSMessageBinary, nil
 	default:
 		return 0, fmt.Errorf("unsupported binary body message type %s", typ)
 	}
@@ -104,6 +110,10 @@ func binaryBodyMessageType(typ byte) (Type, error) {
 		return TypeHTTPRequestBody, nil
 	case binaryResponseBody:
 		return TypeHTTPResponseBody, nil
+	case binaryWSMessageText:
+		return TypeWSMessageText, nil
+	case binaryWSMessageBinary:
+		return TypeWSMessageBinary, nil
 	default:
 		return "", fmt.Errorf("unsupported binary body frame type %d", typ)
 	}

@@ -96,12 +96,50 @@ func TestStreamingMessageTypeValues(t *testing.T) {
 		TypeHTTPResponseStart: "http.response.start",
 		TypeHTTPResponseBody:  "http.response.body",
 		TypeHTTPResponseEnd:   "http.response.end",
+		TypeWSOpen:            "ws.open",
+		TypeWSAccept:          "ws.accept",
+		TypeWSError:           "ws.error",
+		TypeWSClose:           "ws.close",
+		TypeWSCancel:          "ws.cancel",
+		TypeWSMessageText:     "ws.message.text",
+		TypeWSMessageBinary:   "ws.message.binary",
 	}
 
 	for got, want := range tests {
 		if string(got) != want {
 			t.Fatalf("type = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestNewWSCancelReusesStreamCancelPayload(t *testing.T) {
+	env, err := NewStream(TypeWSCancel, "str_ws", "tun_ws", StreamCancel{Reason: "peer closed"})
+	if err != nil {
+		t.Fatalf("NewStream returned error: %v", err)
+	}
+	payload, err := DecodePayload[StreamCancel](env)
+	if err != nil {
+		t.Fatalf("DecodePayload returned error: %v", err)
+	}
+	if payload.Reason != "peer closed" {
+		t.Fatalf("reason = %q, want peer closed", payload.Reason)
+	}
+}
+
+func TestNewWSErrorReusesErrorPayload(t *testing.T) {
+	env, err := NewStream(TypeWSError, "str_ws", "tun_ws", ErrorPayload{
+		Code:    "local_dial_failed",
+		Message: "could not reach the local WebSocket endpoint",
+	})
+	if err != nil {
+		t.Fatalf("NewStream returned error: %v", err)
+	}
+	payload, err := DecodePayload[ErrorPayload](env)
+	if err != nil {
+		t.Fatalf("DecodePayload returned error: %v", err)
+	}
+	if payload.Code != "local_dial_failed" {
+		t.Fatalf("code = %q, want local_dial_failed", payload.Code)
 	}
 }
 
