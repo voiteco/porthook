@@ -1005,7 +1005,7 @@ func TestPublicRequestEnforcesBasicAccessPolicy(t *testing.T) {
 	cfg := testConfig()
 	cfg.ControlPlaneURL = controlPlane.URL
 	cfg.ControlPlaneToken = "validator-secret"
-	cfg.StreamTimeout = 200 * time.Millisecond
+	cfg.StreamRequestTimeout = 200 * time.Millisecond
 	server := NewServer(cfg, slog.Default())
 	agentServer := httptest.NewServer(server.AgentHandler())
 	defer agentServer.Close()
@@ -1363,7 +1363,7 @@ func TestPublicRequestRoutesCustomDomainThroughControlPlane(t *testing.T) {
 	cfg := testConfig()
 	cfg.ControlPlaneURL = controlPlane.URL
 	cfg.ControlPlaneToken = "validator-secret"
-	cfg.StreamTimeout = 200 * time.Millisecond
+	cfg.StreamRequestTimeout = 200 * time.Millisecond
 	cfg.CustomDomainCacheTTL = time.Minute
 	cfg.RequestLogLimit = 10
 	server := NewServer(cfg, slog.Default())
@@ -2047,7 +2047,7 @@ func TestPublicRequestMapsStreamErrorToBadGateway(t *testing.T) {
 
 func TestPublicRequestTimesOutWaitingForAgent(t *testing.T) {
 	cfg := testConfig()
-	cfg.StreamTimeout = 50 * time.Millisecond
+	cfg.StreamRequestTimeout = 50 * time.Millisecond
 	server := NewServer(cfg, slog.Default())
 	agentServer := httptest.NewServer(server.AgentHandler())
 	defer agentServer.Close()
@@ -2103,7 +2103,7 @@ func TestPublicRequestTimesOutWaitingForAgent(t *testing.T) {
 
 func TestPublicRequestTimeoutSendsStreamCancel(t *testing.T) {
 	cfg := testConfig()
-	cfg.StreamTimeout = 50 * time.Millisecond
+	cfg.StreamRequestTimeout = 50 * time.Millisecond
 	server := NewServer(cfg, slog.Default())
 	agentServer := httptest.NewServer(server.AgentHandler())
 	defer agentServer.Close()
@@ -2148,8 +2148,8 @@ func TestPublicRequestTimeoutSendsStreamCancel(t *testing.T) {
 			agentErr <- err
 			return
 		}
-		if payload.Reason != "gateway stream timeout" {
-			agentErr <- errString("cancel reason was not gateway stream timeout")
+		if payload.Reason != "gateway timed out waiting for a response" {
+			agentErr <- errString("cancel reason was not the request-timeout reason")
 			return
 		}
 		agentErr <- nil
@@ -2172,6 +2172,276 @@ func TestPublicRequestTimeoutSendsStreamCancel(t *testing.T) {
 	}
 	if err := <-agentErr; err != nil {
 		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
+func TestPublicRequestSurvivesIdleGapsPastTheRequestTimeout(t *testing.T) {
+	cfg := testConfig()
+	cfg.StreamRequestTimeout = 150 * time.Millisecond
+	cfg.StreamIdleTimeout = 120 * time.Millisecond
+	cfg.StreamMaxLifetime = time.Hour
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	const chunk = "data: tick\n\n"
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+
+		start, err := messages.NewStream(messages.TypeHTTPResponseStart, reqEnv.StreamID, reqEnv.TunnelID, httpwire.ResponseStart{
+			Status: http.StatusOK,
+		})
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if err := wswire.WriteEnvelope(ctx, conn, start); err != nil {
+			agentErr <- err
+			return
+		}
+
+		// Each gap is under the idle timeout, but their sum comfortably
+		// exceeds the request timeout: this only survives if the request
+		// timeout stops applying once the response has started.
+		for i := 0; i < 5; i++ {
+			time.Sleep(70 * time.Millisecond)
+			if err := wswire.WriteBinaryBody(ctx, conn, messages.TypeHTTPResponseBody, reqEnv.StreamID, reqEnv.TunnelID, []byte(chunk)); err != nil {
+				agentErr <- err
+				return
+			}
+		}
+
+		end, err := messages.NewStream(messages.TypeHTTPResponseEnd, reqEnv.StreamID, reqEnv.TunnelID, nil)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		agentErr <- wswire.WriteEnvelope(ctx, conn, end)
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if got := strings.Count(string(body), chunk); got != 5 {
+		t.Fatalf("chunk count = %d, want 5 (body = %q)", got, string(body))
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
+func TestPublicRequestStreamIdleTimeoutClosesStalledResponse(t *testing.T) {
+	cfg := testConfig()
+	cfg.StreamRequestTimeout = time.Hour
+	cfg.StreamIdleTimeout = 60 * time.Millisecond
+	cfg.StreamMaxLifetime = time.Hour
+	cfg.RequestLogLimit = 10
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+
+		start, err := messages.NewStream(messages.TypeHTTPResponseStart, reqEnv.StreamID, reqEnv.TunnelID, httpwire.ResponseStart{
+			Status: http.StatusOK,
+		})
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if err := wswire.WriteEnvelope(ctx, conn, start); err != nil {
+			agentErr <- err
+			return
+		}
+		if err := wswire.WriteBinaryBody(ctx, conn, messages.TypeHTTPResponseBody, reqEnv.StreamID, reqEnv.TunnelID, []byte("first\n")); err != nil {
+			agentErr <- err
+			return
+		}
+
+		// Go silent: no further activity, so the idle timeout must cut the
+		// stream instead of letting it hang for the test's lifetime.
+		cancelEnv, err := wswire.Read(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if cancelEnv.Envelope.Type != messages.TypeHTTPStreamCancel {
+			agentErr <- errUnexpectedType(cancelEnv.Envelope.Type, messages.TypeHTTPStreamCancel)
+			return
+		}
+		agentErr <- nil
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+	if string(body) != "first\n" {
+		t.Fatalf("body = %q, want truncated after the idle timeout cut the stream", string(body))
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+
+	logs := server.requestLogs.list(1)
+	if len(logs) != 1 {
+		t.Fatalf("request logs = %d, want 1", len(logs))
+	}
+	if logs[0].Outcome != "stream_idle_timeout" {
+		t.Fatalf("outcome = %q, want stream_idle_timeout", logs[0].Outcome)
+	}
+}
+
+func TestPublicRequestStreamMaxLifetimeClosesActiveResponse(t *testing.T) {
+	cfg := testConfig()
+	cfg.StreamRequestTimeout = time.Hour
+	cfg.StreamIdleTimeout = time.Hour
+	cfg.StreamMaxLifetime = 80 * time.Millisecond
+	cfg.RequestLogLimit = 10
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+
+		start, err := messages.NewStream(messages.TypeHTTPResponseStart, reqEnv.StreamID, reqEnv.TunnelID, httpwire.ResponseStart{
+			Status: http.StatusOK,
+		})
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if err := wswire.WriteEnvelope(ctx, conn, start); err != nil {
+			agentErr <- err
+			return
+		}
+
+		// Keep sending activity well past the max lifetime; idle detection
+		// alone would never cut this stream.
+		for i := 0; i < 20; i++ {
+			if err := wswire.WriteBinaryBody(ctx, conn, messages.TypeHTTPResponseBody, reqEnv.StreamID, reqEnv.TunnelID, []byte("x")); err != nil {
+				agentErr <- err
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		agentErr <- errString("stream was not cancelled by the max-lifetime timeout")
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.ReadAll(resp.Body)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		logs := server.requestLogs.list(1)
+		if len(logs) == 1 {
+			if logs[0].Outcome != "stream_max_lifetime_exceeded" {
+				t.Fatalf("outcome = %q, want stream_max_lifetime_exceeded", logs[0].Outcome)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for the request log entry")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
@@ -3205,16 +3475,16 @@ func (s *captureRequestLogStore) entriesSnapshot() []requestLogEntry {
 
 func testConfig() Config {
 	return Config{
-		PublicAddr:       ":8080",
-		AgentAddr:        ":8081",
-		ManagementAddr:   ":8082",
-		RootDomain:       "localhost",
-		PublicURL:        "http://localhost:8080",
-		StaticToken:      "dev-token",
-		MaxBodyBytes:     defaultMaxBodyBytes,
-		StreamChunkBytes: defaultStreamChunkBytes,
-		StreamTimeout:    defaultStreamTimeout,
-		ShutdownTimeout:  defaultShutdownTimeout,
+		PublicAddr:           ":8080",
+		AgentAddr:            ":8081",
+		ManagementAddr:       ":8082",
+		RootDomain:           "localhost",
+		PublicURL:            "http://localhost:8080",
+		StaticToken:          "dev-token",
+		MaxBodyBytes:         defaultMaxBodyBytes,
+		StreamChunkBytes:     defaultStreamChunkBytes,
+		StreamRequestTimeout: defaultStreamRequestTimeout,
+		ShutdownTimeout:      defaultShutdownTimeout,
 	}
 }
 

@@ -135,8 +135,14 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	if cfg.HandshakeTimeout <= 0 {
 		addError("PORTHOOK_HANDSHAKE_TIMEOUT", "must be positive")
 	}
-	if cfg.StreamTimeout <= 0 {
-		addError("PORTHOOK_STREAM_TIMEOUT", "must be positive")
+	if cfg.StreamRequestTimeout <= 0 {
+		addError("PORTHOOK_STREAM_REQUEST_TIMEOUT", "must be positive")
+	}
+	if cfg.StreamIdleTimeout < 0 {
+		addError("PORTHOOK_STREAM_IDLE_TIMEOUT", "must not be negative")
+	}
+	if cfg.StreamMaxLifetime <= 0 {
+		addError("PORTHOOK_STREAM_MAX_LIFETIME", "must be positive")
 	}
 	if cfg.WebSocketWriteTimeout <= 0 {
 		addError("PORTHOOK_WS_WRITE_TIMEOUT", "must be positive")

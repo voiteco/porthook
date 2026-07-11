@@ -150,7 +150,7 @@ Common symptoms:
 | Tunnel URL returns 401 | Basic or bearer access policy requires valid public credentials. |
 | Tunnel URL returns 403 | IP allowlist or another access policy denied the public request. |
 | Tunnel URL returns 503 | Concurrent stream limit, disconnected agent, or overloaded local service. |
-| Tunnel URL returns 504 | `PORTHOOK_STREAM_TIMEOUT`, slow local service, or broken WebSocket path. |
+| Tunnel URL returns 504 | `PORTHOOK_STREAM_REQUEST_TIMEOUT` (slow local service before the first byte), `PORTHOOK_STREAM_IDLE_TIMEOUT` (stalled after the response started), `PORTHOOK_STREAM_MAX_LIFETIME` (exceeded absolute duration), or a broken WebSocket path. |
 | Dashboard login fails | Control-plane admin token, access boundary, browser session storage, `/api/v1/status`. |
 | Requested subdomain rejected | Reservation ownership for the token used by the agent. |
 | Protected tunnel unexpectedly public | Missing access policy for the reserved subdomain or gateway not configured with `PORTHOOK_CONTROL_PLANE_URL`. |

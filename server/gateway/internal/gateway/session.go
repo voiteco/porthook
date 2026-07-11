@@ -147,10 +147,21 @@ func (s *agentSession) streamRoundTrip(
 	}
 
 	result, err = s.readStreamResponse(ctx, streamID, ch, chunkBytes, writeResponseStart, writeResponseBody, result)
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+	if err != nil && !isStreamContextDoneCause(err) {
 		_ = s.cancelStream(context.Background(), streamID, streamCancelReasonForError(err))
 	}
 	return result, err
+}
+
+// isStreamContextDoneCause reports whether err is a cause readStreamResponse
+// already sent a stream-cancel message for when its ctx.Done() branch fired,
+// so streamRoundTrip does not send a second, redundant cancellation.
+func isStreamContextDoneCause(err error) bool {
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, ErrStreamRequestTimeout) ||
+		errors.Is(err, ErrStreamIdleTimeout) ||
+		errors.Is(err, ErrStreamMaxLifetimeExceeded)
 }
 
 func (s *agentSession) writeRequestBody(ctx context.Context, streamID string, body io.Reader, maxBodyBytes int64, chunkBytes int) (int64, error) {
@@ -204,8 +215,9 @@ func (s *agentSession) readStreamResponse(
 	for {
 		select {
 		case <-ctx.Done():
-			_ = s.cancelStream(context.Background(), streamID, streamCancelReason(ctx.Err()))
-			return result, ctx.Err()
+			cause := context.Cause(ctx)
+			_ = s.cancelStream(context.Background(), streamID, streamCancelReason(cause))
+			return result, cause
 		case <-s.done:
 			return result, errors.New("agent disconnected")
 		case respMsg := <-ch:
@@ -364,6 +376,12 @@ func (s *agentSession) cancelStream(ctx context.Context, streamID, reason string
 
 func streamCancelReason(err error) string {
 	switch {
+	case errors.Is(err, ErrStreamRequestTimeout):
+		return "gateway timed out waiting for a response"
+	case errors.Is(err, ErrStreamIdleTimeout):
+		return "gateway stream idle timeout"
+	case errors.Is(err, ErrStreamMaxLifetimeExceeded):
+		return "gateway stream exceeded its maximum lifetime"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "gateway stream timeout"
 	case errors.Is(err, context.Canceled):

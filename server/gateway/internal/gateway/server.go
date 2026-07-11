@@ -128,8 +128,13 @@ func (s *Server) Run(ctx context.Context) error {
 		Handler:           s.PublicHandler(),
 		ReadHeaderTimeout: s.cfg.ReadHeaderTimeout,
 		ReadTimeout:       s.cfg.ReadTimeout,
-		WriteTimeout:      s.cfg.WriteTimeout,
-		IdleTimeout:       s.cfg.IdleTimeout,
+		// WriteTimeout is deliberately unset: a fixed connection-level
+		// write deadline would kill long-lived SSE, long-polling, and
+		// WebSocket tunnel responses regardless of activity. Response
+		// duration is bounded instead by the stream-level request, idle,
+		// and max-lifetime policy applied per request in handlePublicRequest
+		// and the public WebSocket relay.
+		IdleTimeout: s.cfg.IdleTimeout,
 	}
 	agentServer := &http.Server{
 		Addr:              s.cfg.AgentAddr,
@@ -409,7 +414,9 @@ type runtimeTimeouts struct {
 	WriteTimeoutSeconds          int64 `json:"write_timeout_seconds"`
 	IdleTimeoutSeconds           int64 `json:"idle_timeout_seconds"`
 	HandshakeTimeoutSeconds      int64 `json:"handshake_timeout_seconds"`
-	StreamTimeoutSeconds         int64 `json:"stream_timeout_seconds"`
+	StreamRequestTimeoutSeconds  int64 `json:"stream_request_timeout_seconds"`
+	StreamIdleTimeoutSeconds     int64 `json:"stream_idle_timeout_seconds"`
+	StreamMaxLifetimeSeconds     int64 `json:"stream_max_lifetime_seconds"`
 	WebSocketWriteTimeoutSeconds int64 `json:"websocket_write_timeout_seconds"`
 	WebSocketPingIntervalSeconds int64 `json:"websocket_ping_interval_seconds"`
 	WebSocketPongTimeoutSeconds  int64 `json:"websocket_pong_timeout_seconds"`
@@ -422,6 +429,8 @@ type runtimeCounters struct {
 	PublicRequestRateLimitedTotal         uint64 `json:"public_request_rate_limited_total"`
 	PublicRequestAuthAttemptsLimitedTotal uint64 `json:"public_request_auth_attempts_limited_total"`
 	PublicRequestTimeoutsTotal            uint64 `json:"public_request_timeouts_total"`
+	PublicRequestStreamIdleTimeoutsTotal  uint64 `json:"public_request_stream_idle_timeouts_total"`
+	PublicRequestStreamMaxLifetimeTotal   uint64 `json:"public_request_stream_max_lifetime_total"`
 	PublicRequestBodyTooLargeTotal        uint64 `json:"public_request_body_too_large_total"`
 	PublicRequestClientCanceledTotal      uint64 `json:"public_request_client_canceled_total"`
 	PublicRequestNoActiveSessionTotal     uint64 `json:"public_request_no_active_session_total"`
@@ -540,7 +549,9 @@ func (s *Server) runtimeSummary() runtimeSummary {
 			WriteTimeoutSeconds:          int64(s.cfg.WriteTimeout.Seconds()),
 			IdleTimeoutSeconds:           int64(s.cfg.IdleTimeout.Seconds()),
 			HandshakeTimeoutSeconds:      int64(s.cfg.HandshakeTimeout.Seconds()),
-			StreamTimeoutSeconds:         int64(s.cfg.StreamTimeout.Seconds()),
+			StreamRequestTimeoutSeconds:  int64(s.cfg.StreamRequestTimeout.Seconds()),
+			StreamIdleTimeoutSeconds:     int64(s.cfg.StreamIdleTimeout.Seconds()),
+			StreamMaxLifetimeSeconds:     int64(s.cfg.StreamMaxLifetime.Seconds()),
 			WebSocketWriteTimeoutSeconds: int64(s.cfg.WebSocketWriteTimeout.Seconds()),
 			WebSocketPingIntervalSeconds: int64(s.cfg.WebSocketPingInterval.Seconds()),
 			WebSocketPongTimeoutSeconds:  int64(s.cfg.WebSocketPongTimeout.Seconds()),
@@ -552,6 +563,8 @@ func (s *Server) runtimeSummary() runtimeSummary {
 			PublicRequestRateLimitedTotal:         s.metrics.publicRequestRateLimitedTotal.Load(),
 			PublicRequestAuthAttemptsLimitedTotal: s.metrics.publicRequestAuthAttemptsLimitedTotal.Load(),
 			PublicRequestTimeoutsTotal:            s.metrics.publicRequestTimeoutsTotal.Load(),
+			PublicRequestStreamIdleTimeoutsTotal:  s.metrics.publicRequestStreamIdleTimeoutsTotal.Load(),
+			PublicRequestStreamMaxLifetimeTotal:   s.metrics.publicRequestStreamMaxLifetimeTotal.Load(),
 			PublicRequestBodyTooLargeTotal:        s.metrics.publicRequestBodyTooLargeTotal.Load(),
 			PublicRequestClientCanceledTotal:      s.metrics.publicRequestClientCanceledTotal.Load(),
 			PublicRequestNoActiveSessionTotal:     s.metrics.publicRequestNoActiveSessionTotal.Load(),
@@ -1042,11 +1055,13 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.StreamTimeout)
-	defer cancel()
+	deadline := newStreamDeadline(r.Context(), s.streamDeadlinePolicy())
+	defer deadline.Stop()
+	ctx := deadline.Context()
 
 	responseStarted := false
 	writeResponseStart := func(tunnelResponse httpwire.ResponseStart) {
+		deadline.MarkResponseStarted()
 		for name, values := range httpwire.StripHopByHopHeaders(tunnelResponse.Header) {
 			for _, value := range values {
 				w.Header().Add(name, value)
@@ -1060,6 +1075,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(tunnelResponse.Status)
 	}
 	writeResponseBody := func(chunk []byte) (int, error) {
+		deadline.Touch()
 		n, err := w.Write(chunk)
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
@@ -1092,13 +1108,31 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 			outcome = "request_body_too_large"
 			writePublicError(w, r, "request body too large", http.StatusRequestEntityTooLarge)
 			return
-		case errors.Is(err, context.DeadlineExceeded):
+		case errors.Is(err, ErrStreamRequestTimeout), errors.Is(err, context.DeadlineExceeded):
 			if !responseStarted {
 				status = http.StatusGatewayTimeout
 			}
 			outcome = "tunnel_timeout"
 			if !responseStarted {
 				writePublicError(w, r, "tunnel request timed out", http.StatusGatewayTimeout)
+			}
+			return
+		case errors.Is(err, ErrStreamIdleTimeout):
+			if !responseStarted {
+				status = http.StatusGatewayTimeout
+			}
+			outcome = "stream_idle_timeout"
+			if !responseStarted {
+				writePublicError(w, r, "tunnel stream idle timeout", http.StatusGatewayTimeout)
+			}
+			return
+		case errors.Is(err, ErrStreamMaxLifetimeExceeded):
+			if !responseStarted {
+				status = http.StatusGatewayTimeout
+			}
+			outcome = "stream_max_lifetime_exceeded"
+			if !responseStarted {
+				writePublicError(w, r, "tunnel stream exceeded its maximum lifetime", http.StatusGatewayTimeout)
 			}
 			return
 		case errors.Is(err, context.Canceled):
@@ -1120,6 +1154,14 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 
 	status = result.Status
 	outcome = "completed"
+}
+
+func (s *Server) streamDeadlinePolicy() streamDeadlinePolicy {
+	return streamDeadlinePolicy{
+		RequestTimeout: s.cfg.StreamRequestTimeout,
+		IdleTimeout:    s.cfg.StreamIdleTimeout,
+		MaxLifetime:    s.cfg.StreamMaxLifetime,
+	}
 }
 
 func (s *Server) evaluatePublicAccess(r *http.Request, subdomain string) (accessPolicyEvaluation, error) {

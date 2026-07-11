@@ -15,6 +15,8 @@ type metrics struct {
 	publicRequestRateLimitedTotal         atomic.Uint64
 	publicRequestAuthAttemptsLimitedTotal atomic.Uint64
 	publicRequestTimeoutsTotal            atomic.Uint64
+	publicRequestStreamIdleTimeoutsTotal  atomic.Uint64
+	publicRequestStreamMaxLifetimeTotal   atomic.Uint64
 	publicRequestBodyTooLargeTotal        atomic.Uint64
 	publicRequestClientCanceledTotal      atomic.Uint64
 	publicRequestNoActiveSessionTotal     atomic.Uint64
@@ -45,6 +47,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetric(w, "porthook_gateway_public_request_rate_limited_total", "Public HTTP requests rejected by per-tunnel rate limits.", "counter", s.metrics.publicRequestRateLimitedTotal.Load())
 	writeMetric(w, "porthook_gateway_public_request_auth_attempts_limited_total", "Public HTTP requests rejected by bounded authentication-attempt protection.", "counter", s.metrics.publicRequestAuthAttemptsLimitedTotal.Load())
 	writeMetric(w, "porthook_gateway_public_request_timeouts_total", "Public HTTP requests that timed out waiting for the tunnel.", "counter", s.metrics.publicRequestTimeoutsTotal.Load())
+	writeMetric(w, "porthook_gateway_public_request_stream_idle_timeouts_total", "Public HTTP streams closed for exceeding the idle timeout.", "counter", s.metrics.publicRequestStreamIdleTimeoutsTotal.Load())
+	writeMetric(w, "porthook_gateway_public_request_stream_max_lifetime_total", "Public HTTP streams closed for exceeding their maximum lifetime.", "counter", s.metrics.publicRequestStreamMaxLifetimeTotal.Load())
 	writeMetric(w, "porthook_gateway_public_request_body_too_large_total", "Public HTTP requests rejected because the request body was too large.", "counter", s.metrics.publicRequestBodyTooLargeTotal.Load())
 	writeMetric(w, "porthook_gateway_public_request_client_canceled_total", "Public HTTP requests canceled by the client before completion.", "counter", s.metrics.publicRequestClientCanceledTotal.Load())
 	writeMetric(w, "porthook_gateway_public_request_no_active_session_total", "Public HTTP requests for hosts without an active tunnel session.", "counter", s.metrics.publicRequestNoActiveSessionTotal.Load())
@@ -73,6 +77,10 @@ func (s *Server) recordPublicRequestMetrics(status int, outcome string) {
 		s.metrics.publicRequestAuthAttemptsLimitedTotal.Add(1)
 	case "tunnel_timeout":
 		s.metrics.publicRequestTimeoutsTotal.Add(1)
+	case "stream_idle_timeout":
+		s.metrics.publicRequestStreamIdleTimeoutsTotal.Add(1)
+	case "stream_max_lifetime_exceeded":
+		s.metrics.publicRequestStreamMaxLifetimeTotal.Add(1)
 	case "request_body_too_large":
 		s.metrics.publicRequestBodyTooLargeTotal.Add(1)
 	case "client_canceled":

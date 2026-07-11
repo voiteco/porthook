@@ -30,7 +30,9 @@ const (
 	defaultWriteTimeout            = 35 * time.Second
 	defaultIdleTimeout             = 120 * time.Second
 	defaultHandshakeTimeout        = 10 * time.Second
-	defaultStreamTimeout           = 30 * time.Second
+	defaultStreamRequestTimeout    = 30 * time.Second
+	defaultStreamIdleTimeout       = 60 * time.Second
+	defaultStreamMaxLifetime       = time.Hour
 	defaultWebSocketWriteTimeout   = 10 * time.Second
 	defaultWebSocketPingInterval   = 15 * time.Second
 	defaultWebSocketPongTimeout    = 5 * time.Second
@@ -67,7 +69,9 @@ type Config struct {
 	WriteTimeout               time.Duration
 	IdleTimeout                time.Duration
 	HandshakeTimeout           time.Duration
-	StreamTimeout              time.Duration
+	StreamRequestTimeout       time.Duration
+	StreamIdleTimeout          time.Duration
+	StreamMaxLifetime          time.Duration
 	WebSocketWriteTimeout      time.Duration
 	WebSocketPingInterval      time.Duration
 	WebSocketPongTimeout       time.Duration
@@ -106,7 +110,9 @@ func ConfigFromEnv() Config {
 		WriteTimeout:               envDuration("PORTHOOK_WRITE_TIMEOUT", defaultWriteTimeout),
 		IdleTimeout:                envDuration("PORTHOOK_IDLE_TIMEOUT", defaultIdleTimeout),
 		HandshakeTimeout:           envDuration("PORTHOOK_HANDSHAKE_TIMEOUT", defaultHandshakeTimeout),
-		StreamTimeout:              envDuration("PORTHOOK_STREAM_TIMEOUT", defaultStreamTimeout),
+		StreamRequestTimeout:       envDuration("PORTHOOK_STREAM_REQUEST_TIMEOUT", defaultStreamRequestTimeout),
+		StreamIdleTimeout:          envDuration("PORTHOOK_STREAM_IDLE_TIMEOUT", defaultStreamIdleTimeout),
+		StreamMaxLifetime:          envDuration("PORTHOOK_STREAM_MAX_LIFETIME", defaultStreamMaxLifetime),
 		WebSocketWriteTimeout:      envDuration("PORTHOOK_WS_WRITE_TIMEOUT", defaultWebSocketWriteTimeout),
 		WebSocketPingInterval:      envDuration("PORTHOOK_WS_PING_INTERVAL", defaultWebSocketPingInterval),
 		WebSocketPongTimeout:       envDuration("PORTHOOK_WS_PONG_TIMEOUT", defaultWebSocketPongTimeout),
@@ -183,8 +189,18 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.HandshakeTimeout <= 0 {
 		cfg.HandshakeTimeout = defaultHandshakeTimeout
 	}
-	if cfg.StreamTimeout <= 0 {
-		cfg.StreamTimeout = defaultStreamTimeout
+	if cfg.StreamRequestTimeout <= 0 {
+		cfg.StreamRequestTimeout = defaultStreamRequestTimeout
+	}
+	// StreamIdleTimeout may be explicitly set to 0 to disable idle
+	// detection and rely solely on StreamMaxLifetime as the safety net.
+	if cfg.StreamIdleTimeout < 0 {
+		cfg.StreamIdleTimeout = defaultStreamIdleTimeout
+	}
+	// StreamMaxLifetime is always enforced: it is the last-resort bound on
+	// stream memory and goroutine usage and cannot be disabled.
+	if cfg.StreamMaxLifetime <= 0 {
+		cfg.StreamMaxLifetime = defaultStreamMaxLifetime
 	}
 	if cfg.WebSocketWriteTimeout <= 0 {
 		cfg.WebSocketWriteTimeout = defaultWebSocketWriteTimeout

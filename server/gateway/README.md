@@ -50,10 +50,12 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_STREAM_CHUNK_BYTES` | `32768` | Maximum HTTP body chunk size for tunnel messages. |
 | `PORTHOOK_READ_HEADER_TIMEOUT` | `5s` | HTTP request header read timeout. |
 | `PORTHOOK_READ_TIMEOUT` | `30s` | HTTP request read timeout. |
-| `PORTHOOK_WRITE_TIMEOUT` | `35s` | HTTP response write timeout. |
+| `PORTHOOK_WRITE_TIMEOUT` | `35s` | HTTP response write timeout for the agent and management listeners. Not applied to the public listener, whose response duration is governed by the stream request/idle/max-lifetime policy below so SSE, long polling, and WebSocket tunnels are not killed on a fixed schedule. |
 | `PORTHOOK_IDLE_TIMEOUT` | `120s` | HTTP keep-alive idle timeout. |
 | `PORTHOOK_HANDSHAKE_TIMEOUT` | `10s` | Agent authentication and tunnel registration timeout. |
-| `PORTHOOK_STREAM_TIMEOUT` | `30s` | Public request round-trip timeout over the tunnel. |
+| `PORTHOOK_STREAM_REQUEST_TIMEOUT` | `30s` | Maximum time to wait for the local service's first response byte on a public request. Stops applying once the response starts. |
+| `PORTHOOK_STREAM_IDLE_TIMEOUT` | `60s` | Maximum gap between response activity once a public stream is underway; resets on every chunk. Set `0s` to disable idle detection and rely only on the max lifetime. |
+| `PORTHOOK_STREAM_MAX_LIFETIME` | `1h` | Absolute cap on a public stream's total duration regardless of activity. Always enforced; cannot be disabled. |
 | `PORTHOOK_WS_WRITE_TIMEOUT` | `10s` | WebSocket message write timeout. |
 | `PORTHOOK_WS_PING_INTERVAL` | `15s` | WebSocket keepalive ping interval. |
 | `PORTHOOK_WS_PONG_TIMEOUT` | `5s` | WebSocket keepalive pong timeout. |
