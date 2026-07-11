@@ -2175,6 +2175,169 @@ func TestPublicRequestTimeoutSendsStreamCancel(t *testing.T) {
 	}
 }
 
+func TestPublicRequestPropagatesClientCancellationToAgent(t *testing.T) {
+	cfg := testConfig()
+	cfg.StreamRequestTimeout = 5 * time.Second
+	cfg.RequestLogLimit = 10
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+	waitForSession(t, ctx, server, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+
+		var cancelEnv messages.Envelope
+		if err := wsjson.Read(ctx, conn, &cancelEnv); err != nil {
+			agentErr <- err
+			return
+		}
+		if cancelEnv.Type != messages.TypeHTTPStreamCancel {
+			agentErr <- errUnexpectedType(cancelEnv.Type, messages.TypeHTTPStreamCancel)
+			return
+		}
+		if cancelEnv.StreamID != reqEnv.StreamID {
+			agentErr <- errString("cancel stream id did not match request")
+			return
+		}
+		payload, err := messages.DecodePayload[messages.StreamCancel](cancelEnv)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		if payload.Reason != "public request canceled" {
+			agentErr <- errString("cancel reason was not the client-cancellation reason: " + payload.Reason)
+			return
+		}
+		agentErr <- nil
+	}()
+
+	reqCtx, cancelReq := context.WithCancel(ctx)
+	reqErr := make(chan error, 1)
+	go func() {
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, publicServer.URL+"/never-responds", nil)
+		if err != nil {
+			reqErr <- err
+			return
+		}
+		req.Host = "demo.localhost"
+		_, err = publicServer.Client().Do(req)
+		reqErr <- err
+	}()
+
+	// Give the request time to reach the agent before the client gives up.
+	time.Sleep(50 * time.Millisecond)
+	cancelReq()
+
+	select {
+	case err := <-reqErr:
+		if err == nil {
+			t.Fatal("public request returned nil error, want a cancellation error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the canceled public request to return")
+	}
+
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		logs := server.requestLogs.list(1)
+		if len(logs) == 1 {
+			if logs[0].Outcome != "client_canceled" {
+				t.Fatalf("outcome = %q, want client_canceled", logs[0].Outcome)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for the request log entry")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestPublicRequestPreservesRepeatedHeadersAndCookies(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		agentErr <- writeStreamedResponse(ctx, conn, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+			Status: http.StatusOK,
+			Header: http.Header{
+				"Set-Cookie": []string{"a=1; Path=/", "b=2; Path=/; HttpOnly"},
+				"X-Multi":    []string{"first", "second"},
+			},
+			Body: []byte("ok"),
+		})
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/cookies", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	req.Host = "demo.localhost"
+
+	resp, err := publicServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("public request returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if cookies := resp.Header["Set-Cookie"]; len(cookies) != 2 || cookies[0] != "a=1; Path=/" || cookies[1] != "b=2; Path=/; HttpOnly" {
+		t.Fatalf("Set-Cookie = %v, want two distinct cookie headers preserved", cookies)
+	}
+	if multi := resp.Header["X-Multi"]; len(multi) != 2 || multi[0] != "first" || multi[1] != "second" {
+		t.Fatalf("X-Multi = %v, want [first second]", multi)
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+}
+
 func TestPublicRequestSurvivesIdleGapsPastTheRequestTimeout(t *testing.T) {
 	cfg := testConfig()
 	cfg.StreamRequestTimeout = 150 * time.Millisecond
