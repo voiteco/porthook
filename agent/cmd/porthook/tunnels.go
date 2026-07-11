@@ -204,14 +204,6 @@ func newTunnelAPIClient(cfg tunnelCLIConfig) tunnelAPIClient {
 	}
 }
 
-func newDirectTunnelAPIClient(baseURL string, timeout time.Duration) tunnelAPIClient {
-	return tunnelAPIClient{
-		baseURL:   baseURL,
-		apiPrefix: "/api/v1",
-		client:    &http.Client{Timeout: timeout},
-	}
-}
-
 func (c tunnelAPIClient) listTunnels(ctx context.Context) (listTunnelsResponse, error) {
 	var listed listTunnelsResponse
 	if err := c.do(ctx, http.MethodGet, c.apiPrefix+"/tunnels", &listed); err != nil {

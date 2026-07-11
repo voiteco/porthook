@@ -18,12 +18,11 @@ import (
 
 const defaultOperationalExportTimeout = 10 * time.Second
 const defaultOperationalExportLimit = 100
-const operationalExportSchemaVersion = 2
+const operationalExportSchemaVersion = 3
 
-const operationalExportUsageText = `usage: porthook export [--gateway URL] [--control-plane URL] [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--event-limit N] [--request-log-limit N] [--output FILE]`
+const operationalExportUsageText = `usage: porthook export --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--event-limit N] [--request-log-limit N] [--output FILE]`
 
 type operationalExportConfig struct {
-	gatewayURL      string
 	controlPlaneURL string
 	adminToken      string
 	adminTokenStdin bool
@@ -46,7 +45,6 @@ type operationalExportSnapshot struct {
 
 type operationalExportSources struct {
 	ControlPlaneURL string `json:"control_plane_url,omitempty"`
-	GatewayURL      string `json:"gateway_url,omitempty"`
 	EventLimit      int    `json:"event_limit"`
 	RequestLogLimit int    `json:"request_log_limit"`
 }
@@ -156,17 +154,13 @@ func parseOperationalExportConfig(args []string, stdin io.Reader, stderr io.Writ
 	if fs.NArg() > 0 {
 		return operationalExportConfig{}, fmt.Errorf("%s", operationalExportUsageText)
 	}
-	if err := finalizeOperationalExportConfig(fs, &cfg, stdin); err != nil {
+	if err := finalizeOperationalExportConfig(&cfg, stdin); err != nil {
 		return operationalExportConfig{}, err
 	}
 	return cfg, nil
 }
 
 func newOperationalExportFlagSet(cfg *operationalExportConfig, stderr io.Writer) *flag.FlagSet {
-	cfg.gatewayURL = strings.TrimSpace(os.Getenv("PORTHOOK_GATEWAY_URL"))
-	if cfg.gatewayURL == "" {
-		cfg.gatewayURL = defaultDoctorGatewayURL
-	}
 	cfg.controlPlaneURL = strings.TrimSpace(os.Getenv("PORTHOOK_CONTROL_PLANE_URL"))
 	cfg.adminToken = strings.TrimSpace(os.Getenv("PORTHOOK_CONTROL_ADMIN_TOKEN"))
 	cfg.timeout = defaultOperationalExportTimeout
@@ -175,7 +169,6 @@ func newOperationalExportFlagSet(cfg *operationalExportConfig, stderr io.Writer)
 
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&cfg.gatewayURL, "gateway", cfg.gatewayURL, "gateway public URL")
 	fs.StringVar(&cfg.controlPlaneURL, "control-plane", cfg.controlPlaneURL, "control-plane API URL")
 	fs.StringVar(&cfg.adminToken, "admin-token", cfg.adminToken, "control-plane admin token")
 	fs.BoolVar(&cfg.adminTokenStdin, "admin-token-stdin", cfg.adminTokenStdin, "read control-plane admin token from stdin")
@@ -186,24 +179,13 @@ func newOperationalExportFlagSet(cfg *operationalExportConfig, stderr io.Writer)
 	return fs
 }
 
-func finalizeOperationalExportConfig(fs *flag.FlagSet, cfg *operationalExportConfig, stdin io.Reader) error {
-	cfg.gatewayURL = strings.TrimSpace(cfg.gatewayURL)
-	if cfg.gatewayURL != "" {
-		gatewayURL, err := normalizeDoctorURL(cfg.gatewayURL, "gateway URL")
-		if err != nil {
-			return err
-		}
-		cfg.gatewayURL = gatewayURL
-	}
-
+func finalizeOperationalExportConfig(cfg *operationalExportConfig, stdin io.Reader) error {
 	cfg.controlPlaneURL = strings.TrimSpace(cfg.controlPlaneURL)
-	if cfg.controlPlaneURL != "" {
-		controlPlaneURL, err := normalizeControlPlaneURL(cfg.controlPlaneURL)
-		if err != nil {
-			return err
-		}
-		cfg.controlPlaneURL = controlPlaneURL
+	controlPlaneURL, err := normalizeControlPlaneURL(cfg.controlPlaneURL)
+	if err != nil {
+		return err
 	}
+	cfg.controlPlaneURL = controlPlaneURL
 
 	cfg.adminToken = strings.TrimSpace(cfg.adminToken)
 	if cfg.adminToken != "" && cfg.adminTokenStdin {
@@ -220,8 +202,8 @@ func finalizeOperationalExportConfig(fs *flag.FlagSet, cfg *operationalExportCon
 		}
 	}
 
-	if cfg.gatewayURL == "" && cfg.controlPlaneURL == "" {
-		return fmt.Errorf("gateway URL or control-plane URL is required")
+	if cfg.adminToken == "" {
+		return fmt.Errorf("admin token is required; use --admin-token or --admin-token-stdin")
 	}
 	if cfg.timeout <= 0 {
 		return fmt.Errorf("timeout must be positive")
@@ -249,24 +231,18 @@ func collectOperationalExport(ctx context.Context, cfg operationalExportConfig) 
 		Version:       version,
 		Sources: operationalExportSources{
 			ControlPlaneURL: cfg.controlPlaneURL,
-			GatewayURL:      cfg.gatewayURL,
 			EventLimit:      cfg.eventLimit,
 			RequestLogLimit: cfg.requestLogLimit,
 		},
 	}
 	diagnostics := collectDoctorReport(ctx, doctorConfig{
-		gatewayURL:      cfg.gatewayURL,
 		controlPlaneURL: cfg.controlPlaneURL,
 		adminToken:      cfg.adminToken,
 		timeout:         cfg.timeout,
 	})
 	snapshot.Diagnostics = &diagnostics
-	if cfg.controlPlaneURL != "" {
-		collectControlPlaneExport(ctx, cfg, &snapshot)
-	}
-	if cfg.gatewayURL != "" {
-		collectGatewayExport(ctx, cfg, &snapshot)
-	}
+	collectControlPlaneExport(ctx, cfg, &snapshot)
+	collectGatewayExport(ctx, cfg, &snapshot)
 	return snapshot
 }
 
@@ -333,7 +309,13 @@ func collectGatewayExport(ctx context.Context, cfg operationalExportConfig, snap
 	}
 	snapshot.Gateway = gateway
 
-	gatewayClient := newDirectTunnelAPIClient(cfg.gatewayURL, cfg.timeout)
+	gatewayClient := newTunnelAPIClient(tunnelCLIConfig{
+		tokenAdminConfig: tokenAdminConfig{
+			controlPlaneURL: cfg.controlPlaneURL,
+			adminToken:      cfg.adminToken,
+		},
+		timeout: cfg.timeout,
+	})
 
 	if listed, err := gatewayClient.listTunnels(ctx); err != nil {
 		addOperationalExportError(snapshot, "gateway", "/api/v1/tunnels", err)
@@ -352,13 +334,13 @@ func collectGatewayExport(ctx context.Context, cfg operationalExportConfig, snap
 	var runtime struct {
 		Runtime map[string]any `json:"runtime"`
 	}
-	if err := gatewayClient.do(ctx, http.MethodGet, "/api/v1/runtime", &runtime); err != nil {
+	if err := gatewayClient.do(ctx, http.MethodGet, gatewayClient.apiPrefix+"/runtime", &runtime); err != nil {
 		addOperationalExportError(snapshot, "gateway", "/api/v1/runtime", err)
 	} else {
 		gateway.Runtime = runtime.Runtime
 	}
 
-	if metricsText, err := gatewayClient.getText(ctx, "/metrics"); err != nil {
+	if metricsText, err := gatewayClient.getText(ctx, gatewayClient.apiPrefix+"/metrics"); err != nil {
 		addOperationalExportError(snapshot, "gateway", "/metrics", err)
 	} else {
 		gateway.MetricsText = metricsText
@@ -366,7 +348,7 @@ func collectGatewayExport(ctx context.Context, cfg operationalExportConfig, snap
 	}
 
 	var logs operationalExportRequestLogsResponse
-	requestLogsPath := "/api/v1/request-logs?limit=" + strconv.Itoa(cfg.requestLogLimit)
+	requestLogsPath := gatewayClient.apiPrefix + "/request-logs?limit=" + strconv.Itoa(cfg.requestLogLimit)
 	if err := gatewayClient.do(ctx, http.MethodGet, requestLogsPath, &logs); err != nil {
 		addOperationalExportError(snapshot, "gateway", "/api/v1/request-logs", err)
 	} else {
@@ -391,6 +373,9 @@ func (c tunnelAPIClient) getText(ctx context.Context, path string) (string, erro
 		return "", err
 	}
 	req.Header.Set("Accept", "text/plain, */*;q=0.1")
+	if c.adminToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.adminToken)
+	}
 	req.Header.Set("User-Agent", "porthook/"+version+" export")
 
 	resp, err := c.client.Do(req)
@@ -509,12 +494,11 @@ func pluralSuffix(count int) string {
 }
 
 func printOperationalExportHelp(w io.Writer) {
-	fmt.Fprintln(w, `usage: porthook export [--gateway URL] [--control-plane URL] [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--event-limit N] [--request-log-limit N] [--output FILE]
+	fmt.Fprintln(w, `usage: porthook export --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--event-limit N] [--request-log-limit N] [--output FILE]
 
 Write a best-effort operational JSON snapshot. The export includes public gateway state, safe control-plane summaries, diagnostics, audit events, metrics, and request logs. It does not include plaintext agent tokens, policy secrets, or local target URLs.
 
 Options:
-  --gateway URL             Gateway public URL. Defaults to PORTHOOK_GATEWAY_URL or http://localhost:8080.
   --control-plane URL       Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.
   --admin-token TOKEN       Control-plane admin token for protected control-plane sections.
   --admin-token-stdin       Read the control-plane admin token from stdin.

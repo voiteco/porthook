@@ -48,28 +48,27 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 			default:
 				t.Fatalf("event limit = %q, want 1 or 5", got)
 			}
-		default:
-			t.Fatalf("unexpected control-plane request: %s", r.URL.Path)
-		}
-	}))
-	defer controlPlane.Close()
-
-	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/healthz":
+		case "/api/v1/gateway/healthz":
+			requireAdminAuth(t, r, &authorizedAdminCalls)
 			_, _ = w.Write([]byte("ok\n"))
-		case "/readyz":
+		case "/api/v1/gateway/readyz":
+			requireAdminAuth(t, r, &authorizedAdminCalls)
 			_, _ = w.Write([]byte("ready\n"))
-		case "/api/v1/tunnels":
+		case "/api/v1/gateway/tunnels":
+			requireAdminAuth(t, r, &authorizedAdminCalls)
 			_ = json.NewEncoder(w).Encode(listTunnelsResponse{Tunnels: []tunnelSummaryCLI{{TunnelID: "tun_demo", Subdomain: "demo", PublicURL: "http://demo.example.test", Protocol: "http", ConnectedAt: now}}})
-		case "/api/v1/tunnels/tun_demo":
+		case "/api/v1/gateway/tunnels/tun_demo":
+			requireAdminAuth(t, r, &authorizedAdminCalls)
 			_ = json.NewEncoder(w).Encode(showTunnelResponse{Tunnel: tunnelDetailCLI{TunnelID: "tun_demo", Subdomain: "demo", PublicURL: "http://demo.example.test", Protocol: "http", ConnectedAt: now, ConnectedSeconds: 60, StreamCapacity: 4}})
-		case "/api/v1/runtime":
+		case "/api/v1/gateway/runtime":
+			requireAdminAuth(t, r, &authorizedAdminCalls)
 			_, _ = w.Write([]byte(`{"runtime":{"active_tunnels":1,"stream_capacity":4}}`))
-		case "/metrics":
+		case "/api/v1/gateway/metrics":
+			requireAdminAuth(t, r, &authorizedAdminCalls)
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte("# HELP porthook_gateway_active_tunnels Active tunnels\n# TYPE porthook_gateway_active_tunnels gauge\nporthook_gateway_active_tunnels 1\n"))
-		case "/api/v1/request-logs":
+		case "/api/v1/gateway/request-logs":
+			requireAdminAuth(t, r, &authorizedAdminCalls)
 			switch got := r.URL.Query().Get("limit"); got {
 			case "1":
 				_ = json.NewEncoder(w).Encode(operationalExportRequestLogsResponse{RequestLogs: []operationalExportRequestLog{{Time: now, Method: http.MethodGet, Host: "demo.example.test", Path: "/", RemoteIP: "192.0.2.1", RequestID: "req_diag", Subdomain: "demo", Status: http.StatusOK, Outcome: "completed", DurationMS: 10}}})
@@ -79,16 +78,15 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 				t.Fatalf("request log limit = %q, want 1 or 7", got)
 			}
 		default:
-			t.Fatalf("unexpected gateway request: %s", r.URL.Path)
+			t.Fatalf("unexpected control-plane request: %s", r.URL.Path)
 		}
 	}))
-	defer gateway.Close()
+	defer controlPlane.Close()
 
 	var stdout, stderr bytes.Buffer
 	err := runWithIO([]string{
 		"export",
 		"--control-plane", controlPlane.URL,
-		"--gateway", gateway.URL,
 		"--admin-token", "admin",
 		"--event-limit", "5",
 		"--request-log-limit", "7",
@@ -99,8 +97,8 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	if authorizedAdminCalls != 6 {
-		t.Fatalf("authorized admin calls = %d, want 6", authorizedAdminCalls)
+	if authorizedAdminCalls != 17 {
+		t.Fatalf("authorized admin calls = %d, want 17", authorizedAdminCalls)
 	}
 	var snapshot operationalExportSnapshot
 	if err := json.NewDecoder(&stdout).Decode(&snapshot); err != nil {
@@ -136,22 +134,29 @@ func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 }
 
 func TestRunOperationalExportRecordsPartialErrors(t *testing.T) {
-	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/gateway/") {
+			assertBearer(t, r, "admin")
+		}
 		switch r.URL.Path {
 		case "/healthz", "/readyz":
 			_, _ = w.Write([]byte("ok\n"))
-		case "/api/v1/tunnels":
+		case "/api/v1/status", "/api/v1/tokens", "/api/v1/reserved-subdomains", "/api/v1/custom-domains", "/api/v1/access-policies", "/api/v1/events":
+			_, _ = w.Write([]byte(`{}`))
+		case "/api/v1/gateway/healthz", "/api/v1/gateway/readyz":
+			_, _ = w.Write([]byte("ok\n"))
+		case "/api/v1/gateway/tunnels":
 			http.Error(w, "gateway unavailable", http.StatusServiceUnavailable)
-		case "/api/v1/runtime", "/metrics", "/api/v1/request-logs":
+		case "/api/v1/gateway/runtime", "/api/v1/gateway/metrics", "/api/v1/gateway/request-logs":
 			_, _ = w.Write([]byte(`{}`))
 		default:
-			t.Fatalf("unexpected gateway request: %s", r.URL.Path)
+			t.Fatalf("unexpected control-plane request: %s", r.URL.Path)
 		}
 	}))
-	defer gateway.Close()
+	defer controlPlane.Close()
 
 	var stdout, stderr bytes.Buffer
-	err := runWithIO([]string{"export", "--gateway", gateway.URL, "--control-plane", ""}, strings.NewReader(""), &stdout, &stderr)
+	err := runWithIO([]string{"export", "--control-plane", controlPlane.URL, "--admin-token", "admin"}, strings.NewReader(""), &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run export returned error: %v", err)
 	}
@@ -168,27 +173,34 @@ func TestRunOperationalExportRecordsPartialErrors(t *testing.T) {
 }
 
 func TestRunOperationalExportWritesOutputFile(t *testing.T) {
-	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/gateway/") {
+			assertBearer(t, r, "admin")
+		}
 		switch r.URL.Path {
 		case "/healthz", "/readyz":
 			_, _ = w.Write([]byte("ok\n"))
-		case "/api/v1/tunnels":
+		case "/api/v1/status", "/api/v1/tokens", "/api/v1/reserved-subdomains", "/api/v1/custom-domains", "/api/v1/access-policies", "/api/v1/events":
+			_, _ = w.Write([]byte(`{}`))
+		case "/api/v1/gateway/healthz", "/api/v1/gateway/readyz":
+			_, _ = w.Write([]byte("ok\n"))
+		case "/api/v1/gateway/tunnels":
 			_, _ = w.Write([]byte(`{"tunnels":[]}`))
-		case "/api/v1/runtime":
+		case "/api/v1/gateway/runtime":
 			_, _ = w.Write([]byte(`{"runtime":{}}`))
-		case "/metrics":
+		case "/api/v1/gateway/metrics":
 			_, _ = w.Write([]byte(""))
-		case "/api/v1/request-logs":
+		case "/api/v1/gateway/request-logs":
 			_, _ = w.Write([]byte(`{"request_logs":[]}`))
 		default:
-			t.Fatalf("unexpected gateway request: %s", r.URL.Path)
+			t.Fatalf("unexpected control-plane request: %s", r.URL.Path)
 		}
 	}))
-	defer gateway.Close()
+	defer controlPlane.Close()
 
 	outputPath := filepath.Join(t.TempDir(), "porthook-export.json")
 	var stdout, stderr bytes.Buffer
-	err := runWithIO([]string{"export", "--gateway", gateway.URL, "--control-plane", "", "--output", outputPath}, strings.NewReader(""), &stdout, &stderr)
+	err := runWithIO([]string{"export", "--control-plane", controlPlane.URL, "--admin-token-stdin", "--output", outputPath}, strings.NewReader("admin\n"), &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run export returned error: %v", err)
 	}
@@ -205,6 +217,19 @@ func TestRunOperationalExportWritesOutputFile(t *testing.T) {
 	}
 	if snapshot.Gateway == nil {
 		t.Fatal("gateway snapshot is nil, want gateway data")
+	}
+}
+
+func TestRunOperationalExportRequiresAdminToken(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := runWithIO(
+		[]string{"export", "--control-plane", "http://127.0.0.1:8082"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	)
+	if err == nil || !strings.Contains(err.Error(), "admin token is required") {
+		t.Fatalf("error = %v, want admin token guidance", err)
 	}
 }
 

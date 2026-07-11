@@ -17,14 +17,12 @@ import (
 )
 
 const (
-	defaultDoctorGatewayURL = "http://localhost:8080"
-	defaultDoctorTimeout    = 5 * time.Second
+	defaultDoctorTimeout = 5 * time.Second
 )
 
 const doctorUsageText = `usage: porthook doctor --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--json]`
 
 type doctorConfig struct {
-	gatewayURL       string
 	controlPlaneURL  string
 	adminToken       string
 	adminTokenStdin  bool
@@ -107,45 +105,17 @@ func collectDoctorReport(ctx context.Context, cfg doctorConfig) doctorReport {
 	client := &http.Client{Timeout: cfg.timeout}
 	report := doctorReport{OK: true}
 
-	if cfg.gatewayURL != "" {
-		report.add(runDoctorGET(ctx, client, "gateway", "health", cfg.gatewayURL+"/healthz", nil, plainDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "readiness", cfg.gatewayURL+"/readyz", nil, plainDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "tunnels API", cfg.gatewayURL+"/api/v1/tunnels", nil, tunnelsDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "runtime API", cfg.gatewayURL+"/api/v1/runtime", nil, runtimeDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "request logs API", cfg.gatewayURL+"/api/v1/request-logs?limit=1", nil, requestLogsDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "metrics", cfg.gatewayURL+"/metrics", nil, metricsDoctorDetail))
-	} else if cfg.controlPlaneURL == "" || cfg.adminToken == "" {
-		report.add(skippedDoctorCheck("gateway", "health", "control-plane operator access is not configured"))
-		report.add(skippedDoctorCheck("gateway", "readiness", "control-plane operator access is not configured"))
-		report.add(skippedDoctorCheck("gateway", "tunnels API", "control-plane operator access is not configured"))
-		report.add(skippedDoctorCheck("gateway", "runtime API", "control-plane operator access is not configured"))
-		report.add(skippedDoctorCheck("gateway", "request logs API", "control-plane operator access is not configured"))
-		report.add(skippedDoctorCheck("gateway", "metrics", "control-plane operator access is not configured"))
-	} else {
-		headers := map[string]string{"Authorization": "Bearer " + cfg.adminToken}
-		report.add(runDoctorGET(ctx, client, "gateway", "health", cfg.controlPlaneURL+"/api/v1/gateway/healthz", headers, plainDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "readiness", cfg.controlPlaneURL+"/api/v1/gateway/readyz", headers, plainDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "tunnels API", cfg.controlPlaneURL+"/api/v1/gateway/tunnels", headers, tunnelsDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "runtime API", cfg.controlPlaneURL+"/api/v1/gateway/runtime", headers, runtimeDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "request logs API", cfg.controlPlaneURL+"/api/v1/gateway/request-logs?limit=1", headers, requestLogsDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "gateway", "metrics", cfg.controlPlaneURL+"/api/v1/gateway/metrics", headers, metricsDoctorDetail))
-	}
-
-	if cfg.controlPlaneURL == "" {
-		report.add(skippedDoctorCheck("control-plane", "health", "control-plane URL is not configured"))
-		report.add(skippedDoctorCheck("control-plane", "readiness", "control-plane URL is not configured"))
-		report.add(skippedDoctorCheck("control-plane", "status API", "control-plane URL is not configured"))
-	} else {
-		report.add(runDoctorGET(ctx, client, "control-plane", "health", cfg.controlPlaneURL+"/healthz", nil, plainDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "control-plane", "readiness", cfg.controlPlaneURL+"/readyz", nil, plainDoctorDetail))
-		report.add(runDoctorGET(ctx, client, "control-plane", "status API", cfg.controlPlaneURL+"/api/v1/status", nil, controlPlaneStatusDoctorDetail))
-		if cfg.adminToken == "" {
-			report.add(skippedDoctorCheck("control-plane", "audit events API", "admin token is not configured"))
-		} else {
-			headers := map[string]string{"Authorization": "Bearer " + cfg.adminToken}
-			report.add(runDoctorGET(ctx, client, "control-plane", "audit events API", cfg.controlPlaneURL+"/api/v1/events?limit=1", headers, auditEventsDoctorDetail))
-		}
-	}
+	headers := map[string]string{"Authorization": "Bearer " + cfg.adminToken}
+	report.add(runDoctorGET(ctx, client, "gateway", "health", cfg.controlPlaneURL+"/api/v1/gateway/healthz", headers, plainDoctorDetail))
+	report.add(runDoctorGET(ctx, client, "gateway", "readiness", cfg.controlPlaneURL+"/api/v1/gateway/readyz", headers, plainDoctorDetail))
+	report.add(runDoctorGET(ctx, client, "gateway", "tunnels API", cfg.controlPlaneURL+"/api/v1/gateway/tunnels", headers, tunnelsDoctorDetail))
+	report.add(runDoctorGET(ctx, client, "gateway", "runtime API", cfg.controlPlaneURL+"/api/v1/gateway/runtime", headers, runtimeDoctorDetail))
+	report.add(runDoctorGET(ctx, client, "gateway", "request logs API", cfg.controlPlaneURL+"/api/v1/gateway/request-logs?limit=1", headers, requestLogsDoctorDetail))
+	report.add(runDoctorGET(ctx, client, "gateway", "metrics", cfg.controlPlaneURL+"/api/v1/gateway/metrics", headers, metricsDoctorDetail))
+	report.add(runDoctorGET(ctx, client, "control-plane", "health", cfg.controlPlaneURL+"/healthz", nil, plainDoctorDetail))
+	report.add(runDoctorGET(ctx, client, "control-plane", "readiness", cfg.controlPlaneURL+"/readyz", nil, plainDoctorDetail))
+	report.add(runDoctorGET(ctx, client, "control-plane", "status API", cfg.controlPlaneURL+"/api/v1/status", nil, controlPlaneStatusDoctorDetail))
+	report.add(runDoctorGET(ctx, client, "control-plane", "audit events API", cfg.controlPlaneURL+"/api/v1/events?limit=1", headers, auditEventsDoctorDetail))
 
 	return report
 }
@@ -268,16 +238,6 @@ func runDoctorGET(ctx context.Context, client *http.Client, component string, na
 		check.Detail = http.StatusText(resp.StatusCode)
 	}
 	return check
-}
-
-func skippedDoctorCheck(component string, name string, detail string) doctorCheck {
-	return doctorCheck{
-		Name:      name,
-		Component: component,
-		OK:        true,
-		Skipped:   true,
-		Detail:    detail,
-	}
 }
 
 func (r *doctorReport) add(check doctorCheck) {
