@@ -541,9 +541,7 @@ func TestRunnerStreamsLocalResponseBeforeCompletion(t *testing.T) {
 	if err := runner.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if !bytes.Contains(output.Bytes(), []byte("GET /slow -> 200")) {
-		t.Fatalf("output does not contain request log: %q", output.String())
-	}
+	waitForRunnerOutput(t, runner, &output, "GET /slow -> 200")
 }
 
 func TestRunnerHandlesConcurrentHTTPRequests(t *testing.T) {
