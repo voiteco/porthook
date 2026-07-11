@@ -5,6 +5,7 @@ package messages
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -106,19 +107,49 @@ func TestStreamingMessageTypeValues(t *testing.T) {
 
 func TestDefaultProtocolCapabilities(t *testing.T) {
 	capabilities := DefaultProtocolCapabilities()
-	if len(capabilities) != 3 {
-		t.Fatalf("capabilities length = %d, want 3", len(capabilities))
-	}
-	if !reflect.DeepEqual(capabilities, []string{
+	want := []string{
 		CapabilityStreamStartEnd,
 		CapabilityBinaryBodyFrame,
 		CapabilityStreamCancel,
-	}) {
-		t.Fatalf("capabilities = %v, want %v", capabilities, []string{
-			CapabilityStreamStartEnd,
-			CapabilityBinaryBodyFrame,
-			CapabilityStreamCancel,
-		})
+		CapabilityWebSocketTunnel,
+	}
+	if !reflect.DeepEqual(capabilities, want) {
+		t.Fatalf("capabilities = %v, want %v", capabilities, want)
+	}
+}
+
+func TestRequiredProtocolCapabilities(t *testing.T) {
+	required := RequiredProtocolCapabilities()
+	want := []string{
+		CapabilityStreamStartEnd,
+		CapabilityBinaryBodyFrame,
+		CapabilityStreamCancel,
+	}
+	if !reflect.DeepEqual(required, want) {
+		t.Fatalf("required capabilities = %v, want %v", required, want)
+	}
+	if slices.Contains(required, CapabilityWebSocketTunnel) {
+		t.Fatal("required capabilities unexpectedly include websocket_tunnel, which must stay optional for v0.2 interoperability")
+	}
+}
+
+func TestIsProtocolVersionSupported(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{"0.2", true},
+		{"0.3", true},
+		{"1.0", true},
+		{"0.1", false},
+		{"", false},
+		{"not-a-version", false},
+		{"0", false},
+	}
+	for _, tt := range tests {
+		if got := IsProtocolVersionSupported(tt.version); got != tt.want {
+			t.Errorf("IsProtocolVersionSupported(%q) = %v, want %v", tt.version, got, tt.want)
+		}
 	}
 }
 

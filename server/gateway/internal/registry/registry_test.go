@@ -47,6 +47,21 @@ func TestRegistryRegisterLookupAndUnregister(t *testing.T) {
 	}
 }
 
+func TestSessionHasCapability(t *testing.T) {
+	session := &Session{Capabilities: []string{"stream_start_end", "websocket_tunnel"}}
+	if !session.HasCapability("websocket_tunnel") {
+		t.Fatal("HasCapability(websocket_tunnel) = false, want true")
+	}
+	if session.HasCapability("missing") {
+		t.Fatal("HasCapability(missing) = true, want false")
+	}
+
+	var nilSession *Session
+	if nilSession.HasCapability("websocket_tunnel") {
+		t.Fatal("nil session HasCapability = true, want false")
+	}
+}
+
 func TestRegistryRejectsDuplicateSubdomain(t *testing.T) {
 	registry := New()
 

@@ -659,15 +659,15 @@ func (s *Server) authenticateAgent(ctx context.Context, conn *websocket.Conn) (a
 		_ = wsjson.Write(ctx, conn, authErr)
 		return agentIdentity{}, errors.New("invalid token")
 	}
-	if payload.ProtocolVersion != messages.ProtocolVersion {
+	if !messages.IsProtocolVersionSupported(payload.ProtocolVersion) {
 		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
 			Code:    "unsupported_protocol",
-			Message: fmt.Sprintf("protocol version %q is not supported, expected %q", payload.ProtocolVersion, messages.ProtocolVersion),
+			Message: fmt.Sprintf("protocol version %q is not supported, minimum supported version is %q", payload.ProtocolVersion, messages.MinSupportedProtocolVersion),
 		})
 		_ = wsjson.Write(ctx, conn, authErr)
 		return agentIdentity{}, fmt.Errorf("unsupported protocol version %q", payload.ProtocolVersion)
 	}
-	missing := messages.MissingRequiredCapabilities(payload.Capabilities, messages.DefaultProtocolCapabilities())
+	missing := messages.MissingRequiredCapabilities(payload.Capabilities, messages.RequiredProtocolCapabilities())
 	if len(missing) > 0 {
 		authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
 			Code:    "unsupported_protocol",
@@ -841,6 +841,7 @@ func (s *Server) newTunnelSession(payload messages.TunnelRegister, identity agen
 		Protocol:        payload.Protocol,
 		AgentVersion:    identity.AgentVersion,
 		ProtocolVersion: identity.ProtocolVersion,
+		Capabilities:    identity.Capabilities,
 		CreatedAt:       time.Now().UTC(),
 	}, nil
 }

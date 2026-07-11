@@ -21,7 +21,22 @@ type Session struct {
 	Protocol        string
 	AgentVersion    string
 	ProtocolVersion string
+	Capabilities    []string
 	CreatedAt       time.Time
+}
+
+// HasCapability reports whether the connected agent declared capability
+// during protocol negotiation.
+func (s *Session) HasCapability(capability string) bool {
+	if s == nil {
+		return false
+	}
+	for _, c := range s.Capabilities {
+		if c == capability {
+			return true
+		}
+	}
+	return false
 }
 
 type Registry struct {

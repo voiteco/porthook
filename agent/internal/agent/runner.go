@@ -173,11 +173,11 @@ func (r *Runner) authenticate(ctx context.Context, conn *websocket.Conn) error {
 }
 
 func (r *Runner) validateAuthOK(payload messages.AuthOK) error {
-	if payload.ProtocolVersion != messages.ProtocolVersion {
-		return fmt.Errorf("gateway protocol version %q is not supported, expected %q", payload.ProtocolVersion, messages.ProtocolVersion)
+	if !messages.IsProtocolVersionSupported(payload.ProtocolVersion) {
+		return fmt.Errorf("gateway protocol version %q is not supported, minimum supported version is %q", payload.ProtocolVersion, messages.MinSupportedProtocolVersion)
 	}
 
-	missing := messages.MissingRequiredCapabilities(payload.Capabilities, messages.DefaultProtocolCapabilities())
+	missing := messages.MissingRequiredCapabilities(payload.Capabilities, messages.RequiredProtocolCapabilities())
 	if len(missing) > 0 {
 		return fmt.Errorf("gateway protocol is incompatible: missing capabilities: %s", strings.Join(missing, ", "))
 	}

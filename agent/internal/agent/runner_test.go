@@ -880,6 +880,81 @@ func TestRunnerDoesNotReconnectAfterUnsupportedProtocolAuthOK(t *testing.T) {
 	}
 }
 
+func TestRunnerAcceptsOlderCompatibleGatewayProtocol(t *testing.T) {
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		var auth messages.Envelope
+		if err := wsjson.Read(r.Context(), conn, &auth); err != nil {
+			t.Errorf("read auth returned error: %v", err)
+			return
+		}
+		if _, err := messages.DecodePayload[messages.AuthRequest](auth); err != nil {
+			t.Errorf("decode auth request returned error: %v", err)
+			return
+		}
+
+		// Simulate a gateway built before WebSocket tunneling existed: it
+		// declares protocol 0.2 and only the baseline capabilities.
+		authOK, _ := messages.New(messages.TypeAuthOK, messages.AuthOK{
+			ProtocolVersion: "0.2",
+			Capabilities: []string{
+				messages.CapabilityStreamStartEnd,
+				messages.CapabilityBinaryBodyFrame,
+				messages.CapabilityStreamCancel,
+			},
+		})
+		if err := wsjson.Write(r.Context(), conn, authOK); err != nil {
+			t.Errorf("write auth ok returned error: %v", err)
+			return
+		}
+
+		registration, err := messages.New(messages.TypeTunnelError, messages.ErrorPayload{
+			Code:    "registration_failed",
+			Message: "stop after negotiation for this test",
+		})
+		if err != nil {
+			t.Errorf("New tunnel error returned error: %v", err)
+			return
+		}
+		_ = wsjson.Write(r.Context(), conn, registration)
+	}))
+	defer gateway.Close()
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:             gateway.URL,
+		Token:                 "dev-token",
+		LocalTarget:           "http://localhost:3000",
+		ReconnectInitialDelay: time.Millisecond,
+		ReconnectMaxDelay:     time.Millisecond,
+		ReconnectJitter:       0,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := runner.Run(ctx)
+	if err == nil {
+		t.Fatal("Run returned nil error")
+	}
+	// Authentication itself must succeed against the older gateway; the
+	// registration_failed error proves negotiation got past auth.
+	if !strings.Contains(err.Error(), "tunnel registration failed") {
+		t.Fatalf("error = %q, want tunnel registration failure, not an auth/protocol error", err.Error())
+	}
+}
+
 func TestRunnerCancelsLocalRequestOnStreamCancel(t *testing.T) {
 	localStarted := make(chan struct{})
 	localCanceled := make(chan struct{})

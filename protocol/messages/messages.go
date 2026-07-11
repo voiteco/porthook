@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 type Type string
@@ -32,19 +34,44 @@ const (
 	TypeHTTPStreamCancel  Type = "http.stream.cancel"
 )
 
-const ProtocolVersion = "0.2"
+// ProtocolVersion is the protocol revision this build speaks. It is
+// informational and negotiated additively through capabilities: peers do not
+// need to match it exactly, only to satisfy RequiredProtocolCapabilities.
+const ProtocolVersion = "0.3"
+
+// MinSupportedProtocolVersion is the oldest peer protocol version this build
+// still interoperates with. Versions from 0.2 onward carry the auth
+// capability-negotiation fields introduced in 0.2.0; older, unversioned
+// peers cannot be identified safely and are rejected.
+const MinSupportedProtocolVersion = "0.2"
 
 const (
 	CapabilityStreamStartEnd  = "stream_start_end"
 	CapabilityBinaryBodyFrame = "binary_body_frames"
 	CapabilityStreamCancel    = "stream_cancel"
+	// CapabilityWebSocketTunnel indicates the peer can open and relay public
+	// WebSocket tunnel streams (ws.open/ws.accept/ws.error/ws.close/
+	// ws.cancel and WebSocket binary body frames). It is additive: a peer
+	// missing it still interoperates fully for HTTP tunneling, and only
+	// WebSocket upgrade attempts against its tunnels are rejected.
+	CapabilityWebSocketTunnel = "websocket_tunnel"
 )
 
-var defaultProtocolCapabilities = []string{
+// requiredProtocolCapabilities are the capabilities every supported peer
+// must declare. They have been required since protocol 0.2 and define the
+// v0.2 HTTP-interoperability floor; adding a capability here is a breaking
+// change and must raise MinSupportedProtocolVersion accordingly.
+var requiredProtocolCapabilities = []string{
 	CapabilityStreamStartEnd,
 	CapabilityBinaryBodyFrame,
 	CapabilityStreamCancel,
 }
+
+// defaultProtocolCapabilities are every capability this build supports and
+// advertises. New, optional capabilities are added here without being added
+// to requiredProtocolCapabilities, so older peers that lack them keep
+// working for everything except the features they gate.
+var defaultProtocolCapabilities = append(append([]string(nil), requiredProtocolCapabilities...), CapabilityWebSocketTunnel)
 
 type Envelope struct {
 	Type     Type            `json:"type"`
@@ -65,8 +92,47 @@ type AuthOK struct {
 	Capabilities    []string `json:"capabilities,omitempty"`
 }
 
+// DefaultProtocolCapabilities returns every capability this build supports
+// and advertises to a peer during authentication.
 func DefaultProtocolCapabilities() []string {
 	return append([]string(nil), defaultProtocolCapabilities...)
+}
+
+// RequiredProtocolCapabilities returns the capabilities a peer must declare
+// to be considered compatible at all. It is the v0.2 HTTP-interoperability
+// floor and intentionally excludes newer, additive capabilities such as
+// CapabilityWebSocketTunnel.
+func RequiredProtocolCapabilities() []string {
+	return append([]string(nil), requiredProtocolCapabilities...)
+}
+
+// IsProtocolVersionSupported reports whether version is at or above
+// MinSupportedProtocolVersion. It does not reject versions newer than
+// ProtocolVersion: forward compatibility with a future peer is governed by
+// capability negotiation, not by the version number.
+func IsProtocolVersionSupported(version string) bool {
+	major, minor, ok := parseProtocolVersion(version)
+	if !ok {
+		return false
+	}
+	minMajor, minMinor, _ := parseProtocolVersion(MinSupportedProtocolVersion)
+	if major != minMajor {
+		return major > minMajor
+	}
+	return minor >= minMinor
+}
+
+func parseProtocolVersion(version string) (major, minor int, ok bool) {
+	parts := strings.SplitN(version, ".", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	major, errA := strconv.Atoi(parts[0])
+	minor, errB := strconv.Atoi(parts[1])
+	if errA != nil || errB != nil || major < 0 || minor < 0 {
+		return 0, 0, false
+	}
+	return major, minor, true
 }
 
 func MissingRequiredCapabilities(capabilities []string, required []string) []string {
