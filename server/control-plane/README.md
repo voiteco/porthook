@@ -50,6 +50,18 @@ Use the configured bootstrap token or a scoped admin token to log in. The dashbo
 
 The dashboard can list, create, and revoke scoped admin tokens and agent tokens, reserve subdomains for active tokens, manage custom domains and access policies, inspect control-plane audit events, show active gateway tunnels, runtime, and metrics, run browser diagnostics, inspect recent gateway request logs, and download an operational JSON export. Plaintext admin and agent tokens are displayed only from create responses; the control plane stores token hashes and later list responses contain token summaries only. Access policy secrets are accepted only in create/update requests and are not returned by list responses. Successful token validation updates `last_used_at` metadata for token list views.
 
+Gateway operator endpoints use the configured private management connection:
+
+- `GET /api/v1/gateway/healthz`
+- `GET /api/v1/gateway/readyz`
+- `GET /api/v1/gateway/metrics`
+- `GET /api/v1/gateway/tunnels`
+- `GET /api/v1/gateway/tunnels/{id}`
+- `GET /api/v1/gateway/runtime`
+- `GET /api/v1/gateway/request-logs`
+
+Health, readiness, metrics, tunnel inventory, and runtime require `runtime_diagnostics`. Request logs require `audit_history`. The bootstrap admin token has all scopes.
+
 ## Runtime Configuration
 
 | Environment variable | Default | Description |

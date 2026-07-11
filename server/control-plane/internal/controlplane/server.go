@@ -27,16 +27,17 @@ import (
 )
 
 type Server struct {
-	cfg            Config
-	service        *tokens.Service
-	reservations   *reserved.Service
-	accessPolicies *access.Service
-	customDomains  *customdomains.Service
-	adminTokens    *admintokens.Service
-	logger         *slog.Logger
-	metrics        metrics
-	startedAt      time.Time
-	auditEvents    AuditEventStore
+	cfg               Config
+	service           *tokens.Service
+	reservations      *reserved.Service
+	accessPolicies    *access.Service
+	customDomains     *customdomains.Service
+	adminTokens       *admintokens.Service
+	logger            *slog.Logger
+	metrics           metrics
+	startedAt         time.Time
+	auditEvents       AuditEventStore
+	gatewayHTTPClient *http.Client
 }
 
 type validateTokenRequest struct {
@@ -125,6 +126,9 @@ func NewServerWithAdminTokens(cfg Config, service *tokens.Service, reservationSe
 	if cfg.Version == "" {
 		cfg.Version = "dev"
 	}
+	if cfg.GatewayManagementTimeout <= 0 {
+		cfg.GatewayManagementTimeout = defaultGatewayManagementTimeout
+	}
 	if service == nil {
 		service = tokens.NewService(tokens.NewMemoryStore())
 	}
@@ -144,15 +148,16 @@ func NewServerWithAdminTokens(cfg Config, service *tokens.Service, reservationSe
 		adminTokenService = admintokens.NewService(admintokens.NewMemoryStore())
 	}
 	return &Server{
-		cfg:            cfg,
-		service:        service,
-		reservations:   reservationService,
-		accessPolicies: accessPolicyService,
-		customDomains:  customDomainService,
-		adminTokens:    adminTokenService,
-		logger:         slog.Default(),
-		startedAt:      time.Now().UTC(),
-		auditEvents:    auditEventStore,
+		cfg:               cfg,
+		service:           service,
+		reservations:      reservationService,
+		accessPolicies:    accessPolicyService,
+		customDomains:     customDomainService,
+		adminTokens:       adminTokenService,
+		logger:            slog.Default(),
+		startedAt:         time.Now().UTC(),
+		auditEvents:       auditEventStore,
+		gatewayHTTPClient: &http.Client{Timeout: cfg.GatewayManagementTimeout},
 	}
 }
 
@@ -244,6 +249,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/dashboard", dashboardHandler)
 	mux.Handle("/dashboard/", dashboardHandler)
 	mux.HandleFunc("/api/v1/status", s.handleStatus)
+	mux.HandleFunc(gatewayOperatorPrefix+"/", s.handleGatewayOperator)
 	mux.HandleFunc("/api/v1/events", s.handleEvents)
 	mux.HandleFunc("/api/v1/admin-tokens", s.handleAdminTokens)
 	mux.HandleFunc("/api/v1/admin-tokens/", s.handleAdminTokenByID)
