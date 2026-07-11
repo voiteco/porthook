@@ -425,8 +425,6 @@ func webSocketUpgradeStatus(t *testing.T, ctx context.Context, client *http.Clie
 	req.Host = host
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", "websocket")
-	req.Header.Set("Sec-WebSocket-Version", "13")
-	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
 
 	resp, err := client.Do(req)
 	if err != nil {
