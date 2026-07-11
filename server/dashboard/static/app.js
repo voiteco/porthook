@@ -1,5 +1,4 @@
 const storageKey = "porthook.dashboard.adminToken";
-const gatewayStorageKey = "porthook.dashboard.gatewayURL";
 const dashboardHashPrefix = "ops";
 
 const auditEventStateFields = [
@@ -102,8 +101,6 @@ const elements = {
   metricsBody: document.querySelector("#metrics-body"),
   metricsEmptyState: document.querySelector("#metrics-empty-state"),
   metricsCount: document.querySelector("#metrics-count"),
-  gatewayForm: document.querySelector("#gateway-form"),
-  gatewayURL: document.querySelector("#gateway-url"),
   tunnelsBody: document.querySelector("#tunnels-body"),
   tunnelsEmptyState: document.querySelector("#tunnels-empty-state"),
   tunnelCount: document.querySelector("#tunnel-count"),
@@ -157,7 +154,6 @@ let editingAccessPolicyID = "";
 let selectedTunnelID = "";
 let restoringFilterState = false;
 
-elements.gatewayURL.value = sessionStorage.getItem(gatewayStorageKey) || defaultGatewayURL();
 restoreFilterStateFromHash();
 
 function setAuthenticated(authenticated) {
@@ -877,29 +873,19 @@ async function checkGatewayRequestLogsAPI() {
 }
 
 async function gatewayJSON(path) {
-  const baseURL = normalizedGatewayURL();
-  if (!baseURL) {
-    throw new Error("gateway URL is required");
-  }
-  const response = await fetch(`${baseURL}${path}`, { cache: "no-store" });
-  const payload = await readPayload(response);
-  if (!response.ok) {
-    throw new Error(responseDetail(payload, response.status));
-  }
-  return payload || {};
+  return (await apiRequest(gatewayOperatorPath(path), { cache: "no-store" })) || {};
 }
 
 async function gatewayText(path) {
-  const baseURL = normalizedGatewayURL();
-  if (!baseURL) {
-    throw new Error("gateway URL is required");
-  }
-  const response = await fetch(`${baseURL}${path}`, { cache: "no-store" });
-  const payload = await readPayload(response);
-  if (!response.ok) {
-    throw new Error(responseDetail(payload, response.status));
-  }
+  const payload = await apiRequest(gatewayOperatorPath(path), { cache: "no-store" });
   return typeof payload === "string" ? payload : "";
+}
+
+function gatewayOperatorPath(path) {
+  if (path === "/metrics" || path === "/healthz" || path === "/readyz") {
+    return `/api/v1/gateway${path}`;
+  }
+  return path.replace(/^\/api\/v1/, "/api/v1/gateway");
 }
 
 function responseDetail(payload, status) {
@@ -911,26 +897,12 @@ function reservationByID(id) {
 }
 
 async function loadTunnels({ silent = false } = {}) {
-  const baseURL = normalizedGatewayURL();
-  if (!baseURL) {
-    elements.tunnelCount.textContent = "Gateway URL required";
-    currentTunnels = [];
-    elements.tunnelsBody.replaceChildren();
-    elements.tunnelsEmptyState.hidden = false;
-    renderOperationalOverview();
-    return;
-  }
-
   elements.tunnelCount.textContent = "Loading tunnels";
   elements.tunnelsBody.replaceChildren();
   elements.tunnelsEmptyState.hidden = true;
 
   try {
-    const response = await fetch(`${baseURL}/api/v1/tunnels`, { cache: "no-store" });
-    const payload = await readPayload(response);
-    if (!response.ok) {
-      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
-    }
+    const payload = await gatewayJSON("/api/v1/tunnels");
     currentTunnels = payload.tunnels || [];
     renderTunnels(currentTunnels);
     if (selectedTunnelID && !currentTunnels.some((tunnel) => tunnel.tunnel_id === selectedTunnelID)) {
@@ -950,25 +922,12 @@ async function loadTunnels({ silent = false } = {}) {
 }
 
 async function loadGatewayRuntime({ silent = false } = {}) {
-  const baseURL = normalizedGatewayURL();
-  if (!baseURL) {
-    currentGatewayRuntime = null;
-    elements.gatewayRuntimeCount.textContent = "Gateway URL required";
-    elements.gatewayRuntimeGrid.replaceChildren();
-    elements.gatewayRuntimeEmptyState.hidden = false;
-    return;
-  }
-
   elements.gatewayRuntimeCount.textContent = "Loading gateway runtime";
   elements.gatewayRuntimeGrid.replaceChildren();
   elements.gatewayRuntimeEmptyState.hidden = true;
 
   try {
-    const response = await fetch(`${baseURL}/api/v1/runtime`, { cache: "no-store" });
-    const payload = await readPayload(response);
-    if (!response.ok) {
-      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
-    }
+    const payload = await gatewayJSON("/api/v1/runtime");
     currentGatewayRuntime = payload.runtime || null;
     renderGatewayRuntime(currentGatewayRuntime);
   } catch (error) {
@@ -1015,26 +974,13 @@ function renderGatewayRuntime(runtime) {
 }
 
 async function loadGatewayMetrics({ silent = false } = {}) {
-  const baseURL = normalizedGatewayURL();
-  if (!baseURL) {
-    currentMetrics = [];
-    elements.metricsCount.textContent = "Gateway URL required";
-    elements.metricsBody.replaceChildren();
-    elements.metricsEmptyState.hidden = false;
-    return;
-  }
-
   elements.metricsCount.textContent = "Loading metrics";
   elements.metricsBody.replaceChildren();
   elements.metricsEmptyState.hidden = true;
 
   try {
-    const response = await fetch(`${baseURL}/metrics`, { cache: "no-store" });
-    const payload = await readPayload(response);
-    if (!response.ok) {
-      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
-    }
-    currentMetrics = parsePrometheusMetrics(typeof payload === "string" ? payload : "");
+    const payload = await gatewayText("/metrics");
+    currentMetrics = parsePrometheusMetrics(payload);
     renderMetrics(currentMetrics);
   } catch (error) {
     currentMetrics = [];
@@ -1147,11 +1093,6 @@ function tunnelActionCell(tunnel) {
 }
 
 async function loadTunnelDetail(tunnel) {
-  const baseURL = normalizedGatewayURL();
-  if (!baseURL) {
-    showNotice("Gateway URL is required.", "error");
-    return;
-  }
   selectedTunnelID = tunnel.tunnel_id;
   elements.tunnelDetailTitle.textContent = tunnel.subdomain || tunnel.tunnel_id;
   elements.tunnelDetailMeta.textContent = "Loading tunnel detail";
@@ -1160,11 +1101,7 @@ async function loadTunnelDetail(tunnel) {
   renderTunnels(currentTunnels);
 
   try {
-    const response = await fetch(`${baseURL}/api/v1/tunnels/${encodeURIComponent(tunnel.tunnel_id)}`, { cache: "no-store" });
-    const payload = await readPayload(response);
-    if (!response.ok) {
-      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
-    }
+    const payload = await gatewayJSON(`/api/v1/tunnels/${encodeURIComponent(tunnel.tunnel_id)}`);
     renderTunnelDetail(payload.tunnel || {});
   } catch (error) {
     elements.tunnelDetailMeta.textContent = "Tunnel detail unavailable";
@@ -1206,17 +1143,6 @@ function clearTunnelDetail() {
 }
 
 async function loadRequestLogs({ silent = false, append = false } = {}) {
-  const baseURL = normalizedGatewayURL();
-  if (!baseURL) {
-    currentRequestLogs = [];
-    requestLogNextCursor = "";
-    renderRequestLogs([]);
-    elements.requestLogCount.textContent = "Gateway URL required";
-    updateRequestLogLoadMore();
-    renderOperationalOverview();
-    return;
-  }
-
   let query;
   try {
     const cursor = append ? requestLogNextCursor : "";
@@ -1243,11 +1169,7 @@ async function loadRequestLogs({ silent = false, append = false } = {}) {
   }
 
   try {
-    const response = await fetch(`${baseURL}/api/v1/request-logs?${query}`, { cache: "no-store" });
-    const payload = await readPayload(response);
-    if (!response.ok) {
-      throw new Error(typeof payload === "string" && payload ? payload : `Gateway returned status ${response.status}.`);
-    }
+    const payload = await gatewayJSON(`/api/v1/request-logs?${query}`);
     const logs = payload.request_logs || [];
     currentRequestLogs = append ? currentRequestLogs.concat(logs) : logs;
     requestLogNextCursor = payload.next_cursor || "";
@@ -2010,18 +1932,6 @@ async function copyText(value, successMessage = "Copied value.") {
   }
 }
 
-function normalizedGatewayURL() {
-  return elements.gatewayURL.value.trim().replace(/\/+$/, "");
-}
-
-function defaultGatewayURL() {
-  const { protocol, hostname } = window.location;
-  if (!protocol || !hostname) {
-    return "http://127.0.0.1:8080";
-  }
-  return `${protocol}//${hostname}:8080`;
-}
-
 async function downloadOperationalExport() {
   elements.exportButton.disabled = true;
   elements.exportCount.textContent = "Collecting export";
@@ -2050,7 +1960,6 @@ async function downloadOperationalExport() {
 }
 
 async function buildOperationalExport() {
-  const gatewayURL = normalizedGatewayURL();
   const requestLogQueryString = safeRequestLogQuery();
   const snapshot = {
     exported_at: new Date().toISOString(),
@@ -2058,7 +1967,6 @@ async function buildOperationalExport() {
     sources: {
       dashboard_url: window.location.href,
       control_plane_url: window.location.origin,
-      gateway_url: gatewayURL,
       event_limit: normalizedAuditEventLimit(),
       request_log_query: requestLogQueryString.query,
       request_log_filters: requestLogExportFilters(),
@@ -2101,11 +2009,6 @@ async function buildOperationalExport() {
   snapshot.control_plane.access_policies = (policies && policies.access_policies) || [];
   const events = await captureOperationalExport(snapshot.errors, "control-plane", "/api/v1/events", () => apiRequest(`/api/v1/events?limit=${encodeURIComponent(normalizedAuditEventLimit())}`));
   snapshot.control_plane.audit_events = (events && events.events) || [];
-
-  if (!gatewayURL) {
-    snapshot.errors.push({ component: "gateway", endpoint: "*", error: "gateway URL is required" });
-    return snapshot;
-  }
 
   const tunnels = await captureOperationalExport(snapshot.errors, "gateway", "/api/v1/tunnels", () => gatewayJSON("/api/v1/tunnels"));
   snapshot.gateway.tunnels = (tunnels && tunnels.tunnels) || [];
@@ -2245,13 +2148,6 @@ elements.auditEventLoadMore.addEventListener("click", async () => {
 elements.diagnosticsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await runDiagnostics();
-});
-elements.gatewayForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const gatewayURL = normalizedGatewayURL();
-  sessionStorage.setItem(gatewayStorageKey, gatewayURL);
-  elements.gatewayURL.value = gatewayURL;
-  await Promise.all([loadTunnels(), loadGatewayRuntime(), loadGatewayMetrics(), loadRequestLogs()]);
 });
 elements.requestLogForm.addEventListener("submit", async (event) => {
   event.preventDefault();

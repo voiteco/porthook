@@ -24,11 +24,15 @@ func TestHandlerServesDashboardIndex(t *testing.T) {
 	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'self'") {
 		t.Fatalf("Content-Security-Policy = %q, want self-only policy", got)
 	}
-	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'self' http: https:") {
-		t.Fatalf("Content-Security-Policy = %q, want gateway-capable connect-src", got)
+	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'self';") {
+		t.Fatalf("Content-Security-Policy = %q, want same-origin connect-src", got)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") || !strings.Contains(body, "Admin tokens") || !strings.Contains(body, "data-admin-scope") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Audit events") || !strings.Contains(body, "audit-event-load-more") || !strings.Contains(body, "Diagnostics") || !strings.Contains(body, "Gateway runtime") || !strings.Contains(body, "Metrics drilldown") || !strings.Contains(body, "Operational export") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Request logs") || !strings.Contains(body, "request-log-load-more") || !strings.Contains(body, "Request ID") || !strings.Contains(body, "Tunnel ID") || !strings.Contains(body, "Tunnel details") {
+	body := rec.Body.String()
+	if !strings.Contains(body, "Porthook") || !strings.Contains(body, "Token management") || !strings.Contains(body, "Admin tokens") || !strings.Contains(body, "data-admin-scope") || !strings.Contains(body, "Custom domains") || !strings.Contains(body, "Access policies") || !strings.Contains(body, "Audit events") || !strings.Contains(body, "audit-event-load-more") || !strings.Contains(body, "Diagnostics") || !strings.Contains(body, "Gateway runtime") || !strings.Contains(body, "Metrics drilldown") || !strings.Contains(body, "Operational export") || !strings.Contains(body, "Operational overview") || !strings.Contains(body, "Request logs") || !strings.Contains(body, "request-log-load-more") || !strings.Contains(body, "Request ID") || !strings.Contains(body, "Tunnel ID") || !strings.Contains(body, "Tunnel details") {
 		t.Fatalf("dashboard index body = %q, want dashboard shell", body)
+	}
+	if strings.Contains(body, "gateway-url") || strings.Contains(body, "Gateway URL") {
+		t.Fatalf("dashboard index body = %q, want no direct gateway URL control", body)
 	}
 }
 
@@ -88,6 +92,12 @@ func TestHandlerServesAssets(t *testing.T) {
 	}
 	if !strings.Contains(body, "/api/v1/tunnels") {
 		t.Fatalf("asset body = %q, want gateway tunnel API client", body)
+	}
+	if !strings.Contains(body, "gatewayOperatorPath") || !strings.Contains(body, "/api/v1/gateway") {
+		t.Fatalf("asset body = %q, want same-origin gateway operator API client", body)
+	}
+	if strings.Contains(body, "gatewayStorageKey") || strings.Contains(body, "gateway-url") {
+		t.Fatalf("asset body = %q, want no direct gateway URL configuration", body)
 	}
 	if !strings.Contains(body, "/api/v1/runtime") || !strings.Contains(body, "renderGatewayRuntime") {
 		t.Fatalf("asset body = %q, want gateway runtime API client", body)

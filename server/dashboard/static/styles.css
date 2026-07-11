@@ -207,10 +207,6 @@ h3 {
   grid-template-columns: minmax(240px, 1fr) minmax(260px, 1fr) auto;
 }
 
-.gateway-form {
-  grid-template-columns: minmax(260px, 1fr) auto;
-}
-
 .diagnostics-form {
   grid-template-columns: auto;
   justify-content: start;
