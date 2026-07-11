@@ -6,7 +6,7 @@ The objective of this roadmap is to take the public self-hosted Porthook product
 
 This document is the execution source of truth for that work. Tasks are ordered by dependency and risk. A task is complete only after its implementation, tests, documentation, commit, push, and required CI checks are complete.
 
-Current phase: Block 1 is complete. Block 2 release qualification is in progress.
+Current phase: Blocks 1 and 2 are complete. Block 3 is ready to start.
 
 ## Supported v1 Scope
 
@@ -102,8 +102,8 @@ Tasks:
 
 Exit gate:
 
-- [ ] Unit, smoke, race, fuzz-seed, vulnerability, static-analysis, and secret checks pass on `main`.
-- [ ] The threat model explicitly informs Blocks 3 through 6.
+- [x] Unit, smoke, race, fuzz-seed, vulnerability, static-analysis, and secret checks pass on `main`.
+- [x] The threat model explicitly informs Blocks 3 through 6.
 
 ## Block 3: Isolate the Gateway Management Surface
 
