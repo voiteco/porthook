@@ -128,12 +128,15 @@ Control messages and stream start/end messages are JSON.
 
 HTTP request and response bodies use binary WebSocket frames tagged as `http.request.body` and `http.response.body`. The gateway and agent still understand the original whole-body `http.request` and `http.response` messages, plus JSON body chunk payloads, for compatibility. The public forwarding path uses `start/body/end` frames with binary body chunks.
 
-Protocol negotiation is handled in the auth handshake:
+A tunneled public WebSocket upgrade is relayed as `ws.open` (gateway to agent), answered with `ws.accept` or `ws.error` (agent to gateway), followed by any number of binary WebSocket body frames tagged `ws.message.text` or `ws.message.binary` carrying application messages in either direction, and terminated by `ws.close` (graceful) or `ws.cancel` (abnormal). See §10.5.
+
+Protocol negotiation is handled in the auth handshake and is additive, not an exact-version match:
 
 - `auth.request` includes `protocol_version` and `capabilities`.
-- `auth.ok` returns the gateway protocol version and capability list.
-- The gateway rejects agents with missing/invalid protocol information as `unsupported_protocol`.
-- The agent rejects gateways that do not report compatible protocol version/capabilities.
+- `auth.ok` returns the gateway's own protocol version and capability list.
+- Each side accepts any peer `protocol_version` at or above the minimum supported version (`0.2`); the version number itself does not need to match.
+- Each side checks the peer's declared `capabilities` against its own *required* capability set (unchanged since `0.2`: `stream_start_end`, `binary_body_frames`, `stream_cancel`) and rejects the connection with `unsupported_protocol` only if one of those is missing.
+- Newer, optional capabilities such as `websocket_tunnel` are never required for the connection itself to succeed. A peer that lacks an optional capability keeps working for everything it does support; only the specific feature it lacks is unavailable (a public WebSocket upgrade against a tunnel whose agent lacks `websocket_tunnel` gets a `501` with an explanatory message instead of hanging or dropping the whole tunnel).
 
 Required capabilities for stream-aware HTTP:
 
@@ -141,7 +144,13 @@ Required capabilities for stream-aware HTTP:
 - `binary_body_frames`
 - `stream_cancel`
 
-Every forwarded HTTP request is assigned a stream ID created by the gateway.
+Optional capabilities:
+
+- `websocket_tunnel`: the peer can open and relay public WebSocket tunnel streams (§10.5).
+
+Every forwarded HTTP request or WebSocket upgrade is assigned a stream ID created by the gateway.
+
+**Compatibility window:** protocol `0.2` interoperability for HTTP tunneling is preserved for the remainder of the pre-`1.0` release line, so a gateway or agent built at protocol `0.3` keeps working against a `0.2` peer (for example, during a rolling upgrade where the gateway and agents are updated separately) with no loss of HTTP functionality; only WebSocket tunneling requires both sides to declare `websocket_tunnel`. The formal `1.x` protocol, API, configuration, and database compatibility policy is published as part of the `v1.0.0` release (see [docs/PRODUCTION_ROADMAP.md](./PRODUCTION_ROADMAP.md) Block 9).
 
 ## 8. Message Envelope
 
@@ -187,12 +196,13 @@ Sent by agent after opening the WebSocket.
   "type": "auth.request",
   "payload": {
     "token": "secret-token",
-    "agent_version": "0.1.0",
-    "protocol_version": "0.2",
+    "agent_version": "0.16.0",
+    "protocol_version": "0.3",
     "capabilities": [
       "stream_start_end",
       "binary_body_frames",
-      "stream_cancel"
+      "stream_cancel",
+      "websocket_tunnel"
     ]
   }
 }
@@ -234,15 +244,18 @@ Sent by gateway when the tunnel is active.
 {
   "type": "auth.ok",
   "payload": {
-    "protocol_version": "0.2",
+    "protocol_version": "0.3",
     "capabilities": [
       "stream_start_end",
       "binary_body_frames",
-      "stream_cancel"
+      "stream_cancel",
+      "websocket_tunnel"
     ]
   }
 }
 ```
+
+`auth.ok` echoes the sender's own version and full capability set; it is informational and not a promise that the peer's version or capabilities matched exactly. A peer only fails authentication if a *required* capability is missing (§7) or the declared `protocol_version` is below the minimum supported version.
 
 ### 9.5 auth.error
 
@@ -251,10 +264,12 @@ Sent by gateway when the tunnel is active.
   "type": "auth.error",
   "payload": {
     "code": "unsupported_protocol",
-    "message": "agent protocol version \"0.1\" is not supported, expected \"0.2\""
+    "message": "protocol version \"0.1\" is not supported, minimum supported version is \"0.2\""
   }
 }
 ```
+
+`unsupported_protocol` is also returned, with a message naming the missing capability, when the peer's declared `protocol_version` is at or above the minimum but a *required* capability (§7) is absent from `capabilities`.
 
 ## 10. Stream Messages
 
@@ -271,6 +286,18 @@ http.response.body
 http.response.end
 http.stream.error
 http.stream.cancel
+```
+
+WebSocket tunnel message types (§10.5):
+
+```text
+ws.open
+ws.accept
+ws.error
+ws.close
+ws.cancel
+ws.message.text
+ws.message.binary
 ```
 
 ### 10.1 Request Start Payload
@@ -323,6 +350,69 @@ Sent by the gateway when a public request no longer needs a local response.
 ```
 
 The agent should cancel the matching local HTTP request context and avoid sending a late response for that stream.
+
+### 10.5 WebSocket Tunnel Messages
+
+Requires the `websocket_tunnel` capability on both peers (§7). A public WebSocket upgrade request is relayed over the same multiplexed agent connection as HTTP streams, using a stream ID the gateway assigns when it detects the upgrade.
+
+**`ws.open`** (gateway to agent) requests that the agent dial the local target's WebSocket endpoint:
+
+```json
+{
+  "type": "ws.open",
+  "payload": {
+    "path": "/socket",
+    "query": "room=1",
+    "header": {
+      "cookie": ["session=abc"]
+    },
+    "subprotocols": ["chat.v1"]
+  }
+}
+```
+
+`header` excludes hop-by-hop and WebSocket handshake fields (`Connection`, `Upgrade`, `Sec-WebSocket-*`); the underlying WebSocket client and server on each leg perform their own handshakes.
+
+**`ws.accept`** (agent to gateway) confirms the local dial succeeded and echoes the subprotocol the local service selected, if any. Only after receiving `ws.accept` does the gateway complete the public 101 handshake, so the public client sees a normal HTTP error response (mapped from the failure reason) rather than a WebSocket connection that opens and then immediately closes:
+
+```json
+{
+  "type": "ws.accept",
+  "payload": {
+    "subprotocol": "chat.v1"
+  }
+}
+```
+
+**`ws.error`** (agent to gateway) reports that the local dial failed. It reuses the `auth.error`/`tunnel.error` error payload shape (`code`, `message`) and maps to a `502` on the public side:
+
+```json
+{
+  "type": "ws.error",
+  "payload": {
+    "code": "local_dial_failed",
+    "message": "dial local websocket endpoint: connection refused"
+  }
+}
+```
+
+**`ws.message.text`** and **`ws.message.binary`** carry one complete tunneled WebSocket application message each, in either direction, as a binary WebSocket body frame (§10.2's frame carrier, tagged with the corresponding type) rather than a JSON envelope. Which type is used preserves whether the original WebSocket message was text or binary.
+
+**`ws.close`** (either direction) relays a graceful WebSocket close code and reason from one leg to the other:
+
+```json
+{
+  "type": "ws.close",
+  "payload": {
+    "code": 1000,
+    "reason": "done"
+  }
+}
+```
+
+**`ws.cancel`** (either direction) aborts the stream abnormally, reusing the `http.stream.cancel` payload shape (`reason`); sent for a request/idle/max-lifetime deadline, a network failure, or the agent session ending.
+
+Ping and pong are not part of this message vocabulary. Each hop (public client to gateway, agent to local target) is an independent WebSocket connection, and each side's WebSocket implementation answers pings and processes pongs transparently for its own connection; there is no end-to-end ping/pong relay through the tunnel.
 
 ## 11. Gateway Design
 

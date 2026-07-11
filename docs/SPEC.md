@@ -238,13 +238,15 @@ Responsibilities:
 
 The dashboard is useful, but not required for the first tunnel MVP.
 
-## 10. Tunnel Protocol v0.2
+## 10. Tunnel Protocol
 
-Protocol negotiation now happens in `auth.request` and `auth.ok` to keep backward compatibility safe:
+Current protocol revision: `0.3`. Protocol negotiation happens in `auth.request` and `auth.ok` and is additive, not an exact-version match, so agents and gateways built at different revisions keep interoperating for everything except the specific newer feature one side lacks:
 
 - `auth.request` carries `protocol_version` and `capabilities`.
-- `auth.ok` returns gateway protocol capabilities.
-- `auth.error` uses `unsupported_protocol` for incompatible clients.
+- `auth.ok` returns the gateway's own protocol version and capabilities.
+- Each side accepts any peer `protocol_version` at or above the minimum supported version (`0.2`).
+- `auth.error` uses `unsupported_protocol` only when the peer's version is below the minimum, or a *required* capability (`stream_start_end`, `binary_body_frames`, `stream_cancel`) is missing.
+- Optional capabilities, such as `websocket_tunnel` (public WebSocket tunneling), gate individual features rather than the connection itself: a peer missing one still works for everything else.
 
 Recommended transport: WebSocket over TLS.
 
@@ -292,8 +294,17 @@ Initial control messages:
 - `http.response.end`
 - `http.stream.error`
 - `http.stream.cancel`
+- `ws.open`
+- `ws.accept`
+- `ws.error`
+- `ws.close`
+- `ws.cancel`
+- `ws.message.text`
+- `ws.message.binary`
 - `ping`
 - `pong`
+
+The `ws.*` messages relay a public WebSocket upgrade to the agent's local target, requiring the `websocket_tunnel` capability on both peers. `ws.open`/`ws.accept`/`ws.close` carry a payload; `ws.error` reuses the `auth.error` payload shape and `ws.cancel` reuses `http.stream.cancel`'s. `ws.message.text`/`ws.message.binary` carry application data as binary WebSocket body frames, not JSON, preserving whether the original message was text or binary. See [docs/TECHNICAL_SPEC.md](./TECHNICAL_SPEC.md) §10.5 for the full message definitions.
 
 `auth.request` example:
 
@@ -302,12 +313,13 @@ Initial control messages:
   "type": "auth.request",
   "payload": {
     "token": "secret-token",
-    "agent_version": "0.1.0",
-    "protocol_version": "0.2",
+    "agent_version": "0.16.0",
+    "protocol_version": "0.3",
     "capabilities": [
       "stream_start_end",
       "binary_body_frames",
-      "stream_cancel"
+      "stream_cancel",
+      "websocket_tunnel"
     ]
   }
 }
@@ -319,11 +331,12 @@ Initial control messages:
 {
   "type": "auth.ok",
   "payload": {
-    "protocol_version": "0.2",
+    "protocol_version": "0.3",
     "capabilities": [
       "stream_start_end",
       "binary_body_frames",
-      "stream_cancel"
+      "stream_cancel",
+      "websocket_tunnel"
     ]
   }
 }

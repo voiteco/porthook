@@ -4,6 +4,21 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+### Added
+- Added protocol revision 0.3 with additive capability negotiation: peers no longer need an exact `protocol_version` match, only the required capability set (unchanged since 0.2), so agents and gateways built at different revisions keep interoperating for HTTP.
+- Added public WebSocket tunneling: the gateway relays a public WebSocket upgrade to the agent's local target over the existing multiplexed tunnel connection, gated by the new optional `websocket_tunnel` capability so agents that lack it keep working for HTTP and get a clear `501` for WebSocket attempts on their tunnels.
+- Added a configurable request/idle/max-lifetime stream deadline policy (`PORTHOOK_STREAM_REQUEST_TIMEOUT`, `PORTHOOK_STREAM_IDLE_TIMEOUT`, `PORTHOOK_STREAM_MAX_LIFETIME`), replacing the previous fixed 30-second stream deadline that killed long-lived SSE and long-polling responses regardless of activity.
+- Added `PORTHOOK_WS_MESSAGE_MAX_BYTES` to bound a single tunneled WebSocket message on the gateway and agent.
+- Added `make smoke-websocket`, a real binary-level smoke test that tunnels to a local WebSocket echo service through the actual gateway and agent binaries.
+
+### Changed
+- The public listener's HTTP write timeout is disabled in favor of the new stream-level deadline policy, so response duration for SSE, long polling, and WebSocket tunnels is bounded by activity and an absolute cap rather than a fixed schedule.
+
+### Fixed
+- Fixed a goroutine-lifecycle bug where the agent's `Run` could return before in-flight per-request goroutines finished writing to the configured output, observable as a data race under `-race`.
+- Fixed the gateway's agent-connection read loop, which only dispatched a fixed whitelist of HTTP response message types to a stream's pending channel; every new WebSocket protocol message silently vanished until this was corrected.
+- Fixed a race in both the gateway's and agent's WebSocket relay where closing a shared connection to honor one direction's clean close could report the whole relay as failed depending on goroutine scheduling.
+
 ## [0.15.1] - 2026-07-11
 
 ### Added

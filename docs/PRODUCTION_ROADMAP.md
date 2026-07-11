@@ -6,7 +6,7 @@ The objective of this roadmap is to take the public self-hosted Porthook product
 
 This document is the execution source of truth for that work. Tasks are ordered by dependency and risk. A task is complete only after its implementation, tests, documentation, commit, push, and required CI checks are complete.
 
-Current phase: Blocks 1 through 4 are complete. Block 5 is ready to start.
+Current phase: Blocks 1 through 5 are complete. Block 6 is ready to start.
 
 ## Supported v1 Scope
 
@@ -163,22 +163,22 @@ Target: `v0.16.0`
 
 Tasks:
 
-- [ ] Specify the next protocol revision and additive capability-negotiation rules.
-- [ ] Preserve HTTP interoperability with protocol `v0.2` agents for a documented compatibility window.
-- [ ] Define WebSocket open, accept, text, binary, ping/pong, close, cancellation, and error messages.
-- [ ] Implement public WebSocket upgrade handling in the gateway and local WebSocket dialing in the agent.
-- [ ] Add per-stream flow control, bounded buffering, frame-size limits, cancellation, and backpressure.
-- [ ] Preserve relevant request headers and close status without forwarding unsafe hop-by-hop state.
-- [ ] Replace the short absolute stream deadline with configurable request, idle, and maximum-lifetime policies suitable for SSE and long polling.
-- [ ] Verify response flushing, repeated headers, cookies, binary bodies, chunked requests, client cancellation, slow clients, and local-service failures.
-- [ ] Add mixed-version tests using independently built agent and gateway binaries.
-- [ ] Update the protocol and technical specifications before releasing the new protocol revision.
+- [x] Specify the next protocol revision and additive capability-negotiation rules.
+- [x] Preserve HTTP interoperability with protocol `v0.2` agents for a documented compatibility window.
+- [x] Define WebSocket open, accept, text, binary, ping/pong, close, cancellation, and error messages.
+- [x] Implement public WebSocket upgrade handling in the gateway and local WebSocket dialing in the agent.
+- [x] Add per-stream flow control, bounded buffering, frame-size limits, cancellation, and backpressure.
+- [x] Preserve relevant request headers and close status without forwarding unsafe hop-by-hop state.
+- [x] Replace the short absolute stream deadline with configurable request, idle, and maximum-lifetime policies suitable for SSE and long polling.
+- [x] Verify response flushing, repeated headers, cookies, binary bodies, chunked requests, client cancellation, slow clients, and local-service failures.
+- [x] Add mixed-version tests using independently built agent and gateway binaries.
+- [x] Update the protocol and technical specifications before releasing the new protocol revision.
 
 Exit gate:
 
-- [ ] HTTP, streaming/SSE, and WebSocket paths pass local and control-plane-backed end-to-end tests.
-- [ ] Compatible versions negotiate capabilities, and incompatible versions fail with an actionable error.
-- [ ] No stream can grow memory or goroutine usage without a configured bound.
+- [x] HTTP, streaming/SSE, and WebSocket paths pass local and control-plane-backed end-to-end tests.
+- [x] Compatible versions negotiate capabilities, and incompatible versions fail with an actionable error.
+- [x] No stream can grow memory or goroutine usage without a configured bound.
 
 ## Block 6: Verify the Real TLS and Custom-Domain Edge
 
