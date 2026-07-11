@@ -11,6 +11,7 @@ import (
 const (
 	defaultPublicAddr              = ":8080"
 	defaultAgentAddr               = ":8081"
+	defaultManagementAddr          = ":8082"
 	defaultRootDomain              = "localhost"
 	defaultPublicURL               = "http://localhost:8080"
 	defaultStaticToken             = "dev-token"
@@ -41,6 +42,7 @@ const (
 type Config struct {
 	PublicAddr                 string
 	AgentAddr                  string
+	ManagementAddr             string
 	RootDomain                 string
 	PublicURL                  string
 	StaticToken                string
@@ -75,6 +77,7 @@ func ConfigFromEnv() Config {
 	return normalizeConfig(Config{
 		PublicAddr:                 envString("PORTHOOK_ADDR", defaultPublicAddr),
 		AgentAddr:                  envString("PORTHOOK_AGENT_ADDR", defaultAgentAddr),
+		ManagementAddr:             envString("PORTHOOK_MANAGEMENT_ADDR", defaultManagementAddr),
 		RootDomain:                 envString("PORTHOOK_ROOT_DOMAIN", defaultRootDomain),
 		PublicURL:                  envString("PORTHOOK_PUBLIC_URL", defaultPublicURL),
 		StaticToken:                envString("PORTHOOK_STATIC_TOKEN", defaultStaticToken),
@@ -112,6 +115,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.AgentAddr == "" {
 		cfg.AgentAddr = defaultAgentAddr
+	}
+	if cfg.ManagementAddr == "" {
+		cfg.ManagementAddr = defaultManagementAddr
 	}
 	if cfg.RootDomain == "" {
 		cfg.RootDomain = defaultRootDomain

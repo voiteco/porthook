@@ -129,15 +129,24 @@ func (s *Server) Run(ctx context.Context) error {
 		WriteTimeout:      s.cfg.WriteTimeout,
 		IdleTimeout:       s.cfg.IdleTimeout,
 	}
+	managementServer := &http.Server{
+		Addr:              s.cfg.ManagementAddr,
+		Handler:           s.ManagementHandler(),
+		ReadHeaderTimeout: s.cfg.ReadHeaderTimeout,
+		ReadTimeout:       s.cfg.ReadTimeout,
+		WriteTimeout:      s.cfg.WriteTimeout,
+		IdleTimeout:       s.cfg.IdleTimeout,
+	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go serveHTTP(errCh, publicServer)
 	go serveHTTP(errCh, agentServer)
+	go serveHTTP(errCh, managementServer)
 
 	stopRequestLogPruner := s.startRequestLogPruner(ctx)
 	defer stopRequestLogPruner()
 
-	s.logger.Info("gateway started", "event", "gateway.started", "public_addr", s.cfg.PublicAddr, "agent_addr", s.cfg.AgentAddr)
+	s.logger.Info("gateway started", "event", "gateway.started", "public_addr", s.cfg.PublicAddr, "agent_addr", s.cfg.AgentAddr, "management_addr", s.cfg.ManagementAddr)
 
 	select {
 	case <-ctx.Done():
@@ -146,14 +155,16 @@ func (s *Server) Run(ctx context.Context) error {
 		s.closeSessions(shutdownCtx, websocket.StatusGoingAway, "gateway shutting down")
 		errPublic := publicServer.Shutdown(shutdownCtx)
 		errAgent := agentServer.Shutdown(shutdownCtx)
-		return errors.Join(errPublic, errAgent)
+		errManagement := managementServer.Shutdown(shutdownCtx)
+		return errors.Join(errPublic, errAgent, errManagement)
 	case err := <-errCh:
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.cfg.ShutdownTimeout)
 		defer cancel()
 		s.closeSessions(shutdownCtx, websocket.StatusInternalError, "gateway listener stopped")
 		errPublic := publicServer.Shutdown(shutdownCtx)
 		errAgent := agentServer.Shutdown(shutdownCtx)
-		return errors.Join(err, errPublic, errAgent)
+		errManagement := managementServer.Shutdown(shutdownCtx)
+		return errors.Join(err, errPublic, errAgent, errManagement)
 	}
 }
 
@@ -236,6 +247,28 @@ func (s *Server) AgentHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(agentWebSocketPath, s.handleAgentWebSocket)
 	return requestid.Middleware(telemetry.HTTPHandler(mux, "gateway.agent"))
+}
+
+func (s *Server) ManagementHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := s.ready(r.Context()); err != nil {
+			http.Error(w, "not ready: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ready\n"))
+	})
+	mux.HandleFunc("/api/v1/tunnels/", s.handleTunnelDetail)
+	mux.HandleFunc("/api/v1/tunnels", s.handleTunnelList)
+	mux.HandleFunc("/api/v1/runtime", s.handleRuntimeSummary)
+	mux.HandleFunc("/api/v1/request-logs", s.handleRequestLogs)
+	mux.HandleFunc("/metrics", s.handleMetrics)
+	return requestid.Middleware(telemetry.HTTPHandler(mux, "gateway.management"))
 }
 
 func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {

@@ -138,7 +138,7 @@ func openRequestLogStore(ctx context.Context, cfg gateway.Config) (*gateway.Post
 
 func runHealthcheck(ctx context.Context, stdout io.Writer) error {
 	cfg := gateway.ConfigFromEnv()
-	healthcheckURL, err := healthcheck.URLFromEnvOrListenAddr(cfg.PublicAddr, "/readyz")
+	healthcheckURL, err := healthcheck.URLFromEnvOrListenAddr(cfg.ManagementAddr, "/readyz")
 	if err != nil {
 		return err
 	}

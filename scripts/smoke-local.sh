@@ -8,6 +8,7 @@ VERSION="${VERSION:-smoke}"
 LOCAL_PORT="${PORTHOOK_SMOKE_LOCAL_PORT:-13000}"
 PUBLIC_PORT="${PORTHOOK_SMOKE_PUBLIC_PORT:-18080}"
 AGENT_PORT="${PORTHOOK_SMOKE_AGENT_PORT:-18081}"
+MANAGEMENT_PORT="${PORTHOOK_SMOKE_MANAGEMENT_PORT:-18085}"
 SUBDOMAIN="${PORTHOOK_SMOKE_SUBDOMAIN:-demo}"
 TOKEN="${PORTHOOK_SMOKE_TOKEN:-smoke-token}"
 KEEP_LOGS="${PORTHOOK_SMOKE_KEEP_LOGS:-0}"
@@ -159,12 +160,13 @@ wait_for_url "http://127.0.0.1:${LOCAL_PORT}/smoke.txt" "local HTTP service"
 
 PORTHOOK_ADDR="127.0.0.1:${PUBLIC_PORT}" \
 PORTHOOK_AGENT_ADDR="127.0.0.1:${AGENT_PORT}" \
+PORTHOOK_MANAGEMENT_ADDR="127.0.0.1:${MANAGEMENT_PORT}" \
 PORTHOOK_ROOT_DOMAIN="localhost" \
 PORTHOOK_PUBLIC_URL="http://localhost:${PUBLIC_PORT}" \
 PORTHOOK_STATIC_TOKEN="${TOKEN}" \
 	"${BIN_DIR}/porthook-gateway" >"${LOG_DIR}/gateway.log" 2>&1 &
 pids+=("$!")
-wait_for_url "http://127.0.0.1:${PUBLIC_PORT}/healthz" "gateway"
+wait_for_url "http://127.0.0.1:${MANAGEMENT_PORT}/healthz" "gateway"
 
 "${BIN_DIR}/porthook" http "${LOCAL_PORT}" \
 	--server "http://127.0.0.1:${AGENT_PORT}" \

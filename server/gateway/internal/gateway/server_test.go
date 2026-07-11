@@ -2185,6 +2185,23 @@ func TestPublicHandlerHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestManagementHandlerHealthEndpoints(t *testing.T) {
+	server := NewServer(testConfig(), slog.Default())
+	httpServer := httptest.NewServer(server.ManagementHandler())
+	defer httpServer.Close()
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		resp, err := httpServer.Client().Get(httpServer.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s returned error: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
+		}
+	}
+}
+
 func TestPublicHandlerListsActiveTunnels(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	connectedAt := time.Date(2026, 6, 30, 11, 0, 0, 0, time.UTC)
@@ -2768,6 +2785,7 @@ func testConfig() Config {
 	return Config{
 		PublicAddr:       ":8080",
 		AgentAddr:        ":8081",
+		ManagementAddr:   ":8082",
 		RootDomain:       "localhost",
 		PublicURL:        "http://localhost:8080",
 		StaticToken:      "dev-token",

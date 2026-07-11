@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -47,6 +48,31 @@ func TestRunHealthcheckUsesConfiguredURL(t *testing.T) {
 	}))
 	defer server.Close()
 	t.Setenv("PORTHOOK_HEALTHCHECK_URL", server.URL+"/readyz")
+
+	var stdout bytes.Buffer
+	if err := run([]string{"healthcheck"}, &stdout); err != nil {
+		t.Fatalf("run healthcheck returned error: %v", err)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "ok" {
+		t.Fatalf("stdout = %q, want ok", got)
+	}
+}
+
+func TestRunHealthcheckUsesManagementListener(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/readyz" {
+			t.Fatalf("path = %q, want /readyz", r.URL.Path)
+		}
+		_, _ = w.Write([]byte("ready\n"))
+	}))
+	defer server.Close()
+
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	t.Setenv("PORTHOOK_HEALTHCHECK_URL", "")
+	t.Setenv("PORTHOOK_MANAGEMENT_ADDR", parsed.Host)
 
 	var stdout bytes.Buffer
 	if err := run([]string{"healthcheck"}, &stdout); err != nil {

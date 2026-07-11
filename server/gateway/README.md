@@ -19,6 +19,7 @@ Default local listeners:
 
 - Public HTTP: `:8080`
 - Agent WebSocket: `:8081`
+- Management HTTP: `:8082`
 
 Run locally:
 
@@ -32,6 +33,7 @@ go run ./server/gateway/cmd/porthook-gateway
 | --- | --- | --- |
 | `PORTHOOK_ADDR` | `:8080` | Public HTTP listener address. |
 | `PORTHOOK_AGENT_ADDR` | `:8081` | Agent WebSocket listener address. |
+| `PORTHOOK_MANAGEMENT_ADDR` | `:8082` | Management HTTP listener address. Keep this listener on a private network. |
 | `PORTHOOK_ROOT_DOMAIN` | `localhost` | Root domain used for subdomain routing. |
 | `PORTHOOK_PUBLIC_URL` | `http://localhost:8080` | Base public URL printed by the agent. |
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` | Static agent authentication token. |
@@ -59,7 +61,7 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_REQUEST_LOG_WRITE_TIMEOUT` | `1s` | Timeout for writing a public request log entry to the durable store. |
 | `PORTHOOK_REQUEST_LOG_RETENTION` | `720h` | Gateway request log retention window. Set `0s` to disable request log pruning. |
 | `PORTHOOK_REQUEST_LOG_PRUNE_INTERVAL` | `1h` | How often the gateway prunes request logs older than the retention window. Set `0s` to disable the pruning worker. |
-| `PORTHOOK_HEALTHCHECK_URL` | derived from `PORTHOOK_ADDR` | Optional explicit URL used by `porthook-gateway healthcheck`. |
+| `PORTHOOK_HEALTHCHECK_URL` | derived from `PORTHOOK_MANAGEMENT_ADDR` | Optional explicit URL used by `porthook-gateway healthcheck`. |
 | `PORTHOOK_HEALTHCHECK_TIMEOUT` | `2s` | HTTP timeout used by `porthook-gateway healthcheck`. |
 | `PORTHOOK_OTEL_ENABLED` | `false` | Enable OpenTelemetry tracing. |
 | `PORTHOOK_OTEL_EXPORTER` | `none` | Trace exporter: `otlp`, `otlp-http`, `otlp-grpc`, `stdout`, `console`, or `none`. |
@@ -69,7 +71,7 @@ Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
 
 ## Operational Endpoints
 
-The public listener exposes:
+The management listener exposes:
 
 - `GET /healthz`
 - `GET /readyz`
@@ -79,11 +81,13 @@ The public listener exposes:
 - `GET /api/v1/runtime`
 - `GET /api/v1/request-logs`
 
+These endpoints remain available on the public listener during the management-listener migration. Configure operator clients to use the management listener.
+
 Metrics use Prometheus text format and include active tunnels, process uptime, public request totals, selected public request outcome counters, custom domain lookup results, access policy denials/errors, token validation attempts, authentication failures, and tunnel registration successes/failures. The metrics endpoint supports browser reads for the self-hosted dashboard. `GET /api/v1/tunnels` returns active tunnel summaries for dashboard visibility and omits local target URLs. `GET /api/v1/tunnels/{id}` returns a single active tunnel with public metadata, stream counts, uptime, and a recent request summary; it also omits local target URLs. `GET /api/v1/runtime` returns safe gateway runtime metadata, limits, timeouts, request-log buffer usage, stream totals, and counters without exposing tokens, local targets, or control-plane URLs.
 
 Use `porthook doctor --gateway http://localhost:8080` to check gateway health, readiness, tunnel, runtime, request-log, and metrics API reachability from the CLI. Use `porthook tunnels list --gateway http://localhost:8080` and `porthook tunnels show --gateway http://localhost:8080 <tunnel-id>` to inspect active tunnels. Use `porthook history requests --gateway http://localhost:8080 --limit 50` to inspect recent gateway request logs. Add `--control-plane` and an admin token to `porthook doctor` to include control-plane checks.
 
-The container image includes `porthook-gateway healthcheck`, which calls `/readyz` through the local public listener. Set `PORTHOOK_HEALTHCHECK_URL` only when the listener cannot be reached through the derived localhost URL.
+The container image includes `porthook-gateway healthcheck`, which calls `/readyz` through the local management listener. Set `PORTHOOK_HEALTHCHECK_URL` only when the listener cannot be reached through the derived localhost URL.
 
 `GET /api/v1/request-logs` returns public request summaries. Without `PORTHOOK_REQUEST_LOG_DATABASE_URL`, it reads from the in-memory ring buffer. When `PORTHOOK_REQUEST_LOG_DATABASE_URL` is set, the gateway writes public request summaries to Postgres and reads the endpoint from that durable store. The response is newest-first and supports `?limit=N`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, `until`, and `cursor`. Time filters use RFC3339 timestamps, and `limit` is applied after filtering. Responses include `request_logs`, echoed `filters`, and `next_cursor` when another page is available. Entries include method, host, path, query presence, remote IP, request ID, subdomain, tunnel ID, stream ID, status, outcome, byte counts, duration, and an optional error string. Raw query strings and authorization values are not returned.
 

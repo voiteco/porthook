@@ -9,6 +9,7 @@ LOCAL_PORT="${PORTHOOK_SMOKE_LOCAL_PORT:-13001}"
 PUBLIC_PORT="${PORTHOOK_SMOKE_PUBLIC_PORT:-18082}"
 AGENT_PORT="${PORTHOOK_SMOKE_AGENT_PORT:-18083}"
 CONTROL_PORT="${PORTHOOK_SMOKE_CONTROL_PORT:-18084}"
+MANAGEMENT_PORT="${PORTHOOK_SMOKE_MANAGEMENT_PORT:-18086}"
 SUBDOMAIN="${PORTHOOK_SMOKE_SUBDOMAIN:-control-demo}"
 ADMIN_TOKEN="${PORTHOOK_SMOKE_ADMIN_TOKEN:-smoke-admin-token}"
 VALIDATOR_TOKEN="${PORTHOOK_SMOKE_VALIDATOR_TOKEN:-smoke-validator-token}"
@@ -139,6 +140,7 @@ start_control_plane() {
 start_gateway() {
 	PORTHOOK_ADDR="127.0.0.1:${PUBLIC_PORT}" \
 	PORTHOOK_AGENT_ADDR="127.0.0.1:${AGENT_PORT}" \
+	PORTHOOK_MANAGEMENT_ADDR="127.0.0.1:${MANAGEMENT_PORT}" \
 	PORTHOOK_ROOT_DOMAIN="localhost" \
 	PORTHOOK_PUBLIC_URL="http://localhost:${PUBLIC_PORT}" \
 	PORTHOOK_STATIC_TOKEN="unused-static-token" \
@@ -148,7 +150,7 @@ start_gateway() {
 		"${BIN_DIR}/porthook-gateway" >>"${LOG_DIR}/gateway.log" 2>&1 &
 	gateway_pid="$!"
 	pids+=("${gateway_pid}")
-	wait_for_url "http://127.0.0.1:${PUBLIC_PORT}/healthz" "gateway"
+	wait_for_url "http://127.0.0.1:${MANAGEMENT_PORT}/healthz" "gateway"
 }
 
 extract_json_field() {

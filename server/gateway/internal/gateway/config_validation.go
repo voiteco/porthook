@@ -45,6 +45,9 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	if err := validateListenAddr(cfg.AgentAddr); err != nil {
 		addError("PORTHOOK_AGENT_ADDR", err.Error())
 	}
+	if err := validateListenAddr(cfg.ManagementAddr); err != nil {
+		addError("PORTHOOK_MANAGEMENT_ADDR", err.Error())
+	}
 	if err := validateRootDomain(cfg.RootDomain); err != nil {
 		addError("PORTHOOK_ROOT_DOMAIN", err.Error())
 	} else if opts.Production && strings.EqualFold(cfg.RootDomain, "localhost") {
