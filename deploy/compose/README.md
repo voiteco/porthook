@@ -32,6 +32,8 @@ Default development configuration:
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` |
 | `PORTHOOK_RATE_LIMIT_RPS` | `60` |
 | `PORTHOOK_RATE_LIMIT_BURST` | `120` |
+| `PORTHOOK_AUTH_ATTEMPT_LIMIT` | `5` |
+| `PORTHOOK_AUTH_ATTEMPT_WINDOW` | `1m` |
 
 ## Control-Plane Stack
 

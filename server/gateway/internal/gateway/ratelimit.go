@@ -49,3 +49,23 @@ func (l *rateLimiter) allow(now time.Time) bool {
 	l.tokens--
 	return true
 }
+
+// peek reports whether allow(now) would currently succeed, without
+// consuming a token or mutating limiter state.
+func (l *rateLimiter) peek(now time.Time) bool {
+	if l == nil {
+		return true
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	tokens := l.tokens
+	if now.After(l.last) {
+		tokens += now.Sub(l.last).Seconds() * l.rate
+		if tokens > l.capacity {
+			tokens = l.capacity
+		}
+	}
+	return tokens >= 1
+}

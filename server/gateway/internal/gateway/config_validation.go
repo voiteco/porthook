@@ -111,6 +111,12 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	if cfg.RateLimitBurst <= 0 {
 		addError("PORTHOOK_RATE_LIMIT_BURST", "must be positive")
 	}
+	if cfg.AuthAttemptLimit <= 0 {
+		addError("PORTHOOK_AUTH_ATTEMPT_LIMIT", "must be positive")
+	}
+	if cfg.AuthAttemptWindow <= 0 {
+		addError("PORTHOOK_AUTH_ATTEMPT_WINDOW", "must be positive")
+	}
 	if cfg.StreamChunkBytes <= 0 {
 		addError("PORTHOOK_STREAM_CHUNK_BYTES", "must be positive")
 	}

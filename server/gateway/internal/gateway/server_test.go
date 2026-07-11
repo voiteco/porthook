@@ -1043,6 +1043,226 @@ func TestPublicRequestEnforcesBasicAccessPolicy(t *testing.T) {
 	}
 }
 
+func TestPublicRequestBasicAuthLogsNeverExposePlaintextCredentials(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer validator-secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/tokens/validate":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"valid":    true,
+				"token_id": "tok_owner",
+			})
+		case "/api/v1/reserved-subdomains/authorize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": true,
+			})
+		case "/api/v1/access-policies/evaluate":
+			var req evaluateAccessPolicyRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			allowed := req.BasicUsername == "admin" && req.BasicPassword == "correct-horse-battery-staple"
+			reason := ""
+			if !allowed {
+				reason = "basic_auth_required"
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": allowed,
+				"mode":    "basic_auth",
+				"reason":  reason,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
+	var logs logBuffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+
+	cfg := testConfig()
+	cfg.ControlPlaneURL = controlPlane.URL
+	cfg.ControlPlaneToken = "validator-secret"
+	server := NewServer(cfg, logger)
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	agentErr := make(chan error, 1)
+	go func() {
+		reqEnv, _, _, err := readStreamedRequest(ctx, conn)
+		if err != nil {
+			agentErr <- err
+			return
+		}
+		agentErr <- writeStreamedResponse(ctx, conn, reqEnv.StreamID, reqEnv.TunnelID, httpwire.Response{
+			Status: http.StatusOK,
+			Body:   []byte("ok"),
+		})
+	}()
+
+	wrongReq, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/private", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	wrongReq.Host = "demo.localhost"
+	wrongReq.SetBasicAuth("admin", "guessed-wrong-password")
+	wrongResp, err := publicServer.Client().Do(wrongReq)
+	if err != nil {
+		t.Fatalf("denied public request returned error: %v", err)
+	}
+	wrongResp.Body.Close()
+	if wrongResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("denied status = %d, want 401", wrongResp.StatusCode)
+	}
+
+	allowedReq, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/private", nil)
+	if err != nil {
+		t.Fatalf("NewRequest returned error: %v", err)
+	}
+	allowedReq.Host = "demo.localhost"
+	allowedReq.SetBasicAuth("admin", "correct-horse-battery-staple")
+	allowedResp, err := publicServer.Client().Do(allowedReq)
+	if err != nil {
+		t.Fatalf("allowed public request returned error: %v", err)
+	}
+	allowedResp.Body.Close()
+	if allowedResp.StatusCode != http.StatusOK {
+		t.Fatalf("allowed status = %d, want 200", allowedResp.StatusCode)
+	}
+	if err := <-agentErr; err != nil {
+		t.Fatalf("agent goroutine returned error: %v", err)
+	}
+
+	got := waitForLog(t, &logs, "event=gateway.public_request")
+	if strings.Contains(got, "guessed-wrong-password") {
+		t.Fatalf("logs leaked the plaintext incorrect password: %q", got)
+	}
+	if strings.Contains(got, "correct-horse-battery-staple") {
+		t.Fatalf("logs leaked the plaintext correct password: %q", got)
+	}
+	if strings.Contains(got, "Basic ") {
+		t.Fatalf("logs leaked a raw Basic authorization header: %q", got)
+	}
+}
+
+func TestPublicRequestThrottlesRepeatedFailedBasicAuth(t *testing.T) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer validator-secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/tokens/validate":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"valid":    true,
+				"token_id": "tok_owner",
+			})
+		case "/api/v1/reserved-subdomains/authorize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": true,
+			})
+		case "/api/v1/access-policies/evaluate":
+			var req evaluateAccessPolicyRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			allowed := req.BasicUsername == "admin" && req.BasicPassword == "secret"
+			reason := ""
+			if !allowed {
+				reason = "basic_auth_required"
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"allowed": allowed,
+				"mode":    "basic_auth",
+				"reason":  reason,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
+	cfg := testConfig()
+	cfg.ControlPlaneURL = controlPlane.URL
+	cfg.ControlPlaneToken = "validator-secret"
+	cfg.TrustedProxies = "127.0.0.0/8"
+	cfg.AuthAttemptLimit = 2
+	cfg.AuthAttemptWindow = time.Minute
+	server := NewServer(cfg, slog.Default())
+	agentServer := httptest.NewServer(server.AgentHandler())
+	defer agentServer.Close()
+	publicServer := httptest.NewServer(server.PublicHandler())
+	defer publicServer.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, websocketURL(agentServer.URL, agentWebSocketPath), nil)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	registerAgent(t, ctx, conn, "demo")
+
+	failedAuthRequest := func(t *testing.T, clientAddr, username, password string) int {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, publicServer.URL+"/private", nil)
+		if err != nil {
+			t.Fatalf("NewRequest returned error: %v", err)
+		}
+		req.Host = "demo.localhost"
+		req.Header.Set("X-Forwarded-For", clientAddr)
+		req.SetBasicAuth(username, password)
+		resp, err := publicServer.Client().Do(req)
+		if err != nil {
+			t.Fatalf("public request returned error: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	for i := 0; i < cfg.AuthAttemptLimit; i++ {
+		if status := failedAuthRequest(t, "198.51.100.10", "admin", "wrong"); status != http.StatusUnauthorized {
+			t.Fatalf("attempt %d status = %d, want 401", i, status)
+		}
+	}
+
+	if status := failedAuthRequest(t, "198.51.100.10", "admin", "wrong"); status != http.StatusTooManyRequests {
+		t.Fatalf("status after exceeding the attempt limit = %d, want 429", status)
+	}
+
+	// The same throttled address is blocked even with correct credentials
+	// until the window elapses: a lockout that lets an attacker verify a
+	// guessed password would defeat the point of the throttle.
+	if status := failedAuthRequest(t, "198.51.100.10", "admin", "secret"); status != http.StatusTooManyRequests {
+		t.Fatalf("status with correct credentials while throttled = %d, want 429", status)
+	}
+
+	// A different client address for the same subdomain is unaffected.
+	if status := failedAuthRequest(t, "198.51.100.20", "admin", "wrong"); status != http.StatusUnauthorized {
+		t.Fatalf("status for an unrelated client address = %d, want 401", status)
+	}
+}
+
 func TestPublicRequestRoutesCustomDomainThroughControlPlane(t *testing.T) {
 	lookupCalls := 0
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -51,6 +51,7 @@ type Server struct {
 	requestLogs     *requestLogBuffer
 	requestLogStore requestLogWriter
 	clientIPs       clientip.Resolver
+	authAttempts    *authAttemptThrottle
 
 	sessionsMu sync.RWMutex
 	sessions   map[string]*agentSession
@@ -113,6 +114,7 @@ func newServerWithRequestLogWriter(cfg Config, logger *slog.Logger, requestLogSt
 		requestLogs:     newRequestLogBuffer(cfg.RequestLogLimit),
 		requestLogStore: requestLogStore,
 		clientIPs:       clientip.New(trustedProxies),
+		authAttempts:    newAuthAttemptThrottle(cfg.AuthAttemptLimit, cfg.AuthAttemptWindow),
 		sessions:        make(map[string]*agentSession),
 
 		generateSubdomain: names.RandomSubdomain,
@@ -395,6 +397,8 @@ type runtimeLimits struct {
 	MaxConcurrentStreams       int   `json:"max_concurrent_streams"`
 	RateLimitRequestsPerSecond int   `json:"rate_limit_rps"`
 	RateLimitBurst             int   `json:"rate_limit_burst"`
+	AuthAttemptLimit           int   `json:"auth_attempt_limit"`
+	AuthAttemptWindowSeconds   int64 `json:"auth_attempt_window_seconds"`
 	StreamChunkBytes           int   `json:"stream_chunk_bytes"`
 }
 
@@ -413,24 +417,25 @@ type runtimeTimeouts struct {
 }
 
 type runtimeCounters struct {
-	PublicRequestsTotal                  uint64 `json:"public_requests_total"`
-	PublicRequestErrorsTotal             uint64 `json:"public_request_errors_total"`
-	PublicRequestRateLimitedTotal        uint64 `json:"public_request_rate_limited_total"`
-	PublicRequestTimeoutsTotal           uint64 `json:"public_request_timeouts_total"`
-	PublicRequestBodyTooLargeTotal       uint64 `json:"public_request_body_too_large_total"`
-	PublicRequestClientCanceledTotal     uint64 `json:"public_request_client_canceled_total"`
-	PublicRequestNoActiveSessionTotal    uint64 `json:"public_request_no_active_session_total"`
-	PublicRequestAccessDeniedTotal       uint64 `json:"public_request_access_denied_total"`
-	PublicRequestAccessPolicyErrorsTotal uint64 `json:"public_request_access_policy_errors_total"`
-	CustomDomainLookupsTotal             uint64 `json:"custom_domain_lookups_total"`
-	CustomDomainLookupHitsTotal          uint64 `json:"custom_domain_lookup_hits_total"`
-	CustomDomainLookupMissesTotal        uint64 `json:"custom_domain_lookup_misses_total"`
-	CustomDomainLookupErrorsTotal        uint64 `json:"custom_domain_lookup_errors_total"`
-	TokenValidationsTotal                uint64 `json:"token_validations_total"`
-	TokenValidationErrorsTotal           uint64 `json:"token_validation_errors_total"`
-	AuthFailuresTotal                    uint64 `json:"auth_failures_total"`
-	TunnelRegistrationsTotal             uint64 `json:"tunnel_registrations_total"`
-	TunnelRegistrationFailuresTotal      uint64 `json:"tunnel_registration_failures_total"`
+	PublicRequestsTotal                   uint64 `json:"public_requests_total"`
+	PublicRequestErrorsTotal              uint64 `json:"public_request_errors_total"`
+	PublicRequestRateLimitedTotal         uint64 `json:"public_request_rate_limited_total"`
+	PublicRequestAuthAttemptsLimitedTotal uint64 `json:"public_request_auth_attempts_limited_total"`
+	PublicRequestTimeoutsTotal            uint64 `json:"public_request_timeouts_total"`
+	PublicRequestBodyTooLargeTotal        uint64 `json:"public_request_body_too_large_total"`
+	PublicRequestClientCanceledTotal      uint64 `json:"public_request_client_canceled_total"`
+	PublicRequestNoActiveSessionTotal     uint64 `json:"public_request_no_active_session_total"`
+	PublicRequestAccessDeniedTotal        uint64 `json:"public_request_access_denied_total"`
+	PublicRequestAccessPolicyErrorsTotal  uint64 `json:"public_request_access_policy_errors_total"`
+	CustomDomainLookupsTotal              uint64 `json:"custom_domain_lookups_total"`
+	CustomDomainLookupHitsTotal           uint64 `json:"custom_domain_lookup_hits_total"`
+	CustomDomainLookupMissesTotal         uint64 `json:"custom_domain_lookup_misses_total"`
+	CustomDomainLookupErrorsTotal         uint64 `json:"custom_domain_lookup_errors_total"`
+	TokenValidationsTotal                 uint64 `json:"token_validations_total"`
+	TokenValidationErrorsTotal            uint64 `json:"token_validation_errors_total"`
+	AuthFailuresTotal                     uint64 `json:"auth_failures_total"`
+	TunnelRegistrationsTotal              uint64 `json:"tunnel_registrations_total"`
+	TunnelRegistrationFailuresTotal       uint64 `json:"tunnel_registration_failures_total"`
 }
 
 func (s *Server) handleTunnelList(w http.ResponseWriter, r *http.Request) {
@@ -524,6 +529,8 @@ func (s *Server) runtimeSummary() runtimeSummary {
 			MaxConcurrentStreams:       s.cfg.MaxConcurrentStreams,
 			RateLimitRequestsPerSecond: s.cfg.RateLimitRequestsPerSecond,
 			RateLimitBurst:             s.cfg.RateLimitBurst,
+			AuthAttemptLimit:           s.cfg.AuthAttemptLimit,
+			AuthAttemptWindowSeconds:   int64(s.cfg.AuthAttemptWindow.Seconds()),
 			StreamChunkBytes:           s.cfg.StreamChunkBytes,
 		},
 		Timeouts: runtimeTimeouts{
@@ -540,24 +547,25 @@ func (s *Server) runtimeSummary() runtimeSummary {
 			ShutdownTimeoutSeconds:       int64(s.cfg.ShutdownTimeout.Seconds()),
 		},
 		Counters: runtimeCounters{
-			PublicRequestsTotal:                  s.metrics.publicRequestsTotal.Load(),
-			PublicRequestErrorsTotal:             s.metrics.publicRequestErrorsTotal.Load(),
-			PublicRequestRateLimitedTotal:        s.metrics.publicRequestRateLimitedTotal.Load(),
-			PublicRequestTimeoutsTotal:           s.metrics.publicRequestTimeoutsTotal.Load(),
-			PublicRequestBodyTooLargeTotal:       s.metrics.publicRequestBodyTooLargeTotal.Load(),
-			PublicRequestClientCanceledTotal:     s.metrics.publicRequestClientCanceledTotal.Load(),
-			PublicRequestNoActiveSessionTotal:    s.metrics.publicRequestNoActiveSessionTotal.Load(),
-			PublicRequestAccessDeniedTotal:       s.metrics.publicRequestAccessDeniedTotal.Load(),
-			PublicRequestAccessPolicyErrorsTotal: s.metrics.publicRequestAccessPolicyErrorsTotal.Load(),
-			CustomDomainLookupsTotal:             s.metrics.customDomainLookupsTotal.Load(),
-			CustomDomainLookupHitsTotal:          s.metrics.customDomainLookupHitsTotal.Load(),
-			CustomDomainLookupMissesTotal:        s.metrics.customDomainLookupMissesTotal.Load(),
-			CustomDomainLookupErrorsTotal:        s.metrics.customDomainLookupErrorsTotal.Load(),
-			TokenValidationsTotal:                s.metrics.tokenValidationsTotal.Load(),
-			TokenValidationErrorsTotal:           s.metrics.tokenValidationErrorsTotal.Load(),
-			AuthFailuresTotal:                    s.metrics.authFailuresTotal.Load(),
-			TunnelRegistrationsTotal:             s.metrics.tunnelRegistrationsTotal.Load(),
-			TunnelRegistrationFailuresTotal:      s.metrics.tunnelRegistrationFailuresTotal.Load(),
+			PublicRequestsTotal:                   s.metrics.publicRequestsTotal.Load(),
+			PublicRequestErrorsTotal:              s.metrics.publicRequestErrorsTotal.Load(),
+			PublicRequestRateLimitedTotal:         s.metrics.publicRequestRateLimitedTotal.Load(),
+			PublicRequestAuthAttemptsLimitedTotal: s.metrics.publicRequestAuthAttemptsLimitedTotal.Load(),
+			PublicRequestTimeoutsTotal:            s.metrics.publicRequestTimeoutsTotal.Load(),
+			PublicRequestBodyTooLargeTotal:        s.metrics.publicRequestBodyTooLargeTotal.Load(),
+			PublicRequestClientCanceledTotal:      s.metrics.publicRequestClientCanceledTotal.Load(),
+			PublicRequestNoActiveSessionTotal:     s.metrics.publicRequestNoActiveSessionTotal.Load(),
+			PublicRequestAccessDeniedTotal:        s.metrics.publicRequestAccessDeniedTotal.Load(),
+			PublicRequestAccessPolicyErrorsTotal:  s.metrics.publicRequestAccessPolicyErrorsTotal.Load(),
+			CustomDomainLookupsTotal:              s.metrics.customDomainLookupsTotal.Load(),
+			CustomDomainLookupHitsTotal:           s.metrics.customDomainLookupHitsTotal.Load(),
+			CustomDomainLookupMissesTotal:         s.metrics.customDomainLookupMissesTotal.Load(),
+			CustomDomainLookupErrorsTotal:         s.metrics.customDomainLookupErrorsTotal.Load(),
+			TokenValidationsTotal:                 s.metrics.tokenValidationsTotal.Load(),
+			TokenValidationErrorsTotal:            s.metrics.tokenValidationErrorsTotal.Load(),
+			AuthFailuresTotal:                     s.metrics.authFailuresTotal.Load(),
+			TunnelRegistrationsTotal:              s.metrics.tunnelRegistrationsTotal.Load(),
+			TunnelRegistrationFailuresTotal:       s.metrics.tunnelRegistrationFailuresTotal.Load(),
 		},
 	}
 }
@@ -972,6 +980,15 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authAttemptKey := subdomain + "|" + s.clientIP(r)
+	if s.authAttempts.blocked(authAttemptKey, started) {
+		status = http.StatusTooManyRequests
+		outcome = "auth_attempts_limited"
+		w.Header().Set("Retry-After", "1")
+		writePublicError(w, r, "too many authentication attempts", http.StatusTooManyRequests)
+		return
+	}
+
 	accessResult, err := s.evaluatePublicAccess(r, subdomain)
 	if err != nil {
 		status = http.StatusServiceUnavailable
@@ -983,6 +1000,9 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	if !accessResult.Allowed {
 		status = accessDeniedStatus(accessResult)
 		outcome = "access_denied"
+		if accessResult.Mode == "basic_auth" || accessResult.Mode == "bearer_token" {
+			s.authAttempts.recordFailure(authAttemptKey, started)
+		}
 		writeAccessDenied(w, r, accessResult)
 		return
 	}

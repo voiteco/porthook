@@ -22,6 +22,8 @@ const (
 	defaultMaxConcurrentStreams    = 64
 	defaultRateLimitRPS            = 60
 	defaultRateLimitBurst          = 120
+	defaultAuthAttemptLimit        = 5
+	defaultAuthAttemptWindow       = time.Minute
 	defaultStreamChunkBytes        = 32 << 10
 	defaultReadHeaderTimeout       = 5 * time.Second
 	defaultReadTimeout             = 30 * time.Second
@@ -57,6 +59,8 @@ type Config struct {
 	MaxConcurrentStreams       int
 	RateLimitRequestsPerSecond int
 	RateLimitBurst             int
+	AuthAttemptLimit           int
+	AuthAttemptWindow          time.Duration
 	StreamChunkBytes           int
 	ReadHeaderTimeout          time.Duration
 	ReadTimeout                time.Duration
@@ -94,6 +98,8 @@ func ConfigFromEnv() Config {
 		MaxConcurrentStreams:       envInt("PORTHOOK_MAX_CONCURRENT_STREAMS", defaultMaxConcurrentStreams),
 		RateLimitRequestsPerSecond: envInt("PORTHOOK_RATE_LIMIT_RPS", defaultRateLimitRPS),
 		RateLimitBurst:             envInt("PORTHOOK_RATE_LIMIT_BURST", defaultRateLimitBurst),
+		AuthAttemptLimit:           envInt("PORTHOOK_AUTH_ATTEMPT_LIMIT", defaultAuthAttemptLimit),
+		AuthAttemptWindow:          envDuration("PORTHOOK_AUTH_ATTEMPT_WINDOW", defaultAuthAttemptWindow),
 		StreamChunkBytes:           envInt("PORTHOOK_STREAM_CHUNK_BYTES", defaultStreamChunkBytes),
 		ReadHeaderTimeout:          envDuration("PORTHOOK_READ_HEADER_TIMEOUT", defaultReadHeaderTimeout),
 		ReadTimeout:                envDuration("PORTHOOK_READ_TIMEOUT", defaultReadTimeout),
@@ -152,6 +158,12 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.RateLimitBurst <= 0 {
 		cfg.RateLimitBurst = defaultRateLimitBurst
+	}
+	if cfg.AuthAttemptLimit <= 0 {
+		cfg.AuthAttemptLimit = defaultAuthAttemptLimit
+	}
+	if cfg.AuthAttemptWindow <= 0 {
+		cfg.AuthAttemptWindow = defaultAuthAttemptWindow
 	}
 	if cfg.StreamChunkBytes <= 0 {
 		cfg.StreamChunkBytes = defaultStreamChunkBytes
