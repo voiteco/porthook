@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,7 +22,7 @@ const defaultHistoryTimeout = 10 * time.Second
 const defaultHistoryLimit = 100
 
 const historyUsageText = `usage: porthook history events --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [filters] [--json]
-       porthook history requests [--gateway URL] [filters] [--json]
+       porthook history requests --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [filters] [--json]
        porthook history help`
 
 type historyEventConfig struct {
@@ -41,21 +40,20 @@ type historyEventConfig struct {
 }
 
 type historyRequestConfig struct {
-	gatewayURL string
-	timeout    time.Duration
-	subdomain  string
-	method     string
-	host       string
-	path       string
-	status     int
-	outcome    string
-	requestID  string
-	tunnelID   string
-	since      string
-	until      string
-	cursor     string
-	limit      int
-	jsonOutput bool
+	tokenAdminConfig
+	timeout   time.Duration
+	subdomain string
+	method    string
+	host      string
+	path      string
+	status    int
+	outcome   string
+	requestID string
+	tunnelID  string
+	since     string
+	until     string
+	cursor    string
+	limit     int
 }
 
 type historyAuditEventsResponse struct {
@@ -103,8 +101,9 @@ type historyRequestLog struct {
 }
 
 type historyGatewayClient struct {
-	baseURL string
-	client  *http.Client
+	baseURL    string
+	adminToken string
+	client     *http.Client
 }
 
 func runHistoryCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
@@ -124,7 +123,7 @@ func runHistoryCommand(args []string, stdin io.Reader, stdout io.Writer, stderr 
 			printHistoryRequestsHelp(stdout)
 			return nil
 		}
-		return runHistoryRequests(args[1:], stdout, stderr)
+		return runHistoryRequests(args[1:], stdin, stdout, stderr)
 	case "help", "--help", "-h":
 		printHistoryUsage(stdout)
 		return nil
@@ -151,8 +150,8 @@ func runHistoryEvents(args []string, stdin io.Reader, stdout io.Writer, stderr i
 	return nil
 }
 
-func runHistoryRequests(args []string, stdout io.Writer, stderr io.Writer) error {
-	cfg, err := parseHistoryRequestConfig(args, stderr)
+func runHistoryRequests(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	cfg, err := parseHistoryRequestConfig(args, stdin, stderr)
 	if err != nil {
 		return err
 	}
@@ -212,11 +211,9 @@ func finalizeHistoryEventConfig(cfg *historyEventConfig) error {
 	return validateHistoryWindow(cfg.since, cfg.until)
 }
 
-func parseHistoryRequestConfig(args []string, stderr io.Writer) (historyRequestConfig, error) {
+func parseHistoryRequestConfig(args []string, stdin io.Reader, stderr io.Writer) (historyRequestConfig, error) {
 	cfg := defaultHistoryRequestConfig()
-	fs := flag.NewFlagSet("history requests", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.StringVar(&cfg.gatewayURL, "gateway", cfg.gatewayURL, "gateway public URL")
+	fs := newTokenAdminFlagSet("history requests", &cfg.tokenAdminConfig, stderr)
 	fs.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "HTTP timeout")
 	fs.IntVar(&cfg.limit, "limit", cfg.limit, "maximum request logs to return")
 	fs.StringVar(&cfg.subdomain, "subdomain", cfg.subdomain, "subdomain filter")
@@ -230,37 +227,29 @@ func parseHistoryRequestConfig(args []string, stderr io.Writer) (historyRequestC
 	fs.StringVar(&cfg.since, "since", cfg.since, "RFC3339 lower time bound")
 	fs.StringVar(&cfg.until, "until", cfg.until, "RFC3339 upper time bound")
 	fs.StringVar(&cfg.cursor, "cursor", cfg.cursor, "pagination cursor")
-	fs.BoolVar(&cfg.jsonOutput, "json", cfg.jsonOutput, "write JSON output")
 	if err := fs.Parse(args); err != nil {
 		return historyRequestConfig{}, err
 	}
 	if fs.NArg() > 0 {
-		return historyRequestConfig{}, fmt.Errorf("usage: porthook history requests [--gateway URL] [filters] [--json]")
+		return historyRequestConfig{}, fmt.Errorf("usage: porthook history requests --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [filters] [--json]")
 	}
-	if err := finalizeHistoryRequestConfig(&cfg); err != nil {
+	if err := finalizeHistoryRequestConfig(fs, &cfg, stdin, stderr); err != nil {
 		return historyRequestConfig{}, err
 	}
 	return cfg, nil
 }
 
 func defaultHistoryRequestConfig() historyRequestConfig {
-	gatewayURL := strings.TrimSpace(os.Getenv("PORTHOOK_GATEWAY_URL"))
-	if gatewayURL == "" {
-		gatewayURL = defaultDoctorGatewayURL
-	}
 	return historyRequestConfig{
-		gatewayURL: gatewayURL,
-		timeout:    defaultHistoryTimeout,
-		limit:      defaultHistoryLimit,
+		timeout: defaultHistoryTimeout,
+		limit:   defaultHistoryLimit,
 	}
 }
 
-func finalizeHistoryRequestConfig(cfg *historyRequestConfig) error {
-	gatewayURL, err := normalizeDoctorURL(cfg.gatewayURL, "gateway URL")
-	if err != nil {
+func finalizeHistoryRequestConfig(fs *flag.FlagSet, cfg *historyRequestConfig, stdin io.Reader, stderr io.Writer) error {
+	if err := finalizeTokenAdminConfig(fs, &cfg.tokenAdminConfig, stdin, stderr); err != nil {
 		return err
 	}
-	cfg.gatewayURL = gatewayURL
 	if cfg.timeout <= 0 {
 		return fmt.Errorf("timeout must be positive")
 	}
@@ -314,14 +303,15 @@ func (c tokenAdminClient) listHistoryEvents(ctx context.Context, cfg historyEven
 
 func newHistoryGatewayClient(cfg historyRequestConfig) historyGatewayClient {
 	return historyGatewayClient{
-		baseURL: cfg.gatewayURL,
-		client:  &http.Client{Timeout: cfg.timeout},
+		baseURL:    cfg.controlPlaneURL,
+		adminToken: cfg.adminToken,
+		client:     &http.Client{Timeout: cfg.timeout},
 	}
 }
 
 func (c historyGatewayClient) listHistoryRequests(ctx context.Context, cfg historyRequestConfig) (historyRequestLogsResponse, error) {
 	var listed historyRequestLogsResponse
-	if err := c.getJSON(ctx, "/api/v1/request-logs?"+historyRequestQuery(cfg), &listed); err != nil {
+	if err := c.getJSON(ctx, "/api/v1/gateway/request-logs?"+historyRequestQuery(cfg), &listed); err != nil {
 		return historyRequestLogsResponse{}, err
 	}
 	return listed, nil
@@ -333,6 +323,7 @@ func (c historyGatewayClient) getJSON(ctx context.Context, path string, out any)
 		return fmt.Errorf("build gateway request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.adminToken)
 	req.Header.Set("User-Agent", "porthook/"+version+" history")
 
 	resp, err := c.client.Do(req)
@@ -520,12 +511,14 @@ Options:
 }
 
 func printHistoryRequestsHelp(w io.Writer) {
-	fmt.Fprintln(w, `usage: porthook history requests [--gateway URL] [filters] [--json]
+	fmt.Fprintln(w, `usage: porthook history requests --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [filters] [--json]
 
-List gateway request logs.
+List gateway request logs through the authenticated control-plane operator API.
 
 Options:
-  --gateway URL             Gateway public URL. Defaults to PORTHOOK_GATEWAY_URL or http://localhost:8080.
+  --control-plane URL       Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.
+  --admin-token TOKEN       Admin token with audit_history scope. Defaults to PORTHOOK_CONTROL_ADMIN_TOKEN.
+  --admin-token-stdin       Read the admin token from stdin.
   --timeout DURATION        HTTP timeout. Default: 10s.
   --limit N                 Maximum request logs to return. Default: 100. Maximum: 1000.
   --subdomain VALUE         Subdomain filter.

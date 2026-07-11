@@ -54,9 +54,10 @@ func TestRunHistoryEventsListsAuditEvents(t *testing.T) {
 
 func TestRunHistoryRequestsListsRequestLogs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/request-logs" {
-			t.Fatalf("request = %s %s, want GET /api/v1/request-logs", r.Method, r.URL.Path)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/gateway/request-logs" {
+			t.Fatalf("request = %s %s, want operator request logs endpoint", r.Method, r.URL.Path)
 		}
+		assertBearer(t, r, "admin-secret")
 		if got := r.Header.Get("User-Agent"); !strings.Contains(got, "history") {
 			t.Fatalf("User-Agent = %q, want history client", got)
 		}
@@ -81,8 +82,8 @@ func TestRunHistoryRequestsListsRequestLogs(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	err := runWithIO(
-		[]string{"history", "requests", "--gateway", server.URL, "--limit", "1", "--method", "get", "--status", "502", "--cursor", "cur_1"},
-		strings.NewReader(""),
+		[]string{"history", "requests", "--control-plane", server.URL, "--admin-token-stdin", "--limit", "1", "--method", "get", "--status", "502", "--cursor", "cur_1"},
+		strings.NewReader("admin-secret\n"),
 		&stdout,
 		&stderr,
 	)
@@ -118,7 +119,7 @@ func TestRunHistoryRequestsRejectsInvalidStatus(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	err := runWithIO(
-		[]string{"history", "requests", "--gateway", "http://127.0.0.1:8080", "--status", "42"},
+		[]string{"history", "requests", "--control-plane", "http://127.0.0.1:8082", "--admin-token", "admin-secret", "--status", "42"},
 		strings.NewReader(""),
 		&stdout,
 		&stderr,
