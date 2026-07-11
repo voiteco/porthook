@@ -63,7 +63,7 @@ configcheck:
 
 configcheck-production:
 	PORTHOOK_ROOT_DOMAIN=tunnels.example.com PORTHOOK_PUBLIC_URL=https://tunnels.example.com PORTHOOK_CONTROL_PLANE_URL=http://control-plane:8082 PORTHOOK_CONTROL_PLANE_TOKEN=validator-secret PORTHOOK_MANAGEMENT_TOKEN=management-secret PORTHOOK_REQUEST_LOG_DATABASE_URL=postgres://porthook:secret@postgres:5432/porthook?sslmode=disable $(GO) run ./server/gateway/cmd/porthook-gateway configcheck --production
-	PORTHOOK_CONTROL_ADMIN_TOKEN=admin-secret PORTHOOK_CONTROL_VALIDATOR_TOKEN=validator-secret PORTHOOK_DATABASE_URL=postgres://porthook:secret@postgres:5432/porthook?sslmode=disable $(GO) run ./server/control-plane/cmd/porthook-control-plane configcheck --production
+	PORTHOOK_CONTROL_ADMIN_TOKEN=admin-secret PORTHOOK_CONTROL_VALIDATOR_TOKEN=validator-secret PORTHOOK_GATEWAY_MANAGEMENT_URL=http://gateway:8082 PORTHOOK_GATEWAY_MANAGEMENT_TOKEN=management-secret PORTHOOK_DATABASE_URL=postgres://porthook:secret@postgres:5432/porthook?sslmode=disable $(GO) run ./server/control-plane/cmd/porthook-control-plane configcheck --production
 
 production-hardening-check:
 	sh scripts/production-hardening-check.sh

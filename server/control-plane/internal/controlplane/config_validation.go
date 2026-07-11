@@ -5,6 +5,7 @@ package controlplane
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -71,6 +72,30 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 			addWarning("PORTHOOK_CONTROL_VALIDATOR_TOKEN", "matches PORTHOOK_CONTROL_ADMIN_TOKEN")
 		}
 	}
+	gatewayManagementConfigured := strings.TrimSpace(cfg.GatewayManagementURL) != ""
+	if !gatewayManagementConfigured {
+		if opts.Production {
+			addError("PORTHOOK_GATEWAY_MANAGEMENT_URL", "is required in production mode")
+		} else {
+			addWarning("PORTHOOK_GATEWAY_MANAGEMENT_URL", "is not configured; gateway operator APIs will be disabled")
+		}
+	} else if err := validateHTTPURL(cfg.GatewayManagementURL); err != nil {
+		addError("PORTHOOK_GATEWAY_MANAGEMENT_URL", err.Error())
+	}
+	gatewayManagementTokenConfigured := strings.TrimSpace(cfg.GatewayManagementToken) != ""
+	if !gatewayManagementTokenConfigured {
+		if gatewayManagementConfigured || opts.Production {
+			addError("PORTHOOK_GATEWAY_MANAGEMENT_TOKEN", "is required when gateway management is configured")
+		}
+	} else if opts.Production && looksLikePlaceholderSecret(cfg.GatewayManagementToken) {
+		addError("PORTHOOK_GATEWAY_MANAGEMENT_TOKEN", "must be replaced with a generated secret in production mode")
+	}
+	if opts.Production && gatewayManagementTokenConfigured && (cfg.GatewayManagementToken == cfg.AdminToken || cfg.GatewayManagementToken == cfg.ValidatorToken) {
+		addError("PORTHOOK_GATEWAY_MANAGEMENT_TOKEN", "must be different from control-plane admin and validator tokens in production mode")
+	}
+	if cfg.GatewayManagementTimeout <= 0 {
+		addError("PORTHOOK_GATEWAY_MANAGEMENT_TIMEOUT", "must be positive")
+	}
 	if strings.TrimSpace(cfg.DatabaseURL) == "" {
 		if opts.Production {
 			addError("PORTHOOK_DATABASE_URL", "is required in production mode")
@@ -86,6 +111,20 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	}
 
 	return report
+}
+
+func validateHTTPURL(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("must be a valid URL: %w", err)
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("must use http or https and include a host")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("must not include userinfo, query, or fragment")
+	}
+	return nil
 }
 
 func validateListenAddr(value string) error {

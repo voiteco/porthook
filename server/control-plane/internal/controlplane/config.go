@@ -8,29 +8,36 @@ import (
 )
 
 const (
-	defaultAddr                    = ":8082"
-	defaultAuditEventRetention     = 90 * 24 * time.Hour
-	defaultAuditEventPruneInterval = time.Hour
+	defaultAddr                     = ":8082"
+	defaultGatewayManagementTimeout = 5 * time.Second
+	defaultAuditEventRetention      = 90 * 24 * time.Hour
+	defaultAuditEventPruneInterval  = time.Hour
 )
 
 type Config struct {
-	Addr                    string
-	AdminToken              string
-	ValidatorToken          string
-	DatabaseURL             string
-	Version                 string
-	AuditEventRetention     time.Duration
-	AuditEventPruneInterval time.Duration
+	Addr                     string
+	AdminToken               string
+	ValidatorToken           string
+	GatewayManagementURL     string
+	GatewayManagementToken   string
+	GatewayManagementTimeout time.Duration
+	DatabaseURL              string
+	Version                  string
+	AuditEventRetention      time.Duration
+	AuditEventPruneInterval  time.Duration
 }
 
 func ConfigFromEnv() Config {
 	cfg := Config{
-		Addr:                    envString("PORTHOOK_CONTROL_ADDR", defaultAddr),
-		AdminToken:              os.Getenv("PORTHOOK_CONTROL_ADMIN_TOKEN"),
-		ValidatorToken:          os.Getenv("PORTHOOK_CONTROL_VALIDATOR_TOKEN"),
-		DatabaseURL:             os.Getenv("PORTHOOK_DATABASE_URL"),
-		AuditEventRetention:     envDuration("PORTHOOK_AUDIT_EVENT_RETENTION", defaultAuditEventRetention),
-		AuditEventPruneInterval: envDuration("PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL", defaultAuditEventPruneInterval),
+		Addr:                     envString("PORTHOOK_CONTROL_ADDR", defaultAddr),
+		AdminToken:               os.Getenv("PORTHOOK_CONTROL_ADMIN_TOKEN"),
+		ValidatorToken:           os.Getenv("PORTHOOK_CONTROL_VALIDATOR_TOKEN"),
+		GatewayManagementURL:     os.Getenv("PORTHOOK_GATEWAY_MANAGEMENT_URL"),
+		GatewayManagementToken:   os.Getenv("PORTHOOK_GATEWAY_MANAGEMENT_TOKEN"),
+		GatewayManagementTimeout: envDuration("PORTHOOK_GATEWAY_MANAGEMENT_TIMEOUT", defaultGatewayManagementTimeout),
+		DatabaseURL:              os.Getenv("PORTHOOK_DATABASE_URL"),
+		AuditEventRetention:      envDuration("PORTHOOK_AUDIT_EVENT_RETENTION", defaultAuditEventRetention),
+		AuditEventPruneInterval:  envDuration("PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL", defaultAuditEventPruneInterval),
 	}
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr

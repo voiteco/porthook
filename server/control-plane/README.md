@@ -57,6 +57,9 @@ The dashboard can list, create, and revoke scoped admin tokens and agent tokens,
 | `PORTHOOK_CONTROL_ADDR` | `:8082` | Control-plane HTTP listener address. |
 | `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Full-scope bootstrap/recovery bearer token for control-plane administration. Production config checks require it, but routine operator access should use scoped admin tokens. |
 | `PORTHOOK_CONTROL_VALIDATOR_TOKEN` | empty | Bearer token required for token validation requests from the gateway. If empty, validation returns `401 Unauthorized`. |
+| `PORTHOOK_GATEWAY_MANAGEMENT_URL` | empty | Private gateway management base URL used by authenticated operator APIs. Required by production configuration validation. |
+| `PORTHOOK_GATEWAY_MANAGEMENT_TOKEN` | empty | Service bearer token used only for control-plane-to-gateway management requests. Required when the management URL is configured. |
+| `PORTHOOK_GATEWAY_MANAGEMENT_TIMEOUT` | `5s` | Timeout for gateway management requests. |
 | `PORTHOOK_DATABASE_URL` | empty | Postgres connection URL. If empty, the process uses in-memory storage for development. |
 | `PORTHOOK_AUDIT_EVENT_RETENTION` | `2160h` | Control-plane audit event retention window. Set `0s` to disable audit event pruning. |
 | `PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL` | `1h` | How often the control plane prunes audit events older than the retention window. Set `0s` to disable the pruning worker. |

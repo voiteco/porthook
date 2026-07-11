@@ -80,6 +80,7 @@ func TestRunConfigcheckAllowsDevelopmentDefaultsWithWarnings(t *testing.T) {
 		"warning: PORTHOOK_CONTROL_ADMIN_TOKEN",
 		"warning: PORTHOOK_CONTROL_VALIDATOR_TOKEN",
 		"warning: PORTHOOK_DATABASE_URL",
+		"warning: PORTHOOK_GATEWAY_MANAGEMENT_URL",
 		"ok",
 	} {
 		if !strings.Contains(output, want) {
@@ -99,6 +100,8 @@ func TestRunConfigcheckProductionRequiresDurableConfig(t *testing.T) {
 		"error: PORTHOOK_CONTROL_ADMIN_TOKEN",
 		"error: PORTHOOK_CONTROL_VALIDATOR_TOKEN",
 		"error: PORTHOOK_DATABASE_URL",
+		"error: PORTHOOK_GATEWAY_MANAGEMENT_URL",
+		"error: PORTHOOK_GATEWAY_MANAGEMENT_TOKEN",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stdout = %q, want %q", output, want)
@@ -109,6 +112,8 @@ func TestRunConfigcheckProductionRequiresDurableConfig(t *testing.T) {
 func TestRunConfigcheckProductionAcceptsDurableConfig(t *testing.T) {
 	t.Setenv("PORTHOOK_CONTROL_ADMIN_TOKEN", "admin-secret")
 	t.Setenv("PORTHOOK_CONTROL_VALIDATOR_TOKEN", "validator-secret")
+	t.Setenv("PORTHOOK_GATEWAY_MANAGEMENT_URL", "http://gateway:8082")
+	t.Setenv("PORTHOOK_GATEWAY_MANAGEMENT_TOKEN", "management-secret")
 	t.Setenv("PORTHOOK_DATABASE_URL", "postgres://porthook:secret@postgres:5432/porthook?sslmode=disable")
 
 	var stdout bytes.Buffer
