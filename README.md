@@ -4,7 +4,7 @@ Porthook is an open-source reverse tunnel service for exposing local development
 
 This repository is the public self-hosted product. Private commercial, hosted-cloud, pricing, and operating plans should live in separate private repositories.
 
-Project status: `v0.15.0` pre-production. The local HTTP tunnel path, self-hosted control-plane token management, scoped admin tokens, gateway token validation, reserved subdomains, access policies, custom domain mappings, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs, operational defaults, and deployment boundaries can still change before 1.0.
+Project status: `v0.15.1` pre-production. The local HTTP tunnel path, self-hosted control-plane token management, scoped admin tokens, gateway token validation, reserved subdomains, access policies, custom domain mappings, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs, operational defaults, and deployment boundaries can still change before 1.0.
 
 ## What It Does
 
@@ -163,16 +163,18 @@ Completed foundations:
 20. Release artifact verification, checksum validation, and durable smoke coverage.
 21. Self-hosted deployment ergonomics, backup guidance, and control-plane proxy hardening.
 22. Scoped admin tokens with CLI, dashboard, audit, and smoke coverage.
+23. Private gateway management listener isolated from public tunnel traffic, with control-plane-mediated operator access.
+24. Trusted-proxy client identity resolution, Argon2id access-policy password hashing, and bounded authentication-attempt protection, verified end-to-end against a real Caddy deployment.
 
 The detailed production-stability plan, ordered implementation blocks, and `v1.0.0` release gates live in [docs/PRODUCTION_ROADMAP.md](./docs/PRODUCTION_ROADMAP.md).
 
 ## Known Limitations
 
-The current pre-production `main` line isolates gateway management on a private listener and mediates operator access through scoped control-plane APIs, but proxy client IP handling still depends on the deployment path and supported public traffic is HTTP with reverse-proxy-provided HTTPS. The reference topology is a single gateway and control-plane node with Postgres. Release images are built locally from source, and release binaries are published for Linux and macOS only. TLS certificates, wildcard DNS, and reverse-proxy routing remain operator responsibilities.
+The current pre-production `main` line isolates gateway management on a private listener, mediates operator access through scoped control-plane APIs, and resolves client identity through an explicit trusted-proxy configuration verified end-to-end against a real Caddy deployment, but supported public traffic is still HTTP with reverse-proxy-provided HTTPS. The reference topology is a single gateway and control-plane node with Postgres. Release images are built locally from source, and release binaries are published for Linux and macOS only. TLS certificates, wildcard DNS, and reverse-proxy routing remain operator responsibilities.
 
 ## Installation
 
-Release binaries for `v0.15.0` are available for Linux and macOS on `amd64` and `arm64`. Windows users can build the CLI agent from source until Windows release packaging is added. See [docs/INSTALL.md](./docs/INSTALL.md) for download, checksum verification, installation, version checks, and `configcheck` usage.
+Release binaries for `v0.15.1` are available for Linux and macOS on `amd64` and `arm64`. Windows users can build the CLI agent from source until Windows release packaging is added. See [docs/INSTALL.md](./docs/INSTALL.md) for download, checksum verification, installation, version checks, and `configcheck` usage.
 
 ## Self-Hosted Quick Start
 

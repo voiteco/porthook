@@ -4,9 +4,16 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-07-11
+
 ### Added
 - Added a dedicated private gateway management listener and a separate control-plane-to-gateway management credential.
 - Added authenticated control-plane operator endpoints for gateway health, readiness, metrics, tunnels, runtime diagnostics, and request logs.
+- Added a shared, trusted-proxy-aware client-IP resolver used consistently by the gateway and control plane for access-policy evaluation, forwarded headers, request logs, audit events, and traces.
+- Added `PORTHOOK_TRUSTED_PROXIES` configuration and an explicit trust boundary for the production Compose network so only the reverse proxy's peer address can supply forwarded client-address headers.
+- Added versioned Argon2id password hashing for user-selected basic-auth access-policy passwords, with lazy upgrade of legacy hashes on successful authentication; generated bearer, agent, admin, and service tokens keep the fast SHA-256 lookup hash.
+- Added bounded authentication-attempt throttling for basic-auth and bearer-token access-policy checks, keyed by subdomain and resolved client address, without limiting public traffic or already-authenticated requests.
+- Added an end-to-end Caddy edge smoke test (`make smoke-caddy-edge`) proving `ip_allowlist` access policies and gateway request logs use the client address the reverse proxy actually observed, not a client-supplied `X-Forwarded-For` header.
 
 ### Changed
 - Dashboard and CLI operational workflows now use scoped control-plane APIs instead of direct gateway URLs; CLI exports use schema version 3.
@@ -15,6 +22,7 @@ All notable changes to Porthook are documented here.
 
 ### Fixed
 - Stabilized the gateway stream-error test by waiting for tunnel registration before issuing its public request.
+- Fixed `porthook access update` usage text and argument parsing, which silently required policy option flags before the trailing policy ID rather than after it as documented.
 
 ## [0.15.0] - 2026-07-11
 

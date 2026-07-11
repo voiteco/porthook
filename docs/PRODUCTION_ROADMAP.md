@@ -6,7 +6,7 @@ The objective of this roadmap is to take the public self-hosted Porthook product
 
 This document is the execution source of truth for that work. Tasks are ordered by dependency and risk. A task is complete only after its implementation, tests, documentation, commit, push, and required CI checks are complete.
 
-Current phase: Blocks 1 through 3 are complete. Block 4 is ready to start.
+Current phase: Blocks 1 through 4 are complete. Block 5 is ready to start.
 
 ## Supported v1 Scope
 
@@ -138,24 +138,24 @@ Target: `v0.15.1`
 
 Tasks:
 
-- [ ] Add a shared client-IP resolver for gateway and control-plane HTTP handlers.
-- [ ] Define explicit trusted-proxy configuration and reject forwarded client headers from untrusted peers.
-- [ ] Parse proxy chains consistently and select the first untrusted client address.
-- [ ] Give the production Compose network an explicit trust configuration suitable for Caddy forwarding.
-- [ ] Use the resolved client address in access-policy evaluation, forwarded headers, request logs, audit events, traces, and rate-limit keys where applicable.
-- [ ] Add direct, trusted-proxy, multi-proxy, IPv4, IPv6, and spoofed-header tests.
-- [ ] Add an end-to-end Caddy test proving tunnel IP allowlists use the original client address.
-- [ ] Introduce versioned Argon2id or bcrypt hashes for user-selected basic-auth passwords.
-- [ ] Preserve constant-time verification and lazily upgrade legacy password hashes after successful authentication.
-- [ ] Keep fast SHA-256 lookup hashes only for generated high-entropy bearer, agent, admin, and service tokens.
-- [ ] Add bounded authentication-attempt protection without preventing normal tunnel traffic.
-- [ ] Verify that plaintext credentials and reusable authorization values never appear in logs, metrics, traces, exports, or API summaries.
+- [x] Add a shared client-IP resolver for gateway and control-plane HTTP handlers.
+- [x] Define explicit trusted-proxy configuration and reject forwarded client headers from untrusted peers.
+- [x] Parse proxy chains consistently and select the first untrusted client address.
+- [x] Give the production Compose network an explicit trust configuration suitable for Caddy forwarding.
+- [x] Use the resolved client address in access-policy evaluation, forwarded headers, request logs, audit events, traces, and rate-limit keys where applicable.
+- [x] Add direct, trusted-proxy, multi-proxy, IPv4, IPv6, and spoofed-header tests.
+- [x] Add an end-to-end Caddy test proving tunnel IP allowlists use the original client address.
+- [x] Introduce versioned Argon2id or bcrypt hashes for user-selected basic-auth passwords.
+- [x] Preserve constant-time verification and lazily upgrade legacy password hashes after successful authentication.
+- [x] Keep fast SHA-256 lookup hashes only for generated high-entropy bearer, agent, admin, and service tokens.
+- [x] Add bounded authentication-attempt protection without preventing normal tunnel traffic.
+- [x] Verify that plaintext credentials and reusable authorization values never appear in logs, metrics, traces, exports, or API summaries.
 
 Exit gate:
 
-- [ ] IP allowlists and audit client addresses are correct through the supported Caddy deployment.
-- [ ] User-selected passwords are no longer stored as unsalted fast hashes.
-- [ ] Forwarded-header spoofing tests pass for every supported deployment mode.
+- [x] IP allowlists and audit client addresses are correct through the supported Caddy deployment.
+- [x] User-selected passwords are no longer stored as unsalted fast hashes.
+- [x] Forwarded-header spoofing tests pass for every supported deployment mode.
 
 ## Block 5: Complete the Public Traffic Protocol
 
