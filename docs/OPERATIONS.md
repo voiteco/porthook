@@ -22,6 +22,8 @@ Use them together with:
 
 2. Replace every `change-me` value with generated values.
 
+   Confirm `PORTHOOK_INTERNAL_SUBNET` does not overlap an existing host, VPN, or Docker network. The stack trusts only this private subnet to supply forwarded client headers.
+
 3. Configure DNS and TLS:
 
    - `*.${PORTHOOK_ROOT_DOMAIN}` routes to the reverse proxy.

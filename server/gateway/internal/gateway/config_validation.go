@@ -52,6 +52,8 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	}
 	if _, err := clientip.ParseTrustedProxies(cfg.TrustedProxies); err != nil {
 		addError("PORTHOOK_TRUSTED_PROXIES", err.Error())
+	} else if opts.Production && strings.TrimSpace(cfg.TrustedProxies) == "" {
+		addError("PORTHOOK_TRUSTED_PROXIES", "is required in production mode")
 	}
 	if strings.TrimSpace(cfg.ManagementToken) == "" {
 		if opts.Production {

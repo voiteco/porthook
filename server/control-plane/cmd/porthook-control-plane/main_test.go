@@ -114,6 +114,7 @@ func TestRunConfigcheckProductionAcceptsDurableConfig(t *testing.T) {
 	t.Setenv("PORTHOOK_CONTROL_VALIDATOR_TOKEN", "validator-secret")
 	t.Setenv("PORTHOOK_GATEWAY_MANAGEMENT_URL", "http://gateway:8082")
 	t.Setenv("PORTHOOK_GATEWAY_MANAGEMENT_TOKEN", "management-secret")
+	t.Setenv("PORTHOOK_TRUSTED_PROXIES", "172.30.0.0/24")
 	t.Setenv("PORTHOOK_DATABASE_URL", "postgres://porthook:secret@postgres:5432/porthook?sslmode=disable")
 
 	var stdout bytes.Buffer

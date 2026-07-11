@@ -38,6 +38,19 @@ func TestValidateConfigRejectsInvalidTrustedProxies(t *testing.T) {
 	t.Fatalf("errors = %+v, want PORTHOOK_TRUSTED_PROXIES error", report.Errors)
 }
 
+func TestValidateConfigRequiresTrustedProxiesInProduction(t *testing.T) {
+	cfg := testConfig()
+	cfg.TrustedProxies = ""
+
+	report := ValidateConfig(cfg, ConfigValidationOptions{Production: true})
+	for _, issue := range report.Errors {
+		if issue.Field == "PORTHOOK_TRUSTED_PROXIES" {
+			return
+		}
+	}
+	t.Fatalf("errors = %+v, want PORTHOOK_TRUSTED_PROXIES error", report.Errors)
+}
+
 func TestValidateConfigRequiresManagementTokenInProduction(t *testing.T) {
 	cfg := testConfig()
 	cfg.ManagementToken = ""

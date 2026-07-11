@@ -110,6 +110,11 @@ control = require_service(default, "porthook-control-plane")
 postgres = require_service(default, "postgres")
 proxy = require_service(default, "reverse-proxy")
 
+network_config = default.get("networks", {}).get("default", {})
+ipam_config = network_config.get("ipam", {}).get("config", [])
+if ipam_config != [{"subnet": "172.30.0.0/24"}]:
+    fail(f"default network must use the explicit trusted proxy subnet, got {ipam_config}")
+
 require_no_host_ports(gateway, "porthook-gateway")
 require_no_host_ports(control, "porthook-control-plane")
 require_no_host_ports(postgres, "postgres")
@@ -159,6 +164,7 @@ control_env = control.get("environment", {})
 admin_token = control_env.get("PORTHOOK_CONTROL_ADMIN_TOKEN")
 validator_token = control_env.get("PORTHOOK_CONTROL_VALIDATOR_TOKEN")
 management_token = control_env.get("PORTHOOK_GATEWAY_MANAGEMENT_TOKEN")
+trusted_proxies = gateway_env.get("PORTHOOK_TRUSTED_PROXIES")
 if not admin_token:
     fail("control plane must receive PORTHOOK_CONTROL_ADMIN_TOKEN")
 if not validator_token:
@@ -169,6 +175,10 @@ if not management_token:
     fail("control plane must receive PORTHOOK_GATEWAY_MANAGEMENT_TOKEN")
 if management_token in {admin_token, validator_token}:
     fail("gateway management token must differ from admin and validator tokens")
+if trusted_proxies != "172.30.0.0/24":
+    fail("gateway must trust only the configured private Compose subnet")
+if control_env.get("PORTHOOK_TRUSTED_PROXIES") != trusted_proxies:
+    fail("gateway and control plane must use the same trusted proxy subnet")
 if not control_env.get("PORTHOOK_DATABASE_URL"):
     fail("control plane must use a durable PORTHOOK_DATABASE_URL")
 if control_env.get("PORTHOOK_GATEWAY_MANAGEMENT_URL") != "http://porthook-gateway:8082":

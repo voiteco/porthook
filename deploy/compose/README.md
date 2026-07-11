@@ -109,11 +109,12 @@ Copy the production example environment and replace every `change-me` value:
 cp deploy/compose/.env.production.example deploy/compose/.env.production
 ```
 
-Configure these public names:
+Configure these production values:
 
 | Environment variable | Purpose |
 | --- | --- |
 | `PORTHOOK_ROOT_DOMAIN` | Wildcard tunnel domain, for example `tunnels.example.com`. |
+| `PORTHOOK_INTERNAL_SUBNET` | Private Compose subnet trusted to supply proxy client headers. Change it when the default overlaps another network. |
 | `PORTHOOK_PUBLIC_URL` | Public URL printed for registered tunnels, for example `https://tunnels.example.com`. |
 | `PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL` | Gateway cache TTL for active custom-domain mappings. |
 | `PORTHOOK_CUSTOM_DOMAIN_MISS_TTL` | Gateway cache TTL for custom-domain misses and pending verification states. |
@@ -154,7 +155,7 @@ The stack listens externally on:
 - agent WebSocket endpoint: `https://<PORTHOOK_AGENT_DOMAIN>/agent/connect`
 - control-plane API and dashboard: `https://<PORTHOOK_CONTROL_DOMAIN>`
 
-The gateway, control plane, and Postgres are only reachable inside the Compose network. Caddy does not route the gateway management listener.
+The gateway, control plane, and Postgres are only reachable inside the Compose network. Caddy does not route the gateway management listener. The explicit `PORTHOOK_INTERNAL_SUBNET` is configured as `PORTHOOK_TRUSTED_PROXIES` for the gateway and control plane so only peers on that service network can supply client forwarding headers.
 The gateway and control-plane services expose container healthchecks, and the reverse proxy waits for both services to become healthy.
 
 ## Dashboard

@@ -109,6 +109,7 @@ PORTHOOK_PUBLIC_URL="https://tunnels.example.com" \
 PORTHOOK_CONTROL_PLANE_URL="http://control-plane:8082" \
 PORTHOOK_CONTROL_PLANE_TOKEN="validator-secret" \
 PORTHOOK_MANAGEMENT_TOKEN="management-secret" \
+PORTHOOK_TRUSTED_PROXIES="172.30.0.0/24" \
 PORTHOOK_REQUEST_LOG_DATABASE_URL="postgres://porthook:secret@postgres:5432/porthook?sslmode=disable" \
 	"${DIST_DIR}/porthook-gateway_${host_os}_${host_arch}" configcheck --production >/dev/null
 
@@ -116,6 +117,7 @@ PORTHOOK_CONTROL_ADMIN_TOKEN="admin-secret" \
 PORTHOOK_CONTROL_VALIDATOR_TOKEN="validator-secret" \
 PORTHOOK_GATEWAY_MANAGEMENT_URL="http://gateway:8082" \
 PORTHOOK_GATEWAY_MANAGEMENT_TOKEN="management-secret" \
+PORTHOOK_TRUSTED_PROXIES="172.30.0.0/24" \
 PORTHOOK_DATABASE_URL="postgres://porthook:secret@postgres:5432/porthook?sslmode=disable" \
 	"${DIST_DIR}/porthook-control-plane_${host_os}_${host_arch}" configcheck --production >/dev/null
 
