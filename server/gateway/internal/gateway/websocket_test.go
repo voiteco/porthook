@@ -5,6 +5,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -433,4 +434,26 @@ func webSocketUpgradeStatus(t *testing.T, ctx context.Context, client *http.Clie
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode
+}
+
+func TestRelayOutcomePrefersACleanCloseOverASideEffectError(t *testing.T) {
+	sideEffectErr := errors.New("use of closed network connection")
+
+	tests := []struct {
+		name          string
+		first, second error
+		want          error
+	}{
+		{"both clean", nil, nil, nil},
+		{"first clean, second side effect", nil, sideEffectErr, nil},
+		{"first side effect, second clean", sideEffectErr, nil, nil},
+		{"both failed", sideEffectErr, sideEffectErr, sideEffectErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := relayOutcome(tt.first, tt.second); got != tt.want {
+				t.Fatalf("relayOutcome(%v, %v) = %v, want %v", tt.first, tt.second, got, tt.want)
+			}
+		})
+	}
 }

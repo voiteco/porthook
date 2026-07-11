@@ -173,18 +173,31 @@ func relayPublicWebSocket(
 		errCh <- pumpAgentToPublic(relayCtx, writeTimeout, publicConn, stream, deadline, &responseBytes)
 	}()
 
-	firstErr := <-errCh
+	first := <-errCh
 	cancelRelay()
-	<-errCh
+	second := <-errCh
+	outcome := relayOutcome(first, second)
 
 	// A deadline (request/idle/max-lifetime) or parent cancellation ends
 	// the relay without either pump having told the agent why; every other
 	// exit path already notified it via ws.close or ws.cancel.
-	if isStreamContextDoneCause(firstErr) {
-		_ = stream.SendCancel(context.Background(), streamCancelReason(firstErr))
+	if isStreamContextDoneCause(outcome) {
+		_ = stream.SendCancel(context.Background(), streamCancelReason(outcome))
 	}
 
-	return requestBytes.Load(), responseBytes.Load(), firstErr
+	return requestBytes.Load(), responseBytes.Load(), outcome
+}
+
+// relayOutcome combines both pump goroutines' results into the relay's
+// overall outcome. Closing the shared public or agent-facing stream to
+// honor one direction's clean ws.close unblocks the other direction's
+// in-flight read with an incidental, non-nil error; treating either nil
+// result as success avoids reporting that side effect as a failure.
+func relayOutcome(first, second error) error {
+	if first == nil || second == nil {
+		return nil
+	}
+	return first
 }
 
 func pumpPublicToAgent(

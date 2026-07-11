@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"nhooyr.io/websocket"
 
@@ -32,9 +33,12 @@ func (r *Runner) handleWSStream(
 	open wsproxy.Open,
 	inbound <-chan wswire.Message,
 ) {
+	started := time.Now()
+
 	localURL, err := buildLocalWSURL(r.cfg.LocalTarget, open.Path, open.Query)
 	if err != nil {
 		r.sendWSError(ctx, conn, tunnelID, env.StreamID, "invalid_local_target", err.Error())
+		r.writeWSOutput(open.Path, open.Query, time.Since(started), err)
 		return
 	}
 
@@ -46,6 +50,7 @@ func (r *Runner) handleWSStream(
 	cancel()
 	if dialErr != nil {
 		r.sendWSError(ctx, conn, tunnelID, env.StreamID, "local_dial_failed", fmt.Sprintf("dial local websocket endpoint: %v", dialErr))
+		r.writeWSOutput(open.Path, open.Query, time.Since(started), dialErr)
 		return
 	}
 	defer localConn.CloseNow()
@@ -66,7 +71,7 @@ func (r *Runner) handleWSStream(
 	}
 
 	requestBytes, responseBytes, relayErr := r.relayWSStream(ctx, conn, tunnelID, env.StreamID, localConn, inbound)
-	r.logWSStream(env.StreamID, tunnelID, open.Path, open.Query, requestBytes, responseBytes, relayErr)
+	r.logWSStream(env.StreamID, tunnelID, open.Path, open.Query, requestBytes, responseBytes, time.Since(started), relayErr)
 }
 
 func (r *Runner) sendWSError(ctx context.Context, conn *websocket.Conn, tunnelID, streamID, code, message string) {
@@ -108,11 +113,23 @@ func (r *Runner) relayWSStream(
 		errCh <- r.pumpGatewayToLocal(relayCtx, localConn, inbound, &gatewayToLocal)
 	}()
 
-	firstErr := <-errCh
+	first := <-errCh
 	cancelRelay()
-	<-errCh
+	second := <-errCh
 
-	return localToGateway.Load(), gatewayToLocal.Load(), firstErr
+	return localToGateway.Load(), gatewayToLocal.Load(), relayOutcome(first, second)
+}
+
+// relayOutcome combines both pump goroutines' results into the relay's
+// overall outcome. Closing the shared local or public connection to honor
+// one direction's clean ws.close unblocks the other direction's in-flight
+// read with an incidental, non-nil error; treating either nil result as
+// success avoids reporting that side effect as a failure.
+func relayOutcome(first, second error) error {
+	if first == nil || second == nil {
+		return nil
+	}
+	return first
 }
 
 func (r *Runner) pumpLocalToGateway(
@@ -212,10 +229,22 @@ func (r *Runner) closeOrCancelForLocalReadError(ctx context.Context, conn *webso
 	return err
 }
 
-func (r *Runner) logWSStream(streamID, tunnelID, path, query string, requestBytes, responseBytes int64, err error) {
+func (r *Runner) logWSStream(streamID, tunnelID, path, query string, requestBytes, responseBytes int64, duration time.Duration, err error) {
 	outcome := "completed"
 	if err != nil {
 		outcome = "local_websocket_failed"
 	}
-	r.logLocalRequestFields(streamID, tunnelID, "WS", path, query, 0, outcome, requestBytes, responseBytes, 0, err)
+	r.logLocalRequestFields(streamID, tunnelID, "WS", path, query, 0, outcome, requestBytes, responseBytes, duration, err)
+	r.writeWSOutput(path, query, duration, err)
+}
+
+func (r *Runner) writeWSOutput(path, query string, duration time.Duration, err error) {
+	r.outputMu.Lock()
+	defer r.outputMu.Unlock()
+
+	if err != nil {
+		fmt.Fprintf(r.output, "WS %s -> error %dms: %s\n", requestDisplayPath(path, query), duration.Milliseconds(), err)
+		return
+	}
+	fmt.Fprintf(r.output, "WS %s -> completed %dms\n", requestDisplayPath(path, query), duration.Milliseconds())
 }

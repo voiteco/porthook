@@ -59,6 +59,9 @@ jobs:
       - name: Run Caddy edge smoke test
         run: make smoke-caddy-edge VERSION=ci-smoke
 
+      - name: Run WebSocket smoke test
+        run: make smoke-websocket VERSION=ci-smoke
+
       - name: Build release binaries
         run: make release-build VERSION=ci
 

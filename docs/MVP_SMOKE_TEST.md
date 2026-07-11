@@ -46,6 +46,14 @@ make smoke-caddy-edge
 
 The Caddy edge smoke test starts the control-plane-backed stack behind a local Caddy instance configured the same way as [deploy/reverse-proxy/caddy/Caddyfile](../deploy/reverse-proxy/caddy/Caddyfile), sends requests with a forged `X-Forwarded-For` header, and verifies that access decisions and request-log entries use the address Caddy actually observed rather than the header a client injects. Requires a `caddy` binary on `PATH` (`go install github.com/caddyserver/caddy/v2/cmd/caddy@v2.11.4`).
 
+To verify that a public WebSocket upgrade tunnels to a real local WebSocket service:
+
+```sh
+make smoke-websocket
+```
+
+The WebSocket smoke test starts a local WebSocket echo service, the gateway, and the `porthook` agent, then drives a real client through the public tunnel URL to exchange a text and a binary message and confirm the negotiated subprotocol, proving the protocol 0.3 WebSocket relay works between real gateway and agent binaries, not just in unit tests.
+
 Default automated ports can be overridden with:
 
 - `PORTHOOK_SMOKE_LOCAL_PORT`

@@ -33,6 +33,7 @@ make vet
 make smoke-local VERSION=v0.15.0
 make smoke-control-plane VERSION=v0.15.0
 make smoke-caddy-edge VERSION=v0.15.0
+make smoke-websocket VERSION=v0.15.0
 make release-build VERSION=v0.15.0
 make release-checksums
 make release-verify VERSION=v0.15.0

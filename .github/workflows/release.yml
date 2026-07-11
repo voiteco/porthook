@@ -72,6 +72,9 @@ jobs:
       - name: Run Caddy edge smoke test
         run: make smoke-caddy-edge VERSION="$VERSION"
 
+      - name: Run WebSocket smoke test
+        run: make smoke-websocket VERSION="$VERSION"
+
       - name: Build release binaries
         run: make release-build VERSION="$VERSION"
 

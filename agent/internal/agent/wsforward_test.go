@@ -5,6 +5,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -148,6 +149,9 @@ func TestRunnerRelaysWebSocketTextAndBinaryMessages(t *testing.T) {
 	if len(gotSubprotocols) != 1 || gotSubprotocols[0] != "chat.v1" {
 		t.Fatalf("local dial subprotocols = %v, want [chat.v1]", gotSubprotocols)
 	}
+	if !bytes.Contains(output.Bytes(), []byte("WS /socket -> completed")) {
+		t.Fatalf("output does not contain websocket request log: %q", output.String())
+	}
 }
 
 func TestRunnerSendsWSErrorWhenLocalDialFails(t *testing.T) {
@@ -212,5 +216,27 @@ func TestRunnerSendsWSErrorWhenLocalDialFails(t *testing.T) {
 
 	if err := runner.Run(ctx); err != nil {
 		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestRelayOutcomePrefersACleanCloseOverASideEffectError(t *testing.T) {
+	sideEffectErr := errors.New("use of closed network connection")
+
+	tests := []struct {
+		name          string
+		first, second error
+		want          error
+	}{
+		{"both clean", nil, nil, nil},
+		{"first clean, second side effect", nil, sideEffectErr, nil},
+		{"first side effect, second clean", sideEffectErr, nil, nil},
+		{"both failed", sideEffectErr, sideEffectErr, sideEffectErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := relayOutcome(tt.first, tt.second); got != tt.want {
+				t.Fatalf("relayOutcome(%v, %v) = %v, want %v", tt.first, tt.second, got, tt.want)
+			}
+		})
 	}
 }
