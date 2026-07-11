@@ -492,18 +492,21 @@ if [[ "${query_response}" != "${MARKER}" ]]; then
 	exit 1
 fi
 
-request_logs_json="$(curl -fsS "http://127.0.0.1:${PUBLIC_PORT}/api/v1/request-logs?limit=20")"
-printf '%s' "${request_logs_json}" | python3 -c '
+request_log_found=0
+for _ in $(seq 1 20); do
+	request_logs_json="$(curl -fsS "http://127.0.0.1:${PUBLIC_PORT}/api/v1/request-logs?limit=20")"
+	if printf '%s' "${request_logs_json}" | python3 -c '
 import json
 import sys
 
 want_subdomain = sys.argv[1]
 raw = sys.stdin.read()
 if "smoke_query_marker=present" in raw:
-    raise SystemExit("request logs exposed the raw query string")
+    print("request logs exposed the raw query string", file=sys.stderr)
+    raise SystemExit(2)
 payload = json.loads(raw)
 logs = payload.get("request_logs", [])
-if not any(
+if any(
     entry.get("subdomain") == want_subdomain
     and entry.get("path") == "/smoke.txt"
     and entry.get("query_present") is True
@@ -511,8 +514,23 @@ if not any(
     and entry.get("outcome") == "completed"
     for entry in logs
 ):
-    raise SystemExit(f"missing completed query request log for {want_subdomain!r}: {payload}")
-' "${SUBDOMAIN}"
+    raise SystemExit(0)
+raise SystemExit(1)
+' "${SUBDOMAIN}"; then
+		request_log_found=1
+		break
+	else
+		status=$?
+		if [[ "${status}" -ne 1 ]]; then
+			exit "${status}"
+		fi
+	fi
+	sleep 0.1
+done
+if [[ "${request_log_found}" -ne 1 ]]; then
+	echo "missing completed query request log for ${SUBDOMAIN@Q}: ${request_logs_json}" >&2
+	exit 1
+fi
 
 printf '%s' "${ADMIN_TOKEN}" | \
 	"${BIN_DIR}/porthook" history events \
