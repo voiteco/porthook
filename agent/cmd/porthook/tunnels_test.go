@@ -15,9 +15,10 @@ import (
 func TestRunTunnelsListPrintsActiveTunnels(t *testing.T) {
 	connectedAt := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/tunnels" {
-			t.Fatalf("request = %s %s, want GET /api/v1/tunnels", r.Method, r.URL.Path)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/gateway/tunnels" {
+			t.Fatalf("request = %s %s, want operator tunnels endpoint", r.Method, r.URL.Path)
 		}
+		assertBearer(t, r, "admin-secret")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(listTunnelsResponse{Tunnels: []tunnelSummaryCLI{{
 			TunnelID:    "tun_demo",
@@ -30,7 +31,7 @@ func TestRunTunnelsListPrintsActiveTunnels(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	err := runWithIO([]string{"tunnels", "list", "--gateway", server.URL}, strings.NewReader(""), &stdout, &stderr)
+	err := runWithIO([]string{"tunnels", "list", "--control-plane", server.URL, "--admin-token", "admin-secret"}, strings.NewReader(""), &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run tunnels list returned error: %v", err)
 	}
@@ -44,9 +45,10 @@ func TestRunTunnelsListPrintsActiveTunnels(t *testing.T) {
 
 func TestRunTunnelsListWritesJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/tunnels" {
-			t.Fatalf("request = %s %s, want GET /api/v1/tunnels", r.Method, r.URL.Path)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/gateway/tunnels" {
+			t.Fatalf("request = %s %s, want operator tunnels endpoint", r.Method, r.URL.Path)
 		}
+		assertBearer(t, r, "admin-secret")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(listTunnelsResponse{Tunnels: []tunnelSummaryCLI{{
 			TunnelID:  "tun_json",
@@ -58,7 +60,7 @@ func TestRunTunnelsListWritesJSON(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	err := runWithIO([]string{"tunnels", "list", "--gateway", server.URL, "--json"}, strings.NewReader(""), &stdout, &stderr)
+	err := runWithIO([]string{"tunnels", "list", "--control-plane", server.URL, "--admin-token-stdin", "--json"}, strings.NewReader("admin-secret\n"), &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run tunnels list returned error: %v", err)
 	}
@@ -75,9 +77,10 @@ func TestRunTunnelsShowPrintsDetail(t *testing.T) {
 	connectedAt := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	lastRequestAt := connectedAt.Add(time.Minute)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/tunnels/tun_demo" {
-			t.Fatalf("request = %s %s, want GET /api/v1/tunnels/tun_demo", r.Method, r.URL.Path)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/gateway/tunnels/tun_demo" {
+			t.Fatalf("request = %s %s, want operator tunnel detail endpoint", r.Method, r.URL.Path)
 		}
+		assertBearer(t, r, "admin-secret")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(showTunnelResponse{Tunnel: tunnelDetailCLI{
 			TunnelID:         "tun_demo",
@@ -104,7 +107,7 @@ func TestRunTunnelsShowPrintsDetail(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	err := runWithIO([]string{"tunnels", "show", "--gateway", server.URL, "tun_demo"}, strings.NewReader(""), &stdout, &stderr)
+	err := runWithIO([]string{"tunnels", "show", "--control-plane", server.URL, "--admin-token", "admin-secret", "tun_demo"}, strings.NewReader(""), &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run tunnels show returned error: %v", err)
 	}
@@ -122,7 +125,7 @@ func TestRunTunnelsHelpPrintsUsage(t *testing.T) {
 		t.Fatalf("run tunnels help returned error: %v", err)
 	}
 	output := stdout.String()
-	for _, want := range []string{"tunnels list", "tunnels show", "--gateway"} {
+	for _, want := range []string{"tunnels list", "tunnels show", "--control-plane", "--admin-token-stdin"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("stdout = %q, want %q", output, want)
 		}
@@ -136,11 +139,18 @@ func TestRunTunnelsReturnsGatewayError(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	err := runWithIO([]string{"tunnels", "show", "--gateway", server.URL, "missing"}, strings.NewReader(""), &stdout, &stderr)
+	err := runWithIO([]string{"tunnels", "show", "--control-plane", server.URL, "--admin-token", "admin-secret", "missing"}, strings.NewReader(""), &stdout, &stderr)
 	if err == nil {
 		t.Fatal("run tunnels show returned nil error")
 	}
 	if !strings.Contains(err.Error(), "gateway returned status 404") {
 		t.Fatalf("error = %q, want gateway status", err)
+	}
+}
+
+func assertBearer(t *testing.T, r *http.Request, token string) {
+	t.Helper()
+	if got := r.Header.Get("Authorization"); got != "Bearer "+token {
+		t.Fatalf("Authorization = %q, want bearer token", got)
 	}
 }

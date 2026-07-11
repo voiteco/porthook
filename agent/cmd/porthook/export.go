@@ -333,10 +333,7 @@ func collectGatewayExport(ctx context.Context, cfg operationalExportConfig, snap
 	}
 	snapshot.Gateway = gateway
 
-	gatewayClient := newTunnelAPIClient(tunnelCLIConfig{
-		gatewayURL: cfg.gatewayURL,
-		timeout:    cfg.timeout,
-	})
+	gatewayClient := newDirectTunnelAPIClient(cfg.gatewayURL, cfg.timeout)
 
 	if listed, err := gatewayClient.listTunnels(ctx); err != nil {
 		addOperationalExportError(snapshot, "gateway", "/api/v1/tunnels", err)

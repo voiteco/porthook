@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -19,14 +18,13 @@ import (
 
 const defaultTunnelAPITimeout = 10 * time.Second
 
-const tunnelsUsageText = `usage: porthook tunnels list [--gateway URL] [--timeout DURATION] [--json]
-       porthook tunnels show [--gateway URL] [--timeout DURATION] TUNNEL_ID [--json]
+const tunnelsUsageText = `usage: porthook tunnels list --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--json]
+       porthook tunnels show --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] TUNNEL_ID [--json]
        porthook tunnels help`
 
 type tunnelCLIConfig struct {
-	gatewayURL string
-	timeout    time.Duration
-	jsonOutput bool
+	tokenAdminConfig
+	timeout time.Duration
 }
 
 type tunnelShowConfig struct {
@@ -75,8 +73,10 @@ type showTunnelResponse struct {
 }
 
 type tunnelAPIClient struct {
-	baseURL string
-	client  *http.Client
+	baseURL    string
+	apiPrefix  string
+	adminToken string
+	client     *http.Client
 }
 
 func runTunnelsCommand(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
@@ -90,13 +90,13 @@ func runTunnelsCommand(args []string, stdin io.Reader, stdout io.Writer, stderr 
 			printTunnelListHelp(stdout)
 			return nil
 		}
-		return runTunnelsList(args[1:], stdout, stderr)
+		return runTunnelsList(args[1:], stdin, stdout, stderr)
 	case "show":
 		if wantsHelp(args[1:]) {
 			printTunnelShowHelp(stdout)
 			return nil
 		}
-		return runTunnelsShow(args[1:], stdout, stderr)
+		return runTunnelsShow(args[1:], stdin, stdout, stderr)
 	case "help", "--help", "-h":
 		printTunnelsUsage(stdout)
 		return nil
@@ -105,8 +105,8 @@ func runTunnelsCommand(args []string, stdin io.Reader, stdout io.Writer, stderr 
 	}
 }
 
-func runTunnelsList(args []string, stdout io.Writer, stderr io.Writer) error {
-	cfg, err := parseTunnelListConfig(args, stderr)
+func runTunnelsList(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	cfg, err := parseTunnelListConfig(args, stdin, stderr)
 	if err != nil {
 		return err
 	}
@@ -122,8 +122,8 @@ func runTunnelsList(args []string, stdout io.Writer, stderr io.Writer) error {
 	return nil
 }
 
-func runTunnelsShow(args []string, stdout io.Writer, stderr io.Writer) error {
-	cfg, err := parseTunnelShowConfig(args, stderr)
+func runTunnelsShow(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	cfg, err := parseTunnelShowConfig(args, stdin, stderr)
 	if err != nil {
 		return err
 	}
@@ -139,66 +139,56 @@ func runTunnelsShow(args []string, stdout io.Writer, stderr io.Writer) error {
 	return nil
 }
 
-func parseTunnelListConfig(args []string, stderr io.Writer) (tunnelCLIConfig, error) {
+func parseTunnelListConfig(args []string, stdin io.Reader, stderr io.Writer) (tunnelCLIConfig, error) {
 	cfg := defaultTunnelCLIConfig()
 	fs := newTunnelFlagSet("tunnels list", &cfg, stderr)
 	if err := fs.Parse(args); err != nil {
 		return tunnelCLIConfig{}, err
 	}
 	if fs.NArg() > 0 {
-		return tunnelCLIConfig{}, fmt.Errorf("usage: porthook tunnels list [--gateway URL] [--timeout DURATION] [--json]")
+		return tunnelCLIConfig{}, fmt.Errorf("usage: porthook tunnels list --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--json]")
 	}
-	if err := finalizeTunnelCLIConfig(&cfg); err != nil {
+	if err := finalizeTunnelCLIConfig(fs, &cfg, stdin, stderr); err != nil {
 		return tunnelCLIConfig{}, err
 	}
 	return cfg, nil
 }
 
-func parseTunnelShowConfig(args []string, stderr io.Writer) (tunnelShowConfig, error) {
+func parseTunnelShowConfig(args []string, stdin io.Reader, stderr io.Writer) (tunnelShowConfig, error) {
 	cfg := tunnelShowConfig{tunnelCLIConfig: defaultTunnelCLIConfig()}
 	fs := newTunnelFlagSet("tunnels show", &cfg.tunnelCLIConfig, stderr)
 	if err := fs.Parse(args); err != nil {
 		return tunnelShowConfig{}, err
 	}
 	if fs.NArg() != 1 {
-		return tunnelShowConfig{}, fmt.Errorf("usage: porthook tunnels show [--gateway URL] [--timeout DURATION] TUNNEL_ID [--json]")
+		return tunnelShowConfig{}, fmt.Errorf("usage: porthook tunnels show --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] TUNNEL_ID [--json]")
 	}
 	cfg.id = strings.TrimSpace(fs.Arg(0))
 	if cfg.id == "" {
 		return tunnelShowConfig{}, fmt.Errorf("tunnel id is required")
 	}
-	if err := finalizeTunnelCLIConfig(&cfg.tunnelCLIConfig); err != nil {
+	if err := finalizeTunnelCLIConfig(fs, &cfg.tunnelCLIConfig, stdin, stderr); err != nil {
 		return tunnelShowConfig{}, err
 	}
 	return cfg, nil
 }
 
 func defaultTunnelCLIConfig() tunnelCLIConfig {
-	gatewayURL := strings.TrimSpace(os.Getenv("PORTHOOK_GATEWAY_URL"))
-	if gatewayURL == "" {
-		gatewayURL = defaultDoctorGatewayURL
-	}
 	return tunnelCLIConfig{
-		gatewayURL: gatewayURL,
-		timeout:    defaultTunnelAPITimeout,
+		timeout: defaultTunnelAPITimeout,
 	}
 }
 
 func newTunnelFlagSet(name string, cfg *tunnelCLIConfig, stderr io.Writer) *flag.FlagSet {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.StringVar(&cfg.gatewayURL, "gateway", cfg.gatewayURL, "gateway public URL")
+	fs := newTokenAdminFlagSet(name, &cfg.tokenAdminConfig, stderr)
 	fs.DurationVar(&cfg.timeout, "timeout", cfg.timeout, "HTTP timeout")
-	fs.BoolVar(&cfg.jsonOutput, "json", cfg.jsonOutput, "write JSON output")
 	return fs
 }
 
-func finalizeTunnelCLIConfig(cfg *tunnelCLIConfig) error {
-	gatewayURL, err := normalizeDoctorURL(cfg.gatewayURL, "gateway URL")
-	if err != nil {
+func finalizeTunnelCLIConfig(fs *flag.FlagSet, cfg *tunnelCLIConfig, stdin io.Reader, stderr io.Writer) error {
+	if err := finalizeTokenAdminConfig(fs, &cfg.tokenAdminConfig, stdin, stderr); err != nil {
 		return err
 	}
-	cfg.gatewayURL = gatewayURL
 	if cfg.timeout <= 0 {
 		return fmt.Errorf("timeout must be positive")
 	}
@@ -207,14 +197,24 @@ func finalizeTunnelCLIConfig(cfg *tunnelCLIConfig) error {
 
 func newTunnelAPIClient(cfg tunnelCLIConfig) tunnelAPIClient {
 	return tunnelAPIClient{
-		baseURL: cfg.gatewayURL,
-		client:  &http.Client{Timeout: cfg.timeout},
+		baseURL:    cfg.controlPlaneURL,
+		apiPrefix:  "/api/v1/gateway",
+		adminToken: cfg.adminToken,
+		client:     &http.Client{Timeout: cfg.timeout},
+	}
+}
+
+func newDirectTunnelAPIClient(baseURL string, timeout time.Duration) tunnelAPIClient {
+	return tunnelAPIClient{
+		baseURL:   baseURL,
+		apiPrefix: "/api/v1",
+		client:    &http.Client{Timeout: timeout},
 	}
 }
 
 func (c tunnelAPIClient) listTunnels(ctx context.Context) (listTunnelsResponse, error) {
 	var listed listTunnelsResponse
-	if err := c.do(ctx, http.MethodGet, "/api/v1/tunnels", &listed); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.apiPrefix+"/tunnels", &listed); err != nil {
 		return listTunnelsResponse{}, err
 	}
 	return listed, nil
@@ -222,7 +222,7 @@ func (c tunnelAPIClient) listTunnels(ctx context.Context) (listTunnelsResponse, 
 
 func (c tunnelAPIClient) showTunnel(ctx context.Context, id string) (showTunnelResponse, error) {
 	var shown showTunnelResponse
-	if err := c.do(ctx, http.MethodGet, "/api/v1/tunnels/"+url.PathEscape(id), &shown); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.apiPrefix+"/tunnels/"+url.PathEscape(id), &shown); err != nil {
 		return showTunnelResponse{}, err
 	}
 	return shown, nil
@@ -234,6 +234,9 @@ func (c tunnelAPIClient) do(ctx context.Context, method string, path string, out
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
+	if c.adminToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.adminToken)
+	}
 	req.Header.Set("User-Agent", "porthook/"+version+" tunnels")
 
 	resp, err := c.client.Do(req)
@@ -330,23 +333,27 @@ func printTunnelsUsage(w io.Writer) {
 }
 
 func printTunnelListHelp(w io.Writer) {
-	fmt.Fprintln(w, `usage: porthook tunnels list [--gateway URL] [--timeout DURATION] [--json]
+	fmt.Fprintln(w, `usage: porthook tunnels list --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--json]
 
-List active tunnels from the gateway public API.
+List active tunnels through the authenticated control-plane operator API.
 
 Options:
-  --gateway URL             Gateway public URL. Defaults to PORTHOOK_GATEWAY_URL or http://localhost:8080.
+  --control-plane URL       Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.
+  --admin-token TOKEN       Admin token with runtime_diagnostics scope. Defaults to PORTHOOK_CONTROL_ADMIN_TOKEN.
+  --admin-token-stdin       Read the admin token from stdin.
   --timeout DURATION        HTTP timeout. Default: 10s.
   --json                    Write JSON output.`)
 }
 
 func printTunnelShowHelp(w io.Writer) {
-	fmt.Fprintln(w, `usage: porthook tunnels show [--gateway URL] [--timeout DURATION] TUNNEL_ID [--json]
+	fmt.Fprintln(w, `usage: porthook tunnels show --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] TUNNEL_ID [--json]
 
-Show one active tunnel from the gateway public API.
+Show one active tunnel through the authenticated control-plane operator API.
 
 Options:
-  --gateway URL             Gateway public URL. Defaults to PORTHOOK_GATEWAY_URL or http://localhost:8080.
+  --control-plane URL       Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.
+  --admin-token TOKEN       Admin token with runtime_diagnostics scope. Defaults to PORTHOOK_CONTROL_ADMIN_TOKEN.
+  --admin-token-stdin       Read the admin token from stdin.
   --timeout DURATION        HTTP timeout. Default: 10s.
   --json                    Write JSON output.`)
 }

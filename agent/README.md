@@ -43,8 +43,8 @@ porthook access create --control-plane http://localhost:8082 --admin-token "$POR
 porthook access list --control-plane http://localhost:8082 --admin-token "$PORTHOOK_CONTROL_ADMIN_TOKEN"
 porthook access update --control-plane http://localhost:8082 --admin-token "$PORTHOOK_CONTROL_ADMIN_TOKEN" ap_... --mode ip_allowlist --ip-allowlist 192.0.2.0/24
 porthook access delete --control-plane http://localhost:8082 --admin-token "$PORTHOOK_CONTROL_ADMIN_TOKEN" ap_...
-porthook tunnels list --gateway http://localhost:8080
-porthook tunnels show --gateway http://localhost:8080 tun_...
+porthook tunnels list --control-plane http://localhost:8082 --admin-token "$PORTHOOK_CONTROL_ADMIN_TOKEN"
+porthook tunnels show --control-plane http://localhost:8082 --admin-token "$PORTHOOK_CONTROL_ADMIN_TOKEN" tun_...
 porthook export --gateway http://localhost:8080 --control-plane http://localhost:8082 --admin-token "$PORTHOOK_CONTROL_ADMIN_TOKEN" --output porthook-operational-export.json
 ```
 
