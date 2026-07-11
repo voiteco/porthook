@@ -2,10 +2,12 @@
 
 Porthook exposes Prometheus text metrics and optional OpenTelemetry traces for the self-hosted gateway and control plane.
 
-Metrics remain available without extra configuration:
+Metrics remain available without extra instrumentation configuration:
 
-- gateway: `GET /metrics` on the public listener
+- gateway: `GET /metrics` on the private management listener with `PORTHOOK_MANAGEMENT_TOKEN`
 - control plane: `GET /metrics` on the control-plane listener
+
+Operators and the dashboard should read gateway metrics through `GET /api/v1/gateway/metrics` on the control plane with a token that has `runtime_diagnostics`. Do not route the gateway management listener through the public reverse proxy.
 
 OpenTelemetry tracing is disabled by default. Enable it only when you intentionally send traces to an OTLP collector or want local stdout trace debugging.
 

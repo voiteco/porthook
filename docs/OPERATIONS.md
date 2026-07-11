@@ -56,7 +56,6 @@ Use them together with:
 7. Check readiness:
 
    ```sh
-   curl -i https://check.${PORTHOOK_ROOT_DOMAIN}/healthz
    curl -i https://${PORTHOOK_CONTROL_DOMAIN}/readyz
    docker compose \
      --env-file deploy/compose/.env.production \
@@ -92,7 +91,6 @@ Run the CLI diagnostics bundle:
 
 ```sh
 printf '%s' '<admin-token>' | porthook doctor \
-  --gateway https://check.${PORTHOOK_ROOT_DOMAIN} \
   --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
   --admin-token-stdin
 ```
@@ -105,8 +103,9 @@ printf '%s' '<admin-token>' | porthook history events \
   --admin-token-stdin \
   --limit 100
 
-porthook history requests \
-  --gateway https://check.${PORTHOOK_ROOT_DOMAIN} \
+printf '%s' '<admin-token>' | porthook history requests \
+  --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+  --admin-token-stdin \
   --limit 100
 ```
 
@@ -114,13 +113,12 @@ Capture a best-effort operational export for incident handoff or offline review:
 
 ```sh
 printf '%s' '<admin-token>' | porthook export \
-  --gateway https://check.${PORTHOOK_ROOT_DOMAIN} \
   --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
   --admin-token-stdin \
   --output porthook-operational-export.json
 ```
 
-The export includes `schema_version: 2`, safe control-plane summaries, diagnostics, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, request logs, and cursor/filter metadata for paginated audit and request-log endpoints. It records partial endpoint failures in `errors` and does not include plaintext agent tokens, policy secrets, or local target URLs.
+The export includes `schema_version: 3`, safe control-plane summaries, diagnostics, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, request logs, and cursor/filter metadata for paginated audit and request-log endpoints. It records partial endpoint failures in `errors` and does not include plaintext agent tokens, policy secrets, or local target URLs.
 
 Useful log events:
 
@@ -248,8 +246,9 @@ printf '%s' '<admin-token>' | porthook history events \
   --admin-token-stdin \
   --limit 5
 
-porthook history requests \
-  --gateway https://check.${PORTHOOK_ROOT_DOMAIN} \
+printf '%s' '<admin-token>' | porthook history requests \
+  --control-plane https://${PORTHOOK_CONTROL_DOMAIN} \
+  --admin-token-stdin \
   --limit 5
 ```
 

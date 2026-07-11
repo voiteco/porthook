@@ -168,7 +168,7 @@ The detailed production-stability plan, ordered implementation blocks, and `v1.0
 
 ## Known Limitations
 
-The `v0.15.0` release is pre-production. The gateway exposes operational endpoints on the same listener as wildcard tunnel traffic, proxy client IP handling depends on the deployment path, and supported public traffic is HTTP with reverse-proxy-provided HTTPS. The reference topology is a single gateway and control-plane node with Postgres. Release images are built locally from source, and release binaries are published for Linux and macOS only. TLS certificates, wildcard DNS, and reverse-proxy routing remain operator responsibilities.
+The current pre-production `main` line isolates gateway management on a private listener and mediates operator access through scoped control-plane APIs, but proxy client IP handling still depends on the deployment path and supported public traffic is HTTP with reverse-proxy-provided HTTPS. The reference topology is a single gateway and control-plane node with Postgres. Release images are built locally from source, and release binaries are published for Linux and macOS only. TLS certificates, wildcard DNS, and reverse-proxy routing remain operator responsibilities.
 
 ## Installation
 
@@ -182,7 +182,7 @@ The quickest control-plane-backed local stack uses Docker Compose:
 cp deploy/compose/.env.control-plane.example deploy/compose/.env.control-plane
 ```
 
-Replace every `change-me` value in `deploy/compose/.env.control-plane`. Generate separate local secrets for the Postgres password, bootstrap control-plane admin token, and gateway validator token:
+Replace every `change-me` value in `deploy/compose/.env.control-plane`. Generate separate local secrets for the Postgres password, bootstrap control-plane admin token, gateway validator token, and gateway management token:
 
 ```sh
 openssl rand -base64 32
@@ -227,7 +227,6 @@ Check the local gateway and control-plane operational endpoints:
 
 ```sh
 printf '%s' "${admin_token}" | porthook doctor \
-  --gateway http://localhost:8080 \
   --control-plane http://localhost:8082 \
   --admin-token-stdin
 ```
@@ -236,7 +235,6 @@ Capture a best-effort operational JSON export:
 
 ```sh
 printf '%s' "${admin_token}" | porthook export \
-  --gateway http://localhost:8080 \
   --control-plane http://localhost:8082 \
   --admin-token-stdin \
   --output porthook-operational-export.json
@@ -245,7 +243,9 @@ printf '%s' "${admin_token}" | porthook export \
 Inspect active tunnels from the CLI:
 
 ```sh
-porthook tunnels list --gateway http://localhost:8080
+printf '%s' "${admin_token}" | porthook tunnels list \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin
 ```
 
 Inspect recent operational history from the CLI:
@@ -256,8 +256,9 @@ printf '%s' "${admin_token}" | porthook history events \
   --admin-token-stdin \
   --limit 50
 
-porthook history requests \
-  --gateway http://localhost:8080 \
+printf '%s' "${admin_token}" | porthook history requests \
+  --control-plane http://localhost:8082 \
+  --admin-token-stdin \
   --status 500 \
   --limit 50
 ```
@@ -343,7 +344,7 @@ curl -i -u demo:'<gateway-password>' -H 'Host: demo.localhost' http://localhost:
 curl -i -u demo:'<gateway-password>' -H 'Host: demo.example.test' http://localhost:8080/
 ```
 
-The gateway public listener and control plane both expose `GET /healthz`, `GET /readyz`, and `GET /metrics` for local operations checks. `porthook doctor` checks gateway health, readiness, tunnels, runtime, request logs, metrics, and configured control-plane APIs, and includes response request IDs for log correlation. See [deploy/compose/README.md](./deploy/compose/README.md) for the full Compose guide.
+The gateway exposes health, readiness, metrics, and diagnostics only on its private management listener. The control plane mediates operator access with `runtime_diagnostics` and `audit_history` scopes; its own health, readiness, and metrics remain on the control-plane listener. `porthook doctor` uses this authenticated operator path and includes response request IDs for log correlation. See [deploy/compose/README.md](./deploy/compose/README.md) for the full Compose guide.
 
 For internet-facing self-hosted deployments, see [docs/DOMAINS_TLS.md](./docs/DOMAINS_TLS.md) for wildcard DNS, custom root domain, and TLS guidance. See [docs/ACCESS_BOUNDARY.md](./docs/ACCESS_BOUNDARY.md) before exposing the control-plane API or dashboard.
 

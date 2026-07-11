@@ -242,17 +242,17 @@ The Compose stack exposes:
 
 | Service | URL |
 | --- | --- |
-| Gateway health | `http://localhost:8080/healthz` |
-| Gateway readiness | `http://localhost:8080/readyz` |
-| Gateway metrics | `http://localhost:8080/metrics` |
-| Gateway active tunnels | `http://localhost:8080/api/v1/tunnels` |
+| Gateway health via operator API | `http://localhost:8082/api/v1/gateway/healthz` |
+| Gateway readiness via operator API | `http://localhost:8082/api/v1/gateway/readyz` |
+| Gateway metrics via operator API | `http://localhost:8082/api/v1/gateway/metrics` |
+| Gateway active tunnels via operator API | `http://localhost:8082/api/v1/gateway/tunnels` |
 | Control-plane health | `http://localhost:8082/healthz` |
 | Control-plane readiness | `http://localhost:8082/readyz` |
 | Control-plane metrics | `http://localhost:8082/metrics` |
 | Control-plane status | `http://localhost:8082/api/v1/status` |
 | Dashboard | `http://localhost:8082/dashboard/` |
 
-Gateway metrics include active tunnels, public request counts, custom domain lookup results, token validation attempts, auth failures, and successful tunnel registrations. The gateway active-tunnels JSON endpoint is read-only and omits local target URLs. Control-plane metrics include token admin operations, token validation results, reserved subdomain operations, custom domain operations, auth failures, and readiness failures.
+Gateway operator endpoints require an admin token with `runtime_diagnostics`, except request logs, which require `audit_history`. Gateway metrics include active tunnels, public request counts, custom domain lookup results, token validation attempts, auth failures, and successful tunnel registrations. The active-tunnels JSON endpoint is read-only and omits local target URLs. Control-plane metrics include token admin operations, token validation results, reserved subdomain operations, custom domain operations, auth failures, and readiness failures.
 
 The control-plane `/readyz` endpoint checks the token, reservation, access policy, and custom domain stores. In this Compose stack, that means it pings Postgres.
 

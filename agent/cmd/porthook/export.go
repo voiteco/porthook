@@ -496,7 +496,7 @@ func pluralSuffix(count int) string {
 func printOperationalExportHelp(w io.Writer) {
 	fmt.Fprintln(w, `usage: porthook export --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--event-limit N] [--request-log-limit N] [--output FILE]
 
-Write a best-effort operational JSON snapshot. The export includes public gateway state, safe control-plane summaries, diagnostics, audit events, metrics, and request logs. It does not include plaintext agent tokens, policy secrets, or local target URLs.
+Write a best-effort operational JSON snapshot. The export includes gateway state through the authenticated operator API, safe control-plane summaries, diagnostics, audit events, metrics, and request logs. It does not include plaintext agent tokens, policy secrets, or local target URLs.
 
 Options:
   --control-plane URL       Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.

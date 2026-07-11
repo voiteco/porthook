@@ -557,7 +557,7 @@ GET  /readyz
 GET  /metrics
 ```
 
-Initial gateway status endpoint:
+Private gateway management endpoints:
 
 ```text
 GET /api/v1/tunnels
@@ -565,6 +565,22 @@ GET /api/v1/tunnels/{id}
 GET /api/v1/runtime
 GET /api/v1/request-logs
 ```
+
+The management listener also serves `GET /healthz`, `GET /readyz`, and `GET /metrics`. Health and readiness are unauthenticated on the private network; management data requires the configured service credential. The public listener reserves none of these paths.
+
+Authenticated control-plane operator endpoints proxy the management surface:
+
+```text
+GET /api/v1/gateway/healthz
+GET /api/v1/gateway/readyz
+GET /api/v1/gateway/metrics
+GET /api/v1/gateway/tunnels
+GET /api/v1/gateway/tunnels/{id}
+GET /api/v1/gateway/runtime
+GET /api/v1/gateway/request-logs
+```
+
+Health, readiness, metrics, tunnels, and runtime require `runtime_diagnostics`. Request logs require `audit_history`.
 
 `GET /api/v1/request-logs` returns newest-first in-memory public request summaries. It supports `limit`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, and `until`. Time filters use RFC3339 timestamps, and raw query strings are not returned.
 
@@ -593,11 +609,11 @@ porthook http <port> --server <url>
 porthook tokens create --control-plane <url> --name <name>
 porthook tokens list --control-plane <url>
 porthook tokens revoke --control-plane <url> <token-id>
-porthook doctor --gateway <url>
-porthook doctor --gateway <url> --control-plane <url>
-porthook tunnels list --gateway <url>
-porthook tunnels show --gateway <url> <tunnel-id>
-porthook export --gateway <url> --control-plane <url>
+porthook doctor --control-plane <url>
+porthook tunnels list --control-plane <url>
+porthook tunnels show --control-plane <url> <tunnel-id>
+porthook history requests --control-plane <url>
+porthook export --control-plane <url>
 porthook version
 ```
 
@@ -607,7 +623,6 @@ Useful flags:
 --server
 --token
 --subdomain
---gateway
 --control-plane
 --admin-token
 --admin-token-stdin
@@ -626,6 +641,8 @@ Gateway configuration:
 PORTHOOK_ROOT_DOMAIN=porthook.example
 PORTHOOK_PUBLIC_URL=https://porthook.example
 PORTHOOK_TOKEN_SECRET=...
+PORTHOOK_MANAGEMENT_ADDR=:8082
+PORTHOOK_MANAGEMENT_TOKEN=management-secret
 PORTHOOK_CONTROL_PLANE_URL=http://control-plane:8082
 PORTHOOK_CONTROL_PLANE_TOKEN=validator-secret
 PORTHOOK_CONTROL_PLANE_TIMEOUT=5s
@@ -633,6 +650,8 @@ PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL=30s
 PORTHOOK_CUSTOM_DOMAIN_MISS_TTL=5s
 PORTHOOK_CONTROL_ADMIN_TOKEN=...
 PORTHOOK_CONTROL_VALIDATOR_TOKEN=...
+PORTHOOK_GATEWAY_MANAGEMENT_URL=http://gateway:8082
+PORTHOOK_GATEWAY_MANAGEMENT_TOKEN=management-secret
 PORTHOOK_DATABASE_URL=...
 PORTHOOK_REDIS_URL=...
 PORTHOOK_RATE_LIMIT_RPS=60

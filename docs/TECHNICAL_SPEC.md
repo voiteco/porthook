@@ -417,21 +417,21 @@ porthook access create --control-plane <url> --reserved-subdomain-id <id> --mode
 porthook access list --control-plane <url>
 porthook access update --control-plane <url> <policy-id> --mode <mode>
 porthook access delete --control-plane <url> <policy-id>
-porthook tunnels list --gateway <url>
-porthook tunnels show --gateway <url> <tunnel-id>
+porthook tunnels list --control-plane <url>
+porthook tunnels show --control-plane <url> <tunnel-id>
 porthook history events --control-plane <url>
-porthook history requests --gateway <url>
-porthook export --gateway <url> --control-plane <url>
+porthook history requests --control-plane <url>
+porthook export --control-plane <url>
 porthook version
 ```
 
 `porthook tokens list` prints token summaries only. Summaries include creation time, last successful validation time when available, and revocation time when revoked.
 
-`porthook tunnels list` and `porthook tunnels show` read active tunnel summaries from the gateway public API. They do not require an admin token and do not expose local target URLs.
+`porthook tunnels list` and `porthook tunnels show` read active tunnel summaries through authenticated control-plane operator APIs. They require an admin token with `runtime_diagnostics` and do not expose local target URLs.
 
-`porthook history events` and `porthook history requests` read paginated operational history from `GET /api/v1/events` and `GET /api/v1/request-logs`. They support the corresponding endpoint filters, `--cursor`, `--limit`, and `--json`; audit events require a control-plane admin token.
+`porthook history events` and `porthook history requests` read paginated operational history from `GET /api/v1/events` and `GET /api/v1/gateway/request-logs`. They support the corresponding endpoint filters, `--cursor`, `--limit`, and `--json`; both require an admin token with `audit_history`.
 
-`porthook export` writes a best-effort operational JSON snapshot for self-hosted debugging. Schema version 2 includes safe control-plane summaries, diagnostics, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, request logs, and cursor/filter metadata for paginated audit and request-log endpoints. It records partial endpoint failures in an `errors` array and does not include plaintext agent tokens, policy secrets, or local target URLs.
+`porthook export` writes a best-effort operational JSON snapshot for self-hosted debugging. Schema version 3 uses only authenticated control-plane APIs and includes safe summaries, diagnostics, audit events, active gateway tunnels and tunnel details, gateway runtime, metrics, request logs, and cursor/filter metadata. It records partial endpoint failures in an `errors` array and does not include plaintext agent tokens, policy secrets, or local target URLs.
 
 Postgres-backed control-plane token, reservation, access policy, custom domain, audit event, and gateway request-log storage uses embedded versioned SQL migrations. The control plane and gateway apply their pending migrations at startup and record applied versions in `schema_migrations`.
 
@@ -439,15 +439,15 @@ The control plane exposes `GET /api/v1/status` for dashboard and automation chec
 
 The control plane exposes `GET /api/v1/events` for dashboard audit visibility. The endpoint returns recent audit events, newest first, and omits plaintext tokens and access policy secrets. It accepts `limit`, `event`, `level`, `request_id`, `remote_ip`, `field`, `since`, `until`, and `cursor` query parameters; time filters use RFC3339 timestamps. Responses include `events`, echoed `filters`, and `next_cursor` when another page is available. Postgres-backed deployments store audit events durably; development deployments without a database use an in-memory ring buffer.
 
-The dashboard includes browser diagnostics for control-plane status/readiness, audit event API access, configured gateway tunnel/runtime/metrics/request-log API reachability, and an operational JSON export download. `porthook doctor` checks the same gateway tunnel, runtime, metrics, and request-log APIs from the CLI, plus gateway health/readiness and configured control-plane endpoints.
+The dashboard and `porthook doctor` use same-origin control-plane operator APIs for gateway health, readiness, tunnel inventory, runtime, metrics, and request logs. Gateway runtime routes require `runtime_diagnostics`; request logs require `audit_history`.
 
-The gateway exposes `GET /api/v1/tunnels` for dashboard active-tunnel visibility. The endpoint returns active tunnel summaries and omits local target URLs.
+The private gateway management listener exposes `GET /api/v1/tunnels`; the control plane proxies it as `GET /api/v1/gateway/tunnels` after scope authorization. The endpoint returns active tunnel summaries and omits local target URLs.
 
-The gateway exposes `GET /api/v1/runtime` for dashboard runtime visibility. The endpoint returns safe uptime, request-log buffer usage, stream totals, selected limits/timeouts, and counters without local target URLs, tokens, or control-plane URLs.
+The private gateway management listener exposes `GET /api/v1/runtime`; the control plane proxies it as `GET /api/v1/gateway/runtime`. The endpoint returns safe uptime, request-log buffer usage, stream totals, selected limits/timeouts, and counters without local target URLs, tokens, or control-plane URLs.
 
-The dashboard can read the gateway Prometheus `GET /metrics` endpoint and render metric names, types, values, and help text for self-hosted operators.
+The dashboard reads gateway Prometheus metrics through `GET /api/v1/gateway/metrics` on the control plane.
 
-The gateway exposes `GET /api/v1/request-logs` for dashboard request-log visibility. The endpoint returns public request summaries, newest first. Without `PORTHOOK_REQUEST_LOG_DATABASE_URL`, it reads from an in-memory ring buffer. When `PORTHOOK_REQUEST_LOG_DATABASE_URL` is configured, the gateway writes public request summaries to Postgres and reads the endpoint from that durable store. It supports `limit`, `subdomain`, `method`, `host`, `path`, `status`, `outcome`, `request_id`, `tunnel_id`, `since`, `until`, and `cursor`; `since` and `until` use RFC3339 timestamps, and `limit` is applied after filtering. Responses include `request_logs`, echoed `filters`, and `next_cursor` when another page is available. Entries include path and `query_present`, but never raw query strings.
+The private gateway management listener exposes `GET /api/v1/request-logs`; the control plane proxies it as `GET /api/v1/gateway/request-logs` after `audit_history` authorization. The endpoint returns public request summaries, newest first. Without `PORTHOOK_REQUEST_LOG_DATABASE_URL`, it reads from an in-memory ring buffer. With durable storage, it supports the same filters and pagination. Entries include path and `query_present`, but never raw query strings.
 
 When the gateway is configured with `PORTHOOK_CONTROL_PLANE_URL`, requested subdomains are authorized through `POST /api/v1/reserved-subdomains/authorize`. Random subdomains do not require reservations.
 
@@ -502,6 +502,8 @@ Gateway environment variables:
 ```text
 PORTHOOK_ADDR=:8080
 PORTHOOK_AGENT_ADDR=:8081
+PORTHOOK_MANAGEMENT_ADDR=:8082
+PORTHOOK_MANAGEMENT_TOKEN=management-secret
 PORTHOOK_ROOT_DOMAIN=porthook.example
 PORTHOOK_PUBLIC_URL=https://porthook.example
 PORTHOOK_STATIC_TOKEN=dev-token
@@ -556,6 +558,8 @@ Control-plane environment variables:
 PORTHOOK_CONTROL_ADDR=:8082
 PORTHOOK_CONTROL_ADMIN_TOKEN=...
 PORTHOOK_CONTROL_VALIDATOR_TOKEN=...
+PORTHOOK_GATEWAY_MANAGEMENT_URL=http://gateway:8082
+PORTHOOK_GATEWAY_MANAGEMENT_TOKEN=management-secret
 PORTHOOK_DATABASE_URL=postgres://...
 PORTHOOK_AUDIT_EVENT_RETENTION=2160h
 PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL=1h
@@ -567,16 +571,23 @@ The agent retries transient dial and WebSocket disconnect failures with exponent
 
 ## 15. Health and Operations
 
-Gateway endpoints:
+Gateway management endpoints:
 
 ```text
 GET /healthz
 GET /readyz
+GET /metrics
+GET /api/v1/tunnels
+GET /api/v1/tunnels/{id}
+GET /api/v1/runtime
+GET /api/v1/request-logs
 ```
 
-`/healthz` should return success when the process is alive.
+`/healthz` should return success when the process is alive. Health and readiness are unauthenticated on the private management network; all data endpoints require `PORTHOOK_MANAGEMENT_TOKEN` when configured.
 
 `/readyz` should return success when the gateway can accept public requests and agent connections.
+
+The public listener has no Porthook operational routes. All paths, including `/healthz`, `/metrics`, and `/api/v1/*`, are forwarded to the selected tunnel.
 
 ## 16. Observability
 

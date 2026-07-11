@@ -6,7 +6,7 @@ The objective of this roadmap is to take the public self-hosted Porthook product
 
 This document is the execution source of truth for that work. Tasks are ordered by dependency and risk. A task is complete only after its implementation, tests, documentation, commit, push, and required CI checks are complete.
 
-Current phase: Blocks 1 and 2 are complete. Block 3 is ready to start.
+Current phase: Blocks 1 through 3 are complete. Block 4 is ready to start.
 
 ## Supported v1 Scope
 
@@ -37,7 +37,8 @@ Deferred until after `v1.0.0`:
 | Release | Purpose |
 | --- | --- |
 | `v0.14.0` | Reconcile and release the current baseline. |
-| `v0.15.0` | Establish mandatory quality gates and close management and access-boundary risks. |
+| `v0.15.0` | Establish mandatory quality and security gates. |
+| `v0.15.1` | Close gateway management and access-boundary risks. |
 | `v0.16.0` | Complete the public traffic protocol and verify the real TLS edge path. |
 | `v0.17.0` | Publish production-shaped distribution artifacts for broad beta use. |
 | `v0.18.0` | Establish a measured reliability and capacity envelope. |
@@ -107,33 +108,33 @@ Exit gate:
 
 ## Block 3: Isolate the Gateway Management Surface
 
-Target: `v0.15.0`
+Target: `v0.15.1`
 
 The public listener must be transparent to tunneled applications. Operational routes must not expose metadata or reserve application paths on wildcard tunnel hosts.
 
 Tasks:
 
-- [ ] Add a dedicated gateway management listener, configured separately from public and agent listeners.
-- [ ] Move health, readiness, metrics, tunnel inventory, runtime diagnostics, and request-log APIs off the public listener.
-- [ ] Keep unauthenticated health and readiness endpoints private to the management network.
-- [ ] Protect management data endpoints with a dedicated control-plane-to-gateway service credential.
-- [ ] Add authenticated control-plane operator endpoints for gateway tunnels, runtime, metrics, and request logs.
-- [ ] Enforce `runtime_diagnostics` for runtime, metrics, and tunnel inventory, and `audit_history` for request-log history.
-- [ ] Move dashboard diagnostics and gateway history reads to the authenticated control-plane endpoints.
-- [ ] Move CLI `doctor`, `tunnels`, `history requests`, and `export` workflows to the authenticated operator path.
-- [ ] Update Compose, Caddy, healthchecks, configuration validation, and production-hardening checks for the private management listener.
-- [ ] Remove public operational CORS behavior that is no longer required.
-- [ ] Add regression tests proving `/healthz`, `/metrics`, and `/api/v1/*` can be forwarded unchanged to a tunneled application.
+- [x] Add a dedicated gateway management listener, configured separately from public and agent listeners.
+- [x] Move health, readiness, metrics, tunnel inventory, runtime diagnostics, and request-log APIs off the public listener.
+- [x] Keep unauthenticated health and readiness endpoints private to the management network.
+- [x] Protect management data endpoints with a dedicated control-plane-to-gateway service credential.
+- [x] Add authenticated control-plane operator endpoints for gateway tunnels, runtime, metrics, and request logs.
+- [x] Enforce `runtime_diagnostics` for runtime, metrics, and tunnel inventory, and `audit_history` for request-log history.
+- [x] Move dashboard diagnostics and gateway history reads to the authenticated control-plane endpoints.
+- [x] Move CLI `doctor`, `tunnels`, `history requests`, and `export` workflows to the authenticated operator path.
+- [x] Update Compose, Caddy, healthchecks, configuration validation, and production-hardening checks for the private management listener.
+- [x] Remove public operational CORS behavior that is no longer required.
+- [x] Add regression tests proving `/healthz`, `/metrics`, and `/api/v1/*` can be forwarded unchanged to a tunneled application.
 
 Exit gate:
 
-- [ ] Wildcard tunnel hosts expose no Porthook operational metadata.
-- [ ] Every application path is transparent on the public listener.
-- [ ] Dashboard and CLI operational workflows require the correct scoped admin token.
+- [x] Wildcard tunnel hosts expose no Porthook operational metadata.
+- [x] Every application path is transparent on the public listener.
+- [x] Dashboard and CLI operational workflows require the correct scoped admin token.
 
 ## Block 4: Harden Client Identity and Access Policies
 
-Target: `v0.15.0`
+Target: `v0.15.1`
 
 Tasks:
 

@@ -2,6 +2,22 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.15.0 to 0.15.1
+
+The current 0.15.x line isolates gateway management from wildcard tunnel traffic. Health, readiness, metrics, tunnel inventory, runtime diagnostics, and request logs move to a private gateway listener. Dashboard and CLI operator workflows now use authenticated control-plane proxy endpoints, and CLI operational export uses schema version 3.
+
+Before upgrading:
+
+1. Generate a new high-entropy `PORTHOOK_GATEWAY_MANAGEMENT_TOKEN` that differs from the admin and validator tokens.
+2. Configure the gateway with `PORTHOOK_MANAGEMENT_ADDR` on a private service network and `PORTHOOK_MANAGEMENT_TOKEN` with the generated value.
+3. Configure the control plane with `PORTHOOK_GATEWAY_MANAGEMENT_URL` pointing to that private listener and `PORTHOOK_GATEWAY_MANAGEMENT_TOKEN` with the same value.
+4. Ensure the reverse proxy and host firewall do not publish the management listener.
+5. Deploy the control plane, gateway, dashboard assets, and CLI together.
+6. Run `porthook doctor --control-plane <control-plane-url> --admin-token-stdin` with a token containing `runtime_diagnostics` and `audit_history`.
+7. Verify `/healthz`, `/metrics`, and `/api/v1/*` on a wildcard tunnel host reach the tunneled application instead of Porthook management handlers.
+
+There is no database migration. A rollback to 0.15.0 requires restoring the previous CLI and dashboard together with the gateway and control plane; direct gateway operator URLs and export schema version 2 are not compatible with the new operator workflow.
+
 ## Upgrade from 0.14.x to 0.15.x
 
 Version 0.15.x adds mandatory quality and security verification gates. It upgrades the source and container build toolchain to Go 1.26.5 and updates the Postgres driver dependency. It does not introduce a database migration or a public API change.

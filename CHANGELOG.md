@@ -4,7 +4,17 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+- Added a dedicated private gateway management listener and a separate control-plane-to-gateway management credential.
+- Added authenticated control-plane operator endpoints for gateway health, readiness, metrics, tunnels, runtime diagnostics, and request logs.
+
+### Changed
+- Dashboard and CLI operational workflows now use scoped control-plane APIs instead of direct gateway URLs; CLI exports use schema version 3.
+- Production Compose keeps gateway management inside the service network and verifies that Caddy does not route it.
+- Gateway health, metrics, and diagnostic APIs moved off the public listener, which now forwards every application path transparently.
+
+### Fixed
+- Stabilized the gateway stream-error test by waiting for tunnel registration before issuing its public request.
 
 ## [0.15.0] - 2026-07-11
 

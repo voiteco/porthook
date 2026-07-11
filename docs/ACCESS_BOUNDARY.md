@@ -19,17 +19,18 @@ The public gateway listener is designed for internet traffic. The control-plane 
 | --- | --- |
 | Wildcard tunnel traffic | Public, routed to the gateway public listener. |
 | Agent WebSocket hostname | Public or restricted to agent networks, routed to the gateway agent listener. |
-| Gateway operational APIs | Public unless externally protected with the gateway hostname. |
+| Gateway management listener | Private Compose or service network only; never routed by the public edge. |
+| Gateway operator APIs | Authenticated control-plane surface with endpoint-specific admin scopes. |
 | Control-plane API | Private or externally protected. |
 | Dashboard | Same boundary as the control-plane API. |
 
 The dashboard stores the admin token in browser session storage for the current tab and sends it to the control-plane API as a bearer token. The token can be the bootstrap token or a scoped admin token. Always use HTTPS and avoid exposing the dashboard on a public hostname without an additional boundary.
 
-Gateway operational APIs such as `GET /api/v1/tunnels`, `GET /api/v1/runtime`, `GET /metrics`, and `GET /api/v1/request-logs` are served on the gateway public listener for self-hosted dashboard visibility. Request log responses omit raw query strings and authorization values, and runtime responses omit tokens, local targets, and control-plane URLs, but these endpoints still include operational metadata such as paths, statuses, outcomes, counters, limits, and remote IPs. Protect or route these endpoints externally if that metadata should not be public in your deployment.
+The gateway serves unauthenticated health and readiness probes plus credential-protected metrics and diagnostic data on a dedicated management listener. The production Compose stack exposes that listener only to the service network and Caddy does not route it. The control plane calls it with a dedicated service credential, then applies `runtime_diagnostics` to health, readiness, metrics, tunnel inventory, and runtime routes and `audit_history` to request-log routes. Wildcard tunnel hosts reserve no operational paths: `/healthz`, `/metrics`, and `/api/v1/*` are forwarded to the tunneled application.
 
 ## Production Compose
 
-The production Compose stack exposes only the reverse proxy on host ports `80` and `443`. The gateway, control plane, and Postgres are private to the Compose network.
+The production Compose stack exposes only the reverse proxy on host ports `80` and `443`. The gateway, its management listener, the control plane, and Postgres are private to the Compose network.
 
 By default, the production stack mounts:
 
@@ -86,7 +87,7 @@ curl -i https://control.example.com/dashboard/
 
 ## Token Handling
 
-- Generate separate values for `PORTHOOK_CONTROL_ADMIN_TOKEN` and `PORTHOOK_CONTROL_VALIDATOR_TOKEN`.
+- Generate separate values for `PORTHOOK_CONTROL_ADMIN_TOKEN`, `PORTHOOK_CONTROL_VALIDATOR_TOKEN`, and `PORTHOOK_GATEWAY_MANAGEMENT_TOKEN`.
 - Treat `PORTHOOK_CONTROL_ADMIN_TOKEN` as a full-scope bootstrap and recovery token. Keep it offline or restricted after creating scoped admin tokens for routine operators.
 - Give routine admin tokens only the scopes required for their work: `admin_tokens`, `tokens`, `reservations`, `domains`, `access_policies`, `audit_history`, or `runtime_diagnostics`.
 - Do not reuse agent tokens as admin or validator tokens.
@@ -94,6 +95,7 @@ curl -i https://control.example.com/dashboard/
 - Revoke scoped admin tokens after operator turnover or suspected exposure.
 - Rotate the bootstrap admin token if the environment value is exposed.
 - Rotate the validator token if gateway or control-plane configuration is exposed.
+- Rotate the gateway management token if either service configuration is exposed, updating both services together.
 
 Changing the validator token requires updating both the gateway and control plane together. Changing the bootstrap admin token affects recovery access and any CLI or dashboard sessions still using that value. Revoking a scoped admin token affects only sessions using that scoped token.
 

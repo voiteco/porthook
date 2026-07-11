@@ -14,6 +14,18 @@ import (
 	"time"
 )
 
+func TestPrintOperationalExportHelpDescribesOperatorAPI(t *testing.T) {
+	var output bytes.Buffer
+	printOperationalExportHelp(&output)
+
+	if !strings.Contains(output.String(), "authenticated operator API") {
+		t.Fatalf("help = %q, want authenticated operator API", output.String())
+	}
+	if strings.Contains(output.String(), "public gateway state") {
+		t.Fatalf("help = %q, want no public gateway state claim", output.String())
+	}
+}
+
 func TestRunOperationalExportWritesSnapshot(t *testing.T) {
 	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 	var authorizedAdminCalls int
