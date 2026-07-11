@@ -145,7 +145,7 @@ func (r *Runner) pumpLocalToGateway(
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			return r.closeOrCancelForLocalReadError(ctx, conn, tunnelID, streamID, err)
+			return r.closeOrCancelForLocalReadError(conn, tunnelID, streamID, err)
 		}
 		byteCount.Add(int64(len(data)))
 
@@ -209,14 +209,20 @@ func (r *Runner) pumpGatewayToLocal(
 // closeOrCancelForLocalReadError tells the gateway about a local-side
 // WebSocket closure. A clean close (a real WebSocket close frame) is
 // relayed as ws.close with the same code and reason; anything else
-// (network failure, protocol violation) is relayed as ws.cancel.
-func (r *Runner) closeOrCancelForLocalReadError(ctx context.Context, conn *websocket.Conn, tunnelID, streamID string, err error) error {
+// (network failure, protocol violation) is relayed as ws.cancel. It always
+// notifies on a fresh context: ctx may already be cancelling as part of the
+// same shutdown that produced err, and this best-effort final message must
+// not be undermined by that same cancellation.
+func (r *Runner) closeOrCancelForLocalReadError(conn *websocket.Conn, tunnelID, streamID string, err error) error {
+	notifyCtx, cancel := contextWithTimeout(context.Background(), r.cfg.WebSocketWriteTimeout)
+	defer cancel()
+
 	if status := websocket.CloseStatus(err); status != -1 {
 		closeEnv, buildErr := messages.NewStream(messages.TypeWSClose, streamID, tunnelID, wsproxy.Close{
 			Code: int(status),
 		})
 		if buildErr == nil {
-			_ = r.write(ctx, conn, closeEnv)
+			_ = r.write(notifyCtx, conn, closeEnv)
 		}
 		return nil
 	}
@@ -224,7 +230,7 @@ func (r *Runner) closeOrCancelForLocalReadError(ctx context.Context, conn *webso
 		Reason: "local websocket connection failed",
 	})
 	if buildErr == nil {
-		_ = r.write(context.Background(), conn, cancelEnv)
+		_ = r.write(notifyCtx, conn, cancelEnv)
 	}
 	return err
 }

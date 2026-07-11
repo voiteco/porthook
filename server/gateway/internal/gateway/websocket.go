@@ -214,7 +214,7 @@ func pumpPublicToAgent(
 			if cause := context.Cause(ctx); ctx.Err() != nil {
 				return cause
 			}
-			return closeOrCancelForReadError(ctx, stream, err)
+			return closeOrCancelForReadError(stream, writeTimeout, err)
 		}
 		deadline.Touch()
 		byteCount.Add(int64(len(data)))
@@ -282,12 +282,18 @@ func pumpAgentToPublic(
 // closeOrCancelForReadError tells the agent about a public-side WebSocket
 // closure. A clean close (a real WebSocket close frame) is relayed as
 // ws.close with the same code and reason; anything else (network failure,
-// protocol violation) is relayed as ws.cancel.
-func closeOrCancelForReadError(ctx context.Context, stream *wsStream, err error) error {
+// protocol violation) is relayed as ws.cancel. It always notifies on a
+// fresh context: the caller's ctx may already be cancelling as part of the
+// same shutdown that produced err, and this best-effort final message must
+// not be undermined by that same cancellation.
+func closeOrCancelForReadError(stream *wsStream, writeTimeout time.Duration, err error) error {
+	notifyCtx, cancel := contextWithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+
 	if status := websocket.CloseStatus(err); status != -1 {
-		_ = stream.SendClose(ctx, int(status), "")
+		_ = stream.SendClose(notifyCtx, int(status), "")
 		return nil
 	}
-	_ = stream.SendCancel(context.Background(), "public websocket connection failed")
+	_ = stream.SendCancel(notifyCtx, "public websocket connection failed")
 	return err
 }
