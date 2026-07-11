@@ -134,6 +134,7 @@ func TestRunConfigcheckProductionAcceptsControlPlaneConfig(t *testing.T) {
 	t.Setenv("PORTHOOK_PUBLIC_URL", "https://tunnels.example.com")
 	t.Setenv("PORTHOOK_CONTROL_PLANE_URL", "http://control-plane:8082")
 	t.Setenv("PORTHOOK_CONTROL_PLANE_TOKEN", "validator-secret")
+	t.Setenv("PORTHOOK_MANAGEMENT_TOKEN", "management-secret")
 	t.Setenv("PORTHOOK_REQUEST_LOG_DATABASE_URL", "postgres://porthook:secret@postgres:5432/porthook?sslmode=disable")
 
 	var stdout bytes.Buffer

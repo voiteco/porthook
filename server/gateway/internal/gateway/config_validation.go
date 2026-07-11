@@ -48,6 +48,13 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	if err := validateListenAddr(cfg.ManagementAddr); err != nil {
 		addError("PORTHOOK_MANAGEMENT_ADDR", err.Error())
 	}
+	if strings.TrimSpace(cfg.ManagementToken) == "" {
+		if opts.Production {
+			addError("PORTHOOK_MANAGEMENT_TOKEN", "is required in production mode")
+		}
+	} else if opts.Production && looksLikePlaceholderSecret(cfg.ManagementToken) {
+		addError("PORTHOOK_MANAGEMENT_TOKEN", "must be replaced with a generated secret in production mode")
+	}
 	if err := validateRootDomain(cfg.RootDomain); err != nil {
 		addError("PORTHOOK_ROOT_DOMAIN", err.Error())
 	} else if opts.Production && strings.EqualFold(cfg.RootDomain, "localhost") {

@@ -2258,6 +2258,55 @@ func TestManagementHandlerHealthEndpoints(t *testing.T) {
 	}
 }
 
+func TestManagementHandlerRequiresBearerForDataEndpoints(t *testing.T) {
+	cfg := testConfig()
+	cfg.ManagementToken = "management-secret"
+	server := NewServer(cfg, slog.Default())
+	httpServer := httptest.NewServer(server.ManagementHandler())
+	defer httpServer.Close()
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		resp, err := httpServer.Client().Get(httpServer.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s without token returned error: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s without token = %d, want 200", path, resp.StatusCode)
+		}
+	}
+
+	for _, path := range []string{"/api/v1/tunnels", "/api/v1/runtime", "/api/v1/request-logs", "/metrics"} {
+		t.Run(path, func(t *testing.T) {
+			resp, err := httpServer.Client().Get(httpServer.URL + path)
+			if err != nil {
+				t.Fatalf("GET without token returned error: %v", err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("status without token = %d, want 401", resp.StatusCode)
+			}
+			if got := resp.Header.Get("WWW-Authenticate"); got != `Bearer realm="Porthook gateway management"` {
+				t.Fatalf("WWW-Authenticate = %q", got)
+			}
+
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, httpServer.URL+path, nil)
+			if err != nil {
+				t.Fatalf("NewRequest returned error: %v", err)
+			}
+			req.Header.Set("Authorization", "Bearer management-secret")
+			resp, err = httpServer.Client().Do(req)
+			if err != nil {
+				t.Fatalf("GET with token returned error: %v", err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status with token = %d, want 200", resp.StatusCode)
+			}
+		})
+	}
+}
+
 func TestManagementHandlerListsActiveTunnels(t *testing.T) {
 	server := NewServer(testConfig(), slog.Default())
 	connectedAt := time.Date(2026, 6, 30, 11, 0, 0, 0, time.UTC)

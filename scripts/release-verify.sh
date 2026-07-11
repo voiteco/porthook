@@ -108,6 +108,7 @@ PORTHOOK_ROOT_DOMAIN="tunnels.example.com" \
 PORTHOOK_PUBLIC_URL="https://tunnels.example.com" \
 PORTHOOK_CONTROL_PLANE_URL="http://control-plane:8082" \
 PORTHOOK_CONTROL_PLANE_TOKEN="validator-secret" \
+PORTHOOK_MANAGEMENT_TOKEN="management-secret" \
 PORTHOOK_REQUEST_LOG_DATABASE_URL="postgres://porthook:secret@postgres:5432/porthook?sslmode=disable" \
 	"${DIST_DIR}/porthook-gateway_${host_os}_${host_arch}" configcheck --production >/dev/null
 

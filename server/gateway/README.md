@@ -34,6 +34,7 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_ADDR` | `:8080` | Public HTTP listener address. |
 | `PORTHOOK_AGENT_ADDR` | `:8081` | Agent WebSocket listener address. |
 | `PORTHOOK_MANAGEMENT_ADDR` | `:8082` | Management HTTP listener address. Keep this listener on a private network. |
+| `PORTHOOK_MANAGEMENT_TOKEN` | empty | Bearer token required by management data and metrics endpoints. Required by production configuration validation. |
 | `PORTHOOK_ROOT_DOMAIN` | `localhost` | Root domain used for subdomain routing. |
 | `PORTHOOK_PUBLIC_URL` | `http://localhost:8080` | Base public URL printed by the agent. |
 | `PORTHOOK_STATIC_TOKEN` | `dev-token` | Static agent authentication token. |
@@ -71,10 +72,8 @@ Duration values use Go duration syntax such as `500ms`, `10s`, or `1m`.
 
 ## Operational Endpoints
 
-The management listener exposes:
+The management listener exposes unauthenticated `GET /healthz` and `GET /readyz` probes. The following endpoints require `Authorization: Bearer <PORTHOOK_MANAGEMENT_TOKEN>` when the token is configured:
 
-- `GET /healthz`
-- `GET /readyz`
 - `GET /metrics`
 - `GET /api/v1/tunnels`
 - `GET /api/v1/tunnels/{id}`

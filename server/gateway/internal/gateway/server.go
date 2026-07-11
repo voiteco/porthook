@@ -246,12 +246,27 @@ func (s *Server) ManagementHandler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
-	mux.HandleFunc("/api/v1/tunnels/", s.handleTunnelDetail)
-	mux.HandleFunc("/api/v1/tunnels", s.handleTunnelList)
-	mux.HandleFunc("/api/v1/runtime", s.handleRuntimeSummary)
-	mux.HandleFunc("/api/v1/request-logs", s.handleRequestLogs)
-	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/api/v1/tunnels/", s.requireManagementAuth(s.handleTunnelDetail))
+	mux.HandleFunc("/api/v1/tunnels", s.requireManagementAuth(s.handleTunnelList))
+	mux.HandleFunc("/api/v1/runtime", s.requireManagementAuth(s.handleRuntimeSummary))
+	mux.HandleFunc("/api/v1/request-logs", s.requireManagementAuth(s.handleRequestLogs))
+	mux.HandleFunc("/metrics", s.requireManagementAuth(s.handleMetrics))
 	return requestid.Middleware(telemetry.HTTPHandler(mux, "gateway.management"))
+}
+
+func (s *Server) requireManagementAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.ManagementToken == "" {
+			next(w, r)
+			return
+		}
+		if !secretEqual(bearerToken(r), s.cfg.ManagementToken) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="Porthook gateway management"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) handleAgentWebSocket(w http.ResponseWriter, r *http.Request) {
