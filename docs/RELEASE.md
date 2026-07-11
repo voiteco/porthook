@@ -28,6 +28,7 @@ Before pushing a tag, run:
 make fmt-check
 make test
 make race
+make vulncheck
 make vet
 make smoke-local VERSION=v0.14.0
 make smoke-control-plane VERSION=v0.14.0

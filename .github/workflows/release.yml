@@ -34,6 +34,9 @@ jobs:
       - name: Run race detector
         run: make race
 
+      - name: Run vulnerability check
+        run: make vulncheck
+
       - name: Run vet
         run: make vet
 
