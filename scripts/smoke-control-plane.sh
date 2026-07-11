@@ -13,6 +13,7 @@ MANAGEMENT_PORT="${PORTHOOK_SMOKE_MANAGEMENT_PORT:-18086}"
 SUBDOMAIN="${PORTHOOK_SMOKE_SUBDOMAIN:-control-demo}"
 ADMIN_TOKEN="${PORTHOOK_SMOKE_ADMIN_TOKEN:-smoke-admin-token}"
 VALIDATOR_TOKEN="${PORTHOOK_SMOKE_VALIDATOR_TOKEN:-smoke-validator-token}"
+MANAGEMENT_TOKEN="${PORTHOOK_SMOKE_MANAGEMENT_TOKEN:-smoke-management-token}"
 BASIC_USERNAME="${PORTHOOK_SMOKE_BASIC_USERNAME:-smoke-user}"
 BASIC_PASSWORD="${PORTHOOK_SMOKE_BASIC_PASSWORD:-smoke-password}"
 DATABASE_URL="${PORTHOOK_SMOKE_DATABASE_URL:-}"
@@ -130,6 +131,8 @@ start_control_plane() {
 	PORTHOOK_CONTROL_ADDR="127.0.0.1:${CONTROL_PORT}" \
 	PORTHOOK_CONTROL_ADMIN_TOKEN="${ADMIN_TOKEN}" \
 	PORTHOOK_CONTROL_VALIDATOR_TOKEN="${VALIDATOR_TOKEN}" \
+	PORTHOOK_GATEWAY_MANAGEMENT_URL="http://127.0.0.1:${MANAGEMENT_PORT}" \
+	PORTHOOK_GATEWAY_MANAGEMENT_TOKEN="${MANAGEMENT_TOKEN}" \
 	PORTHOOK_DATABASE_URL="${DATABASE_URL}" \
 		"${BIN_DIR}/porthook-control-plane" >>"${LOG_DIR}/control-plane.log" 2>&1 &
 	control_pid="$!"
@@ -141,6 +144,7 @@ start_gateway() {
 	PORTHOOK_ADDR="127.0.0.1:${PUBLIC_PORT}" \
 	PORTHOOK_AGENT_ADDR="127.0.0.1:${AGENT_PORT}" \
 	PORTHOOK_MANAGEMENT_ADDR="127.0.0.1:${MANAGEMENT_PORT}" \
+	PORTHOOK_MANAGEMENT_TOKEN="${MANAGEMENT_TOKEN}" \
 	PORTHOOK_ROOT_DOMAIN="localhost" \
 	PORTHOOK_PUBLIC_URL="http://localhost:${PUBLIC_PORT}" \
 	PORTHOOK_STATIC_TOKEN="unused-static-token" \
@@ -447,7 +451,7 @@ PORTHOOK_TOKEN="" \
 pids+=("$!")
 wait_for_log "${LOG_DIR}/agent.log" "Tunnel established" "agent registration"
 
-tunnels_json="$(curl -fsS "http://127.0.0.1:${MANAGEMENT_PORT}/api/v1/tunnels")"
+tunnels_json="$(curl -fsS -H "Authorization: Bearer ${MANAGEMENT_TOKEN}" "http://127.0.0.1:${MANAGEMENT_PORT}/api/v1/tunnels")"
 printf '%s' "${tunnels_json}" | python3 -c '
 import json
 import sys
@@ -496,7 +500,7 @@ fi
 
 request_log_found=0
 for _ in $(seq 1 20); do
-	request_logs_json="$(curl -fsS "http://127.0.0.1:${MANAGEMENT_PORT}/api/v1/request-logs?limit=20")"
+	request_logs_json="$(curl -fsS -H "Authorization: Bearer ${MANAGEMENT_TOKEN}" "http://127.0.0.1:${MANAGEMENT_PORT}/api/v1/request-logs?limit=20")"
 	if printf '%s' "${request_logs_json}" | python3 -c '
 import json
 import sys
@@ -552,8 +556,10 @@ if not any(event.get("event") == "control_plane.token_created" for event in payl
     raise SystemExit(f"missing token_created audit event: {payload}")
 PY
 
-"${BIN_DIR}/porthook" history requests \
-	--gateway "http://127.0.0.1:${MANAGEMENT_PORT}" \
+printf '%s' "${ADMIN_TOKEN}" | \
+	"${BIN_DIR}/porthook" history requests \
+	--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+	--admin-token-stdin \
 	--subdomain "${SUBDOMAIN}" \
 	--path "/smoke.txt" \
 	--status 200 \
@@ -595,8 +601,10 @@ if [[ "${DURABLE_RESTART}" == "1" ]]; then
 	stop_process "${gateway_pid}" "gateway"
 	start_gateway
 
-	"${BIN_DIR}/porthook" history requests \
-		--gateway "http://127.0.0.1:${MANAGEMENT_PORT}" \
+	printf '%s' "${ADMIN_TOKEN}" | \
+		"${BIN_DIR}/porthook" history requests \
+		--control-plane "http://127.0.0.1:${CONTROL_PORT}" \
+		--admin-token-stdin \
 		--subdomain "${SUBDOMAIN}" \
 		--path "/smoke.txt" \
 		--status 200 \
