@@ -21,7 +21,7 @@ const (
 	defaultDoctorTimeout    = 5 * time.Second
 )
 
-const doctorUsageText = `usage: porthook doctor [--gateway URL] [--control-plane URL] [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--json]`
+const doctorUsageText = `usage: porthook doctor --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--json]`
 
 type doctorConfig struct {
 	gatewayURL       string
@@ -107,20 +107,28 @@ func collectDoctorReport(ctx context.Context, cfg doctorConfig) doctorReport {
 	client := &http.Client{Timeout: cfg.timeout}
 	report := doctorReport{OK: true}
 
-	if cfg.gatewayURL == "" {
-		report.add(skippedDoctorCheck("gateway", "health", "gateway URL is not configured"))
-		report.add(skippedDoctorCheck("gateway", "readiness", "gateway URL is not configured"))
-		report.add(skippedDoctorCheck("gateway", "tunnels API", "gateway URL is not configured"))
-		report.add(skippedDoctorCheck("gateway", "runtime API", "gateway URL is not configured"))
-		report.add(skippedDoctorCheck("gateway", "request logs API", "gateway URL is not configured"))
-		report.add(skippedDoctorCheck("gateway", "metrics", "gateway URL is not configured"))
-	} else {
+	if cfg.gatewayURL != "" {
 		report.add(runDoctorGET(ctx, client, "gateway", "health", cfg.gatewayURL+"/healthz", nil, plainDoctorDetail))
 		report.add(runDoctorGET(ctx, client, "gateway", "readiness", cfg.gatewayURL+"/readyz", nil, plainDoctorDetail))
 		report.add(runDoctorGET(ctx, client, "gateway", "tunnels API", cfg.gatewayURL+"/api/v1/tunnels", nil, tunnelsDoctorDetail))
 		report.add(runDoctorGET(ctx, client, "gateway", "runtime API", cfg.gatewayURL+"/api/v1/runtime", nil, runtimeDoctorDetail))
 		report.add(runDoctorGET(ctx, client, "gateway", "request logs API", cfg.gatewayURL+"/api/v1/request-logs?limit=1", nil, requestLogsDoctorDetail))
 		report.add(runDoctorGET(ctx, client, "gateway", "metrics", cfg.gatewayURL+"/metrics", nil, metricsDoctorDetail))
+	} else if cfg.controlPlaneURL == "" || cfg.adminToken == "" {
+		report.add(skippedDoctorCheck("gateway", "health", "control-plane operator access is not configured"))
+		report.add(skippedDoctorCheck("gateway", "readiness", "control-plane operator access is not configured"))
+		report.add(skippedDoctorCheck("gateway", "tunnels API", "control-plane operator access is not configured"))
+		report.add(skippedDoctorCheck("gateway", "runtime API", "control-plane operator access is not configured"))
+		report.add(skippedDoctorCheck("gateway", "request logs API", "control-plane operator access is not configured"))
+		report.add(skippedDoctorCheck("gateway", "metrics", "control-plane operator access is not configured"))
+	} else {
+		headers := map[string]string{"Authorization": "Bearer " + cfg.adminToken}
+		report.add(runDoctorGET(ctx, client, "gateway", "health", cfg.controlPlaneURL+"/api/v1/gateway/healthz", headers, plainDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "readiness", cfg.controlPlaneURL+"/api/v1/gateway/readyz", headers, plainDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "tunnels API", cfg.controlPlaneURL+"/api/v1/gateway/tunnels", headers, tunnelsDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "runtime API", cfg.controlPlaneURL+"/api/v1/gateway/runtime", headers, runtimeDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "request logs API", cfg.controlPlaneURL+"/api/v1/gateway/request-logs?limit=1", headers, requestLogsDoctorDetail))
+		report.add(runDoctorGET(ctx, client, "gateway", "metrics", cfg.controlPlaneURL+"/api/v1/gateway/metrics", headers, metricsDoctorDetail))
 	}
 
 	if cfg.controlPlaneURL == "" {
@@ -144,18 +152,12 @@ func collectDoctorReport(ctx context.Context, cfg doctorConfig) doctorReport {
 
 func parseDoctorConfig(args []string, stdin io.Reader, stderr io.Writer) (doctorConfig, error) {
 	cfg := doctorConfig{
-		gatewayURL:      strings.TrimSpace(os.Getenv("PORTHOOK_GATEWAY_URL")),
 		controlPlaneURL: strings.TrimSpace(os.Getenv("PORTHOOK_CONTROL_PLANE_URL")),
 		adminToken:      strings.TrimSpace(os.Getenv("PORTHOOK_CONTROL_ADMIN_TOKEN")),
 		timeout:         defaultDoctorTimeout,
 	}
-	if cfg.gatewayURL == "" {
-		cfg.gatewayURL = defaultDoctorGatewayURL
-	}
-
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&cfg.gatewayURL, "gateway", cfg.gatewayURL, "gateway public URL")
 	fs.StringVar(&cfg.controlPlaneURL, "control-plane", cfg.controlPlaneURL, "control-plane API URL")
 	fs.StringVar(&cfg.adminToken, "admin-token", cfg.adminToken, "control-plane admin token")
 	fs.BoolVar(&cfg.adminTokenStdin, "admin-token-stdin", cfg.adminTokenStdin, "read control-plane admin token from stdin")
@@ -173,19 +175,12 @@ func parseDoctorConfig(args []string, stdin io.Reader, stderr io.Writer) (doctor
 		}
 	})
 
-	gatewayURL, err := normalizeDoctorURL(cfg.gatewayURL, "gateway URL")
+	cfg.controlPlaneURL = strings.TrimSpace(cfg.controlPlaneURL)
+	controlPlaneURL, err := normalizeDoctorURL(cfg.controlPlaneURL, "control-plane URL")
 	if err != nil {
 		return doctorConfig{}, err
 	}
-	cfg.gatewayURL = gatewayURL
-	cfg.controlPlaneURL = strings.TrimSpace(cfg.controlPlaneURL)
-	if cfg.controlPlaneURL != "" {
-		controlPlaneURL, err := normalizeDoctorURL(cfg.controlPlaneURL, "control-plane URL")
-		if err != nil {
-			return doctorConfig{}, err
-		}
-		cfg.controlPlaneURL = controlPlaneURL
-	}
+	cfg.controlPlaneURL = controlPlaneURL
 	if cfg.timeout <= 0 {
 		return doctorConfig{}, fmt.Errorf("timeout must be positive")
 	}
@@ -211,6 +206,9 @@ func parseDoctorConfig(args []string, stdin io.Reader, stderr io.Writer) (doctor
 		cfg.adminToken = adminToken
 	} else {
 		cfg.adminToken = strings.TrimSpace(cfg.adminToken)
+	}
+	if cfg.adminToken == "" {
+		return doctorConfig{}, fmt.Errorf("admin token is required; use --admin-token or --admin-token-stdin")
 	}
 
 	return cfg, nil
@@ -414,17 +412,16 @@ func printDoctorReport(w io.Writer, report doctorReport) {
 }
 
 func printDoctorHelp(w io.Writer) {
-	fmt.Fprintln(w, `usage: porthook doctor [--gateway URL] [--control-plane URL] [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--json]
+	fmt.Fprintln(w, `usage: porthook doctor --control-plane URL [--admin-token TOKEN | --admin-token-stdin] [--timeout DURATION] [--json]
 
 Run local operational checks against a self-hosted Porthook deployment.
 
 Checks:
-  gateway /healthz, /readyz, /api/v1/tunnels, /api/v1/runtime, /api/v1/request-logs, and /metrics
-  control-plane /healthz, /readyz, and /api/v1/status when --control-plane is set
-  control-plane /api/v1/events when --control-plane and an admin token are set
+  gateway health, readiness, tunnels, runtime, request logs, and metrics through the operator API
+  control-plane /healthz, /readyz, and /api/v1/status
+  control-plane /api/v1/events when an admin token is set
 
 Options:
-  --gateway URL             Gateway public URL. Defaults to PORTHOOK_GATEWAY_URL or http://localhost:8080.
   --control-plane URL       Control-plane API URL. Defaults to PORTHOOK_CONTROL_PLANE_URL.
   --admin-token TOKEN       Control-plane admin token. Defaults to PORTHOOK_CONTROL_ADMIN_TOKEN.
   --admin-token-stdin       Read the control-plane admin token from stdin.

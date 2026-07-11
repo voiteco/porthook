@@ -91,7 +91,6 @@ Run operational diagnostics:
 
 ```sh
 printf '%s' 'admin-secret' | porthook doctor \
-  --gateway http://localhost:8080 \
   --control-plane http://localhost:8082 \
   --admin-token-stdin
 ```

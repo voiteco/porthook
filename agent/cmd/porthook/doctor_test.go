@@ -12,40 +12,14 @@ import (
 )
 
 func TestRunDoctorChecksGatewayAndControlPlane(t *testing.T) {
-	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Request-ID", "req_gateway")
-		switch r.URL.Path {
-		case "/healthz":
-			if r.Method != http.MethodGet {
-				t.Fatalf("gateway health method = %s, want GET", r.Method)
-			}
-			_, _ = w.Write([]byte("ok\n"))
-		case "/readyz":
-			_, _ = w.Write([]byte("ready\n"))
-		case "/api/v1/tunnels":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"tunnels":[{"tunnel_id":"tun_1"}]}`))
-		case "/api/v1/runtime":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"runtime":{"active_tunnels":1,"active_streams":2,"request_log_entries":3,"request_log_capacity":100,"uptime_seconds":60}}`))
-		case "/api/v1/request-logs":
-			if r.URL.Query().Get("limit") != "1" {
-				t.Fatalf("request logs limit = %q, want 1", r.URL.Query().Get("limit"))
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"request_logs":[{"request_id":"req_public"}]}`))
-		case "/metrics":
-			w.Header().Set("Content-Type", "text/plain")
-			_, _ = w.Write([]byte("# TYPE porthook_gateway_active_tunnels gauge\nporthook_gateway_active_tunnels 1\n"))
-		default:
-			t.Fatalf("unexpected gateway path %s", r.URL.Path)
-		}
-	}))
-	defer gateway.Close()
-
 	var gotEventsAuth string
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Request-ID", "req_control")
+		if strings.HasPrefix(r.URL.Path, "/api/v1/gateway/") {
+			assertBearer(t, r, "admin-secret")
+			w.Header().Set("X-Request-ID", "req_gateway")
+		} else {
+			w.Header().Set("X-Request-ID", "req_control")
+		}
 		switch r.URL.Path {
 		case "/healthz":
 			_, _ = w.Write([]byte("ok\n"))
@@ -65,6 +39,25 @@ func TestRunDoctorChecksGatewayAndControlPlane(t *testing.T) {
 			gotEventsAuth = r.Header.Get("Authorization")
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"events":[{"event":"control_plane.token_created"}]}`))
+		case "/api/v1/gateway/healthz":
+			_, _ = w.Write([]byte("ok\n"))
+		case "/api/v1/gateway/readyz":
+			_, _ = w.Write([]byte("ready\n"))
+		case "/api/v1/gateway/tunnels":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"tunnels":[{"tunnel_id":"tun_1"}]}`))
+		case "/api/v1/gateway/runtime":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"runtime":{"active_tunnels":1,"active_streams":2,"request_log_entries":3,"request_log_capacity":100,"uptime_seconds":60}}`))
+		case "/api/v1/gateway/request-logs":
+			if r.URL.Query().Get("limit") != "1" {
+				t.Fatalf("request logs limit = %q, want 1", r.URL.Query().Get("limit"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"request_logs":[{"request_id":"req_public"}]}`))
+		case "/api/v1/gateway/metrics":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("# TYPE porthook_gateway_active_tunnels gauge\nporthook_gateway_active_tunnels 1\n"))
 		default:
 			t.Fatalf("unexpected control-plane path %s", r.URL.Path)
 		}
@@ -76,7 +69,6 @@ func TestRunDoctorChecksGatewayAndControlPlane(t *testing.T) {
 	err := runWithIO(
 		[]string{
 			"doctor",
-			"--gateway", gateway.URL,
 			"--control-plane", controlPlane.URL,
 			"--admin-token-stdin",
 		},
@@ -100,35 +92,46 @@ func TestRunDoctorChecksGatewayAndControlPlane(t *testing.T) {
 }
 
 func TestRunDoctorJSONReportsReadinessFailure(t *testing.T) {
-	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Request-ID", "req_ready_failed")
+		if strings.HasPrefix(r.URL.Path, "/api/v1/gateway/") {
+			assertBearer(t, r, "admin-secret")
+		}
 		switch r.URL.Path {
-		case "/healthz":
+		case "/healthz", "/readyz":
 			_, _ = w.Write([]byte("ok\n"))
-		case "/readyz":
+		case "/api/v1/status":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ready","ready":true,"version":"test"}`))
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"events":[]}`))
+		case "/api/v1/gateway/healthz":
+			_, _ = w.Write([]byte("ok\n"))
+		case "/api/v1/gateway/readyz":
 			http.Error(w, "not ready: database unavailable", http.StatusServiceUnavailable)
-		case "/api/v1/tunnels":
+		case "/api/v1/gateway/tunnels":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"tunnels":[]}`))
-		case "/api/v1/runtime":
+		case "/api/v1/gateway/runtime":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"runtime":{"active_tunnels":0,"request_log_capacity":100}}`))
-		case "/api/v1/request-logs":
+		case "/api/v1/gateway/request-logs":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"request_logs":[]}`))
-		case "/metrics":
+		case "/api/v1/gateway/metrics":
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte(""))
 		default:
 			t.Fatalf("unexpected gateway path %s", r.URL.Path)
 		}
 	}))
-	defer gateway.Close()
+	defer controlPlane.Close()
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	err := runWithIO(
-		[]string{"doctor", "--gateway", gateway.URL, "--json"},
+		[]string{"doctor", "--control-plane", controlPlane.URL, "--admin-token", "admin-secret", "--json"},
 		strings.NewReader(""),
 		&stdout,
 		&stderr,
@@ -171,7 +174,7 @@ func TestRunDoctorRejectsAdminTokenFlagAndStdin(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	err := runWithIO(
-		[]string{"doctor", "--gateway", "http://127.0.0.1:8080", "--admin-token", "admin-flag", "--admin-token-stdin"},
+		[]string{"doctor", "--control-plane", "http://127.0.0.1:8082", "--admin-token", "admin-flag", "--admin-token-stdin"},
 		strings.NewReader("admin-stdin"),
 		&stdout,
 		&stderr,
@@ -181,5 +184,19 @@ func TestRunDoctorRejectsAdminTokenFlagAndStdin(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--admin-token and --admin-token-stdin are mutually exclusive") {
 		t.Fatalf("error = %q, want mutually exclusive guidance", err.Error())
+	}
+}
+
+func TestRunDoctorRequiresAdminToken(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runWithIO(
+		[]string{"doctor", "--control-plane", "http://127.0.0.1:8082"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+	)
+	if err == nil || !strings.Contains(err.Error(), "admin token is required") {
+		t.Fatalf("error = %v, want admin token guidance", err)
 	}
 }

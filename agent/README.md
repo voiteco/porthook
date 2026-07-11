@@ -58,7 +58,7 @@ CLI flags take precedence for the command they configure. Environment variables 
 | `PORTHOOK_SERVER_URL` | `http://localhost:8081` | Gateway agent listener URL. |
 | `PORTHOOK_TOKEN` | `dev-token` | Static agent authentication token. |
 | `PORTHOOK_CONFIG_PATH` | OS config dir | Optional path for the JSON login config file. |
-| `PORTHOOK_GATEWAY_URL` | `http://localhost:8080` | Default gateway public URL for `porthook doctor` and `porthook tunnels` commands. |
+| `PORTHOOK_GATEWAY_URL` | `http://localhost:8080` | Default gateway URL used by the operational export command during the operator API migration. |
 | `PORTHOOK_CONTROL_PLANE_URL` | empty | Default control-plane API URL for `porthook tokens`, `porthook reserved`, `porthook domains`, and `porthook access` commands. |
 | `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Default admin token for `porthook tokens`, `porthook reserved`, `porthook domains`, and `porthook access` commands. Prefer `--admin-token-stdin` for shell history safety. |
 | `PORTHOOK_HANDSHAKE_TIMEOUT` | `10s` | WebSocket dial, authentication, and tunnel registration timeout. |
