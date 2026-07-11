@@ -14,6 +14,7 @@ const (
 	defaultHandshakeTimeout      = 10 * time.Second
 	defaultRequestTimeout        = 30 * time.Second
 	defaultMaxResponseBodyBytes  = 1 << 20
+	defaultWSMessageMaxBytes     = 1 << 20
 	defaultStreamChunkBytes      = 32 << 10
 	defaultWebSocketWriteTimeout = 10 * time.Second
 	defaultWebSocketPingInterval = 15 * time.Second
@@ -33,6 +34,7 @@ type Config struct {
 	HandshakeTimeout      time.Duration
 	RequestTimeout        time.Duration
 	MaxResponseBodyBytes  int64
+	WSMessageMaxBytes     int64
 	StreamChunkBytes      int
 	WebSocketWriteTimeout time.Duration
 	WebSocketPingInterval time.Duration
@@ -49,6 +51,7 @@ func ConfigFromEnv() Config {
 		HandshakeTimeout:      envDuration("PORTHOOK_HANDSHAKE_TIMEOUT", defaultHandshakeTimeout),
 		RequestTimeout:        envDuration("PORTHOOK_REQUEST_TIMEOUT", defaultRequestTimeout),
 		MaxResponseBodyBytes:  envInt64("PORTHOOK_MAX_RESPONSE_BODY_BYTES", defaultMaxResponseBodyBytes),
+		WSMessageMaxBytes:     envInt64("PORTHOOK_WS_MESSAGE_MAX_BYTES", defaultWSMessageMaxBytes),
 		StreamChunkBytes:      envInt("PORTHOOK_STREAM_CHUNK_BYTES", defaultStreamChunkBytes),
 		WebSocketWriteTimeout: envDuration("PORTHOOK_WS_WRITE_TIMEOUT", defaultWebSocketWriteTimeout),
 		WebSocketPingInterval: envDuration("PORTHOOK_WS_PING_INTERVAL", defaultWebSocketPingInterval),
@@ -88,6 +91,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.MaxResponseBodyBytes <= 0 {
 		cfg.MaxResponseBodyBytes = defaultMaxResponseBodyBytes
+	}
+	if cfg.WSMessageMaxBytes <= 0 {
+		cfg.WSMessageMaxBytes = defaultWSMessageMaxBytes
 	}
 	if cfg.StreamChunkBytes <= 0 {
 		cfg.StreamChunkBytes = defaultStreamChunkBytes

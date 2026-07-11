@@ -140,6 +140,24 @@ func readLimitedResponseBody(body io.Reader, limit int64) ([]byte, error) {
 	return data, nil
 }
 
+func buildLocalWSURL(localTarget, requestPath, rawQuery string) (string, error) {
+	httpURL, err := buildLocalURL(localTarget, requestPath, rawQuery)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(httpURL)
+	if err != nil {
+		return "", fmt.Errorf("parse local websocket target: %w", err)
+	}
+	switch parsed.Scheme {
+	case "http":
+		parsed.Scheme = "ws"
+	case "https":
+		parsed.Scheme = "wss"
+	}
+	return parsed.String(), nil
+}
+
 func buildLocalURL(localTarget, requestPath, rawQuery string) (string, error) {
 	base, err := url.Parse(localTarget)
 	if err != nil {

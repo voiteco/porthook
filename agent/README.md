@@ -61,8 +61,9 @@ CLI flags take precedence for the command they configure. Environment variables 
 | `PORTHOOK_CONTROL_PLANE_URL` | empty | Default control-plane API URL for `porthook tokens`, `porthook reserved`, `porthook domains`, and `porthook access` commands. |
 | `PORTHOOK_CONTROL_ADMIN_TOKEN` | empty | Default admin token for `porthook tokens`, `porthook reserved`, `porthook domains`, and `porthook access` commands. Prefer `--admin-token-stdin` for shell history safety. |
 | `PORTHOOK_HANDSHAKE_TIMEOUT` | `10s` | WebSocket dial, authentication, and tunnel registration timeout. |
-| `PORTHOOK_REQUEST_TIMEOUT` | `30s` | Local service request timeout. |
+| `PORTHOOK_REQUEST_TIMEOUT` | `30s` | Local HTTP service request timeout, and local WebSocket dial timeout. |
 | `PORTHOOK_MAX_RESPONSE_BODY_BYTES` | `1048576` | Maximum local response body sent through the tunnel. |
+| `PORTHOOK_WS_MESSAGE_MAX_BYTES` | `1048576` | Maximum size of a single tunneled WebSocket message in either direction. |
 | `PORTHOOK_STREAM_CHUNK_BYTES` | `32768` | Maximum HTTP body chunk size for tunnel messages. |
 | `PORTHOOK_WS_WRITE_TIMEOUT` | `10s` | WebSocket message write timeout. |
 | `PORTHOOK_WS_PING_INTERVAL` | `15s` | WebSocket keepalive ping interval. |

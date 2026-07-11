@@ -1030,6 +1030,14 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deadline := newStreamDeadline(r.Context(), s.streamDeadlinePolicy())
+	defer deadline.Stop()
+
+	if isWebSocketUpgradeRequest(r) {
+		status, outcome, requestBytes, responseBytes, requestErr = s.handlePublicWebSocket(w, r, session, accessResult, streamID, deadline)
+		return
+	}
+
 	requestHeader := httpwire.StripHopByHopHeaders(r.Header)
 	if accessConsumesAuthorization(accessResult) {
 		requestHeader.Del("Authorization")
@@ -1055,8 +1063,6 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	deadline := newStreamDeadline(r.Context(), s.streamDeadlinePolicy())
-	defer deadline.Stop()
 	ctx := deadline.Context()
 
 	responseStarted := false

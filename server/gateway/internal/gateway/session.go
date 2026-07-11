@@ -484,7 +484,13 @@ func (s *agentSession) readLoop(ctx context.Context, logger *slog.Logger) {
 			messages.TypeHTTPResponseStart,
 			messages.TypeHTTPResponseBody,
 			messages.TypeHTTPResponseEnd,
-			messages.TypeHTTPStreamError:
+			messages.TypeHTTPStreamError,
+			messages.TypeWSAccept,
+			messages.TypeWSError,
+			messages.TypeWSMessageText,
+			messages.TypeWSMessageBinary,
+			messages.TypeWSClose,
+			messages.TypeWSCancel:
 			if !s.deliver(ctx, msg) {
 				logger.Warn("received response for unknown stream", "event", "gateway.unknown_stream_response", "tunnel_id", s.tunnel.TunnelID, "subdomain", s.tunnel.Subdomain, "stream_id", env.StreamID)
 			}

@@ -44,7 +44,8 @@ go run ./server/gateway/cmd/porthook-gateway
 | `PORTHOOK_CONTROL_PLANE_TIMEOUT` | `5s` | Timeout for control-plane token validation, reserved-subdomain authorization, custom domain lookup, and access policy evaluation requests. |
 | `PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL` | `30s` | Time to cache custom-domain lookup hits and misses. Set to `0s` to disable caching. |
 | `PORTHOOK_MAX_BODY_BYTES` | `1048576` | Maximum public request body forwarded through a tunnel. |
-| `PORTHOOK_MAX_CONCURRENT_STREAMS` | `64` | Maximum concurrent public requests per tunnel. |
+| `PORTHOOK_WS_MESSAGE_MAX_BYTES` | `1048576` | Maximum size of a single tunneled WebSocket message in either direction. |
+| `PORTHOOK_MAX_CONCURRENT_STREAMS` | `64` | Maximum concurrent public requests per tunnel, including open WebSocket tunnels. |
 | `PORTHOOK_RATE_LIMIT_RPS` | `60` | Maximum public requests per second per tunnel. |
 | `PORTHOOK_RATE_LIMIT_BURST` | `120` | Per-tunnel burst capacity before rate limiting returns `429`. |
 | `PORTHOOK_STREAM_CHUNK_BYTES` | `32768` | Maximum HTTP body chunk size for tunnel messages. |

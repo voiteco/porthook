@@ -19,6 +19,7 @@ import (
 
 	"github.com/voiteco/porthook/protocol/httpwire"
 	"github.com/voiteco/porthook/protocol/messages"
+	"github.com/voiteco/porthook/protocol/wsproxy"
 	"github.com/voiteco/porthook/protocol/wswire"
 )
 
@@ -38,10 +39,11 @@ type Runner struct {
 }
 
 type activeStream struct {
-	cancel   context.CancelFunc
-	chunks   chan requestBodyChunk
-	done     chan struct{}
-	doneOnce sync.Once
+	cancel    context.CancelFunc
+	chunks    chan requestBodyChunk
+	wsInbound chan wswire.Message
+	done      chan struct{}
+	doneOnce  sync.Once
 }
 
 type requestBodyChunk struct {
@@ -323,6 +325,26 @@ func (r *Runner) serve(ctx context.Context, conn *websocket.Conn, tunnelID strin
 			if r.cancelActiveStream(env.StreamID) {
 				r.logger.Info("stream canceled by gateway", "stream_id", env.StreamID, "reason", payload.Reason)
 			}
+		case messages.TypeWSOpen:
+			open, err := messages.DecodePayload[wsproxy.Open](env)
+			if err != nil {
+				r.logger.Warn("decode ws open failed", "stream_id", env.StreamID, "error", err)
+				continue
+			}
+			streamCtx, cancelStream := context.WithCancel(ctx)
+			stream := newActiveWSStream(cancelStream)
+			r.addActiveStream(env.StreamID, stream)
+			r.activeWG.Add(1)
+			go func(env messages.Envelope, open wsproxy.Open, stream *activeStream) {
+				defer r.activeWG.Done()
+				defer r.removeActiveStream(env.StreamID)
+				defer cancelStream()
+				r.handleWSStream(streamCtx, conn, tunnelID, env, open, stream.wsInbound)
+			}(env, open, stream)
+		case messages.TypeWSMessageText, messages.TypeWSMessageBinary, messages.TypeWSClose, messages.TypeWSCancel:
+			if err := r.deliverActiveStreamMessage(ctx, env.StreamID, msg); err != nil {
+				r.logger.Warn("deliver ws message failed", "stream_id", env.StreamID, "type", env.Type, "error", err)
+			}
 		case messages.TypePing:
 			pong, err := messages.New(messages.TypePong, nil)
 			if err != nil {
@@ -570,6 +592,14 @@ func newActiveStream(cancel context.CancelFunc, chunks chan requestBodyChunk) *a
 	}
 }
 
+func newActiveWSStream(cancel context.CancelFunc) *activeStream {
+	return &activeStream{
+		cancel:    cancel,
+		wsInbound: make(chan wswire.Message, wsStreamPendingBuffer),
+		done:      make(chan struct{}),
+	}
+}
+
 func (s *activeStream) closeDone() {
 	s.doneOnce.Do(func() {
 		close(s.done)
@@ -607,6 +637,24 @@ func (r *Runner) deliverActiveStreamChunk(ctx context.Context, streamID string, 
 
 	select {
 	case stream.chunks <- chunk:
+		return nil
+	case <-stream.done:
+		return fmt.Errorf("stream closed")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (r *Runner) deliverActiveStreamMessage(ctx context.Context, streamID string, msg wswire.Message) error {
+	r.activeMu.Lock()
+	stream, ok := r.activeStreams[streamID]
+	r.activeMu.Unlock()
+	if !ok || stream.wsInbound == nil {
+		return fmt.Errorf("unknown stream")
+	}
+
+	select {
+	case stream.wsInbound <- msg:
 		return nil
 	case <-stream.done:
 		return fmt.Errorf("stream closed")

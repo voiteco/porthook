@@ -102,6 +102,9 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	if cfg.MaxBodyBytes <= 0 {
 		addError("PORTHOOK_MAX_BODY_BYTES", "must be positive")
 	}
+	if cfg.WSMessageMaxBytes <= 0 {
+		addError("PORTHOOK_WS_MESSAGE_MAX_BYTES", "must be positive")
+	}
 	if cfg.MaxConcurrentStreams <= 0 {
 		addError("PORTHOOK_MAX_CONCURRENT_STREAMS", "must be positive")
 	}
