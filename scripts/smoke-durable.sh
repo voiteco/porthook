@@ -33,9 +33,15 @@ docker run -d --rm \
 	-p 127.0.0.1::5432 \
 	"${POSTGRES_IMAGE}" >/dev/null
 
+ready_checks=0
 for _ in $(seq 1 120); do
 	if docker exec "${POSTGRES_CONTAINER}" pg_isready -U porthook -d porthook >/dev/null 2>&1; then
-		break
+		ready_checks=$((ready_checks + 1))
+		if [[ "${ready_checks}" -ge 3 ]]; then
+			break
+		fi
+	else
+		ready_checks=0
 	fi
 	sleep 0.5
 done
