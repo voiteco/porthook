@@ -4,6 +4,16 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-07-12
+
+Feature freeze for the `1.0.0` line: from this release onward, only release blockers, compatibility fixes, tests, and documentation are accepted until `v1.0.0` ships (see the roadmap's Block 9).
+
+### Added
+- Added `docs/COMPATIBILITY.md`, publishing what `1.x` guarantees to keep working across the wire protocol, HTTP API, configuration, database schema, and CLI export format, and what's explicitly excluded from that guarantee.
+- Added `docs/RELEASE_REHEARSAL.md`, recording real production-shaped verification ahead of `v1.0.0`: clean installs from published images on both Linux `amd64` and `arm64` with a live tunnel round trip on each, upgrade rehearsals from both `v0.14.0` (built from source, exercising the `v0.15.1` management-listener isolation change) and `v0.17.0` through to current with all seeded data verified to survive, a backup/restore rehearsal on a genuinely fresh host using the documented `compose-backup` procedure, confirmation that no migration has changed since `v0.14.0` (so there is nothing yet to roll back), and a final security review against the threat model.
+- Added the post-`v1.0.0` supported-version, deprecation, migration, and security-fix release policies to `SECURITY.md`, replacing the stale pre-`1.0` table.
+- Added two concrete findings from Block 8's failure-injection work to `docs/THREAT_MODEL.md`'s abuse-cases table: the fail-closed behavior when access-policy evaluation can't reach the control plane, and the `auth_unavailable` reconnect fix.
+
 ## [0.18.0] - 2026-07-12
 
 ### Added
