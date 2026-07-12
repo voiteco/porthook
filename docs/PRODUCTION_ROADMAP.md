@@ -236,7 +236,7 @@ Tasks:
 - [x] Add a reproducible load harness and document reference hardware and network conditions.
 - [x] Verify an initial minimum profile of 100 active tunnels, 500 concurrent streams across tunnels, and 100 aggregate requests per second.
 - [x] Run sustained load for at least 30 minutes with no unexpected errors or unbounded resource growth.
-- [ ] Run a 72-hour soak covering HTTP, streaming, WebSocket, reconnects, and operational-history retention. (Tooling supports it and a representative shorter soak has been run; the literal 72-hour unattended run has not — see docs/RELIABILITY.md.)
+- [ ] Run a 72-hour soak covering HTTP, streaming, WebSocket, reconnects, and operational-history retention. (Deliberately deferred: GitHub Actions' 6-hour job cap rules out an unattended 72-hour run in CI. Accepted for now as a 33-minute representative soak plus a weekly 5-hour scheduled soak (`.github/workflows/soak.yml`); the literal 72-hour run remains an operator-executed procedure ahead of the `v1.0.0` release rehearsal in Block 9 — see docs/RELIABILITY.md.)
 - [x] Track and assert memory, goroutine, file-descriptor, WebSocket, database-connection, latency, and error-rate behavior.
 - [x] Exercise agent disconnects, gateway graceful shutdown, reverse-proxy restart, control-plane outage, Postgres restart, slow Postgres, and network interruption.
 - [x] Define and verify recovery bounds for each supported failure mode.
@@ -248,7 +248,7 @@ Tasks:
 
 Exit gate:
 
-- [ ] The reference load and 72-hour soak complete without leaks, deadlocks, data corruption, or unexplained errors. (The 30-minute reference load and a 45-minute representative soak have; the literal 72-hour soak has not been run — see docs/RELIABILITY.md.)
+- [ ] The reference load and 72-hour soak complete without leaks, deadlocks, data corruption, or unexplained errors. (The 30-minute reference load and a 33-minute representative soak have, with no leaks, deadlocks, corruption, or unexplained errors; the literal 72-hour soak is deliberately deferred — accepted for now per the task note above — see docs/RELIABILITY.md.)
 - [x] Failure recovery and supported capacity are measurable, documented, and repeatable.
 
 ## Block 9: Freeze, Rehearse, and Release v1

@@ -4,8 +4,10 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-12
+
 ### Added
-- Added reliability metrics — goroutine count, heap memory, database connection pool stats, and a public-request/request-duration latency histogram — exposed on both services' `/metrics` endpoints.
+- Added reliability metrics — goroutine count, heap memory, database connection pool stats, open file descriptors (Linux), and a public-request/request-duration latency histogram — exposed on both services' `/metrics` endpoints.
 - Added configurable database connection pool limits (`PORTHOOK_DB_MAX_OPEN_CONNS`, `PORTHOOK_DB_MAX_IDLE_CONNS`, `PORTHOOK_DB_CONN_MAX_LIFETIME`, `PORTHOOK_DB_CONN_MAX_IDLE_TIME`) to the gateway and control plane, and `PORTHOOK_SHUTDOWN_TIMEOUT` to the control plane, matching the gateway's existing setting.
 - Added a reproducible load-generation harness (`scripts/testdata/loadgen`, `make smoke-capacity`) and verified the minimum capacity profile — 100 active tunnels, 500 concurrent WebSocket streams, 100 aggregate requests/second — sustained for 30 minutes against a real Postgres-backed gateway with zero errors and no unbounded goroutine or heap growth.
 - Added a failure-injection test suite (`make smoke-failure-injection`) exercising agent disconnect, gateway graceful shutdown, reverse-proxy restart, control-plane outage, Postgres restart, slow Postgres, and network interruption against real processes, with measured recovery bounds documented in `docs/RELIABILITY.md`.
