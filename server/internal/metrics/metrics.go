@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"strconv"
 	"sync/atomic"
@@ -37,13 +38,27 @@ func writeSample(w io.Writer, name, help, metricType string, value uint64) {
 var DefaultLatencyBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}
 
 // WriteRuntimeStats writes goroutine and heap-memory gauges for the current
-// process, prefixed with prefix (for example "porthook_gateway").
+// process, prefixed with prefix (for example "porthook_gateway"). It also
+// writes an open-file-descriptor gauge when the count is available (Linux,
+// via /proc/self/fd; the supported v1 server deployment target), and
+// omits it otherwise rather than reporting a misleading value.
 func WriteRuntimeStats(w io.Writer, prefix string) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 	WriteGauge(w, prefix+"_goroutines", "Current number of goroutines.", uint64(runtime.NumGoroutine()))
 	WriteGauge(w, prefix+"_heap_alloc_bytes", "Bytes of allocated, reachable heap objects.", memStats.HeapAlloc)
 	WriteGauge(w, prefix+"_heap_sys_bytes", "Bytes of heap memory obtained from the OS.", memStats.HeapSys)
+	if fds, ok := openFileDescriptorCount(); ok {
+		WriteGauge(w, prefix+"_open_fds", "Current number of open file descriptors.", fds)
+	}
+}
+
+func openFileDescriptorCount() (uint64, bool) {
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return 0, false
+	}
+	return uint64(len(entries)), true
 }
 
 // WriteDBPoolStats writes database connection pool gauges/counters from

@@ -19,6 +19,7 @@ Both `/metrics` endpoints are hand-rolled Prometheus text-exposition format (no 
 - Point-in-time gauges for current state (active tunnels, token/reservation/policy/domain inventory counts, control-plane readiness).
 - `<prefix>_public_request_duration_seconds` (gateway) / `<prefix>_request_duration_seconds` (control plane): a fixed-bucket latency histogram (`porthook_gateway_public_request_duration_seconds` covers every public tunnel request; `porthook_control_plane_request_duration_seconds` covers every control-plane HTTP request, recorded by a wrapping middleware so no individual handler needs to instrument itself).
 - `<prefix>_goroutines`, `<prefix>_heap_alloc_bytes`, `<prefix>_heap_sys_bytes`: current goroutine count and heap memory from the Go runtime.
+- `<prefix>_open_fds`: current open file descriptor count, present only on Linux (via `/proc/self/fd`, the supported v1 server deployment target) and omitted elsewhere rather than reporting a misleading value.
 - `<prefix>_db_open_connections`, `<prefix>_db_in_use_connections`, `<prefix>_db_idle_connections`, `<prefix>_db_wait_count_total`: the Postgres connection pool's current state, present only when a database is configured (`PORTHOOK_REQUEST_LOG_DATABASE_URL` for the gateway, `PORTHOOK_DATABASE_URL` for the control plane). See [Reliability and Capacity](./RELIABILITY.md) for the pool-sizing environment variables and alert examples built on these metrics.
 
 ## Trace Coverage
