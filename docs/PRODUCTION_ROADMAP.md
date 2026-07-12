@@ -194,13 +194,13 @@ Tasks:
 - [x] Verify `X-Forwarded-*`, original host, request ID, and client-address behavior across the edge.
 - [x] Add configuration checks for inconsistent public URL, root domain, proxy, and certificate settings where they can be validated safely.
 - [x] Document certificate issuance, renewal, reload, expiry monitoring, and rollback without committing certificate material.
-- [ ] Run the TLS edge smoke in CI and the release workflow.
+- [x] Run the TLS edge smoke in CI and the release workflow.
 
 Exit gate:
 
-- [ ] The checked-in production deployment completes real HTTPS and secure WebSocket round trips.
-- [ ] Custom domains work through the documented proxy and operator-managed TLS flow.
-- [ ] Test certificates and private keys are generated ephemerally and never committed.
+- [x] The checked-in production deployment completes real HTTPS and secure WebSocket round trips.
+- [x] Custom domains work through the documented proxy and operator-managed TLS flow.
+- [x] Test certificates and private keys are generated ephemerally and never committed.
 
 ## Block 7: Publish Production-Shaped Distribution Artifacts
 
