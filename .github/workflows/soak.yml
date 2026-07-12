@@ -1,0 +1,106 @@
+name: Soak
+
+# Runs the expensive, long-duration reliability scenarios from
+# docs/PRODUCTION_ROADMAP.md Block 8 that are deliberately not part of
+# every CI run: a multi-hour capacity soak covering sustained HTTP/WebSocket
+# traffic, agent reconnect churn, and operational-history retention
+# pruning, plus a larger-scale backup/restore check. GitHub-hosted runners
+# hard-cap a single job at 6 hours, so this cannot run the full 72-hour
+# soak the roadmap describes; that is documented in docs/RELIABILITY.md as
+# an operator-executed procedure using the same scripts with a longer
+# PORTHOOK_SMOKE_DURATION. This workflow instead runs a bounded but
+# meaningfully long soak on a weekly schedule, plus on demand.
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Soak load duration (e.g. 30m, 5h)"
+        required: false
+        default: "5h"
+      tunnel_count:
+        description: "Number of active tunnels"
+        required: false
+        default: "100"
+      ws_streams:
+        description: "Concurrent WebSocket streams"
+        required: false
+        default: "500"
+      target_rps:
+        description: "Aggregate target requests/second"
+        required: false
+        default: "100"
+
+permissions:
+  contents: read
+
+jobs:
+  capacity-soak:
+    name: Capacity soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run representative soak
+        run: |
+          PORTHOOK_SMOKE_TUNNEL_COUNT="${{ github.event.inputs.tunnel_count || '100' }}" \
+          PORTHOOK_SMOKE_WS_STREAMS="${{ github.event.inputs.ws_streams || '500' }}" \
+          PORTHOOK_SMOKE_TARGET_RPS="${{ github.event.inputs.target_rps || '100' }}" \
+          PORTHOOK_SMOKE_DURATION="${{ github.event.inputs.duration || '5h' }}" \
+          PORTHOOK_SMOKE_REPORT_INTERVAL=60s \
+          PORTHOOK_SMOKE_RECONNECT_INTERVAL=90s \
+          PORTHOOK_SMOKE_REQUEST_LOG_RETENTION=30m \
+          PORTHOOK_SMOKE_REQUEST_LOG_PRUNE_INTERVAL=10m \
+          PORTHOOK_SMOKE_RETENTION_OLD_ROWS=50 \
+          PORTHOOK_SMOKE_DB_MAX_OPEN_CONNS=50 \
+            make smoke-capacity VERSION=soak-${{ github.run_id }} 2>&1 | tee soak-output.log
+
+      - name: Upload soak output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-soak-output
+          path: soak-output.log
+          retention-days: 30
+
+  backup-restore-soak:
+    name: Backup/restore soak (larger data volume)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run backup/restore check with a larger data volume
+        run: |
+          PORTHOOK_SMOKE_TOKEN_COUNT=25 \
+          PORTHOOK_SMOKE_REQUEST_LOG_TARGET=5000 \
+          PORTHOOK_SMOKE_RETENTION_OLD_ROWS=200 \
+          PORTHOOK_SMOKE_RETENTION_RECENT_ROWS=50 \
+            make smoke-backup-restore VERSION=soak-${{ github.run_id }} 2>&1 | tee backup-restore-soak-output.log
+
+      - name: Upload backup/restore soak output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-restore-soak-output
+          path: backup-restore-soak-output.log
+          retention-days: 30

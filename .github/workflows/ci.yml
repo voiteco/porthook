@@ -65,6 +65,15 @@ jobs:
       - name: Run TLS edge smoke test
         run: make smoke-tls-edge VERSION=ci-smoke
 
+      - name: Run capacity smoke test
+        run: make smoke-capacity VERSION=ci-smoke
+
+      - name: Run failure-injection smoke test
+        run: make smoke-failure-injection VERSION=ci-smoke
+
+      - name: Run backup/restore smoke test
+        run: make smoke-backup-restore VERSION=ci-smoke
+
       - name: Build release binaries
         run: make release-build VERSION=ci
 

@@ -1,0 +1,196 @@
+# Example Prometheus alerting rules for the gateway and control plane.
+#
+# These assume a scrape config with job labels `porthook-gateway` and
+# `porthook-control-plane` against each service's /metrics endpoint (see
+# docs/OBSERVABILITY.md). Thresholds are starting points, not guarantees —
+# tune them against your own traffic and the reference numbers in
+# docs/RELIABILITY.md before relying on them in production.
+groups:
+  - name: porthook-gateway
+    rules:
+      - alert: PorthookGatewayDown
+        expr: up{job="porthook-gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Gateway target down ({{ $labels.instance }})"
+          description: "Prometheus has not scraped porthook-gateway on {{ $labels.instance }} for 1 minute."
+
+      - alert: PorthookGatewayHighErrorRate
+        expr: |
+          (
+            rate(porthook_gateway_public_request_errors_total[5m])
+            /
+            clamp_min(rate(porthook_gateway_public_requests_total[5m]), 1e-9)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Gateway 5xx rate above 5% ({{ $labels.instance }})"
+          description: "More than 5% of public requests returned status >= 500 over the last 5 minutes."
+
+      - alert: PorthookGatewayHighLatencyP99
+        expr: |
+          histogram_quantile(0.99, sum(rate(porthook_gateway_public_request_duration_seconds_bucket[5m])) by (le, instance)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway public request p99 latency above 2s ({{ $labels.instance }})"
+          description: "p99 public request latency has been above 2 seconds for 5 minutes."
+
+      - alert: PorthookGatewayDBPoolWaiting
+        expr: increase(porthook_gateway_db_wait_count_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway is waiting on its database pool ({{ $labels.instance }})"
+          description: "Requests are blocking on PORTHOOK_DB_MAX_OPEN_CONNS. Raise the pool size or investigate slow queries; see docs/RELIABILITY.md."
+
+      - alert: PorthookGatewayGoroutineGrowth
+        expr: porthook_gateway_goroutines - (porthook_gateway_goroutines offset 1h) > 2000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway goroutine count grew by more than 2000 in an hour ({{ $labels.instance }})"
+          description: "Sustained goroutine growth can indicate a leaked connection, stream, or background loop."
+
+      - alert: PorthookGatewayHeapGrowth
+        expr: porthook_gateway_heap_alloc_bytes - (porthook_gateway_heap_alloc_bytes offset 1h) > 1e9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway heap grew by more than 1 GiB in an hour ({{ $labels.instance }})"
+          description: "Sustained heap growth without a matching traffic increase can indicate a memory leak."
+
+      # porthook_gateway_open_fds is only present on Linux (the supported
+      # server deployment target); tune the absolute threshold to your
+      # actual process ulimit (`ulimit -n` / container fd limit).
+      - alert: PorthookGatewayFileDescriptorsHigh
+        expr: porthook_gateway_open_fds > 8000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway open file descriptors above 8000 ({{ $labels.instance }})"
+          description: "Approaching the process's file-descriptor limit risks refused connections; check for a leaked connection or stream and consider raising the ulimit."
+
+      - alert: PorthookGatewayNoActiveTunnels
+        expr: porthook_gateway_active_tunnels == 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Gateway has zero active tunnels ({{ $labels.instance }})"
+          description: "Only meaningful for deployments that expect tunnels to be active continuously; adjust or remove otherwise."
+
+      - alert: PorthookGatewayTunnelChurn
+        expr: |
+          increase(porthook_gateway_tunnel_registrations_total[15m]) > (3 * porthook_gateway_active_tunnels + 10)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway tunnels are re-registering far more than expected ({{ $labels.instance }})"
+          description: "More than 3x the current active-tunnel count re-registered in 15 minutes, suggesting agents are reconnecting repeatedly (flaky network, crash-looping agent, or gateway instability)."
+
+      - alert: PorthookGatewayTunnelRegistrationFailures
+        expr: increase(porthook_gateway_tunnel_registration_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway tunnel registrations are failing after authentication ({{ $labels.instance }})"
+          description: "Agents are authenticating but failing to complete tunnel registration; check gateway logs for the failure reason."
+
+  - name: porthook-certificates
+    rules:
+      # Requires blackbox_exporter (https://github.com/prometheus/blackbox_exporter)
+      # configured to probe the public HTTPS endpoint(s) served by the reverse
+      # proxy (Caddy in the reference deployment). Porthook itself does not
+      # terminate TLS or manage certificates in the supported v1 deployment
+      # shape, so certificate expiry has to be observed at the edge.
+      - alert: PorthookCertificateExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry{job="blackbox-https"} - time() < 14 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS certificate for {{ $labels.instance }} expires within 14 days"
+          description: "The certificate served at {{ $labels.instance }} expires in less than 14 days. If using automatic TLS (Caddy/ACME), verify renewal is succeeding; otherwise renew manually."
+
+  - name: porthook-control-plane
+    rules:
+      - alert: PorthookControlPlaneDown
+        expr: up{job="porthook-control-plane"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Control plane target down ({{ $labels.instance }})"
+          description: "Prometheus has not scraped porthook-control-plane on {{ $labels.instance }} for 1 minute."
+
+      - alert: PorthookControlPlaneNotReady
+        expr: porthook_control_plane_ready == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Control plane reporting not ready ({{ $labels.instance }})"
+          description: "/metrics readiness gauge has been 0 for 2 minutes. Agents cannot validate tokens while this is true."
+
+      - alert: PorthookControlPlaneHighLatencyP99
+        expr: |
+          histogram_quantile(0.99, sum(rate(porthook_control_plane_request_duration_seconds_bucket[5m])) by (le, instance)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Control plane p99 request latency above 2s ({{ $labels.instance }})"
+          description: "p99 request latency across all control-plane endpoints has been above 2 seconds for 5 minutes."
+
+      - alert: PorthookControlPlaneTokenValidationErrors
+        expr: |
+          (
+            rate(porthook_control_plane_token_validation_errors_total[5m])
+            /
+            clamp_min(rate(porthook_control_plane_token_validations_total[5m]), 1e-9)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Control plane token validation error rate above 5% ({{ $labels.instance }})"
+          description: "Gateways call this path on every new agent connection; sustained errors here block new tunnels."
+
+      - alert: PorthookControlPlaneDBPoolWaiting
+        expr: increase(porthook_control_plane_db_wait_count_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Control plane is waiting on its database pool ({{ $labels.instance }})"
+          description: "Requests are blocking on PORTHOOK_DB_MAX_OPEN_CONNS. Raise the pool size or investigate slow queries; see docs/RELIABILITY.md."
+
+      - alert: PorthookControlPlaneAuthFailureSpike
+        expr: rate(porthook_control_plane_auth_failures_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Control plane authorization failures above 1/s ({{ $labels.instance }})"
+          description: "Sustained authorization failures can indicate credential stuffing or a misconfigured client; check request logs."
+
+      - alert: PorthookControlPlaneGoroutineGrowth
+        expr: porthook_control_plane_goroutines - (porthook_control_plane_goroutines offset 1h) > 2000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Control plane goroutine count grew by more than 2000 in an hour ({{ $labels.instance }})"
+          description: "Sustained goroutine growth can indicate a leaked connection or background loop."
