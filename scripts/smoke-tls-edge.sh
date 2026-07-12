@@ -233,6 +233,14 @@ pids+=("$!")
 wait_for_url "http://127.0.0.1:${MANAGEMENT_PORT}/healthz" "gateway"
 
 cat >"${CADDYFILE}" <<EOF
+# All hostnames below carry an explicit certificate already, so disable
+# Caddy's automatic HTTPS management. Without this, Caddy also starts an
+# HTTP->HTTPS redirect listener on :80, which needs a privileged port bind
+# unavailable to an unprivileged CI runner user.
+{
+	auto_https off
+}
+
 https://*.${ROOT_DOMAIN}:${CADDY_PORT} {
 	tls ${WILDCARD_CERT} ${WILDCARD_CERT%-cert.pem}-key.pem
 	reverse_proxy 127.0.0.1:${PUBLIC_PORT}
