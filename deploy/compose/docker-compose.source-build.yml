@@ -1,7 +1,7 @@
-# Production deployment bundle: pulls published porthook-gateway and
-# porthook-control-plane images from GHCR by tag or digest and does not
-# require a source checkout or local build. Contributors building from
-# source should use docker-compose.source-build.yml instead.
+# Contributor deployment bundle: builds porthook-gateway and
+# porthook-control-plane from this source checkout instead of pulling
+# published images. Same shape as docker-compose.production.yml otherwise;
+# operators deploying a release should use that file instead.
 services:
   postgres:
     image: postgres:16-alpine
@@ -19,7 +19,10 @@ services:
       retries: 12
 
   porthook-control-plane:
-    image: ${PORTHOOK_CONTROL_PLANE_IMAGE:?set PORTHOOK_CONTROL_PLANE_IMAGE, e.g. ghcr.io/voiteco/porthook-control-plane:v0.17.0 or a pinned @sha256 digest}
+    build:
+      context: ../..
+      dockerfile: server/control-plane/Dockerfile
+    image: ${PORTHOOK_CONTROL_PLANE_IMAGE:-porthook-control-plane:dev}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -53,7 +56,10 @@ services:
       start_period: 10s
 
   porthook-gateway:
-    image: ${PORTHOOK_GATEWAY_IMAGE:?set PORTHOOK_GATEWAY_IMAGE, e.g. ghcr.io/voiteco/porthook-gateway:v0.17.0 or a pinned @sha256 digest}
+    build:
+      context: ../..
+      dockerfile: server/gateway/Dockerfile
+    image: ${PORTHOOK_GATEWAY_IMAGE:-porthook-gateway:dev}
     restart: unless-stopped
     depends_on:
       porthook-control-plane:

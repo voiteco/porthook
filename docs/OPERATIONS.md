@@ -20,7 +20,7 @@ Use them together with:
    cp deploy/compose/.env.production.example deploy/compose/.env.production
    ```
 
-2. Replace every `change-me` value with generated values.
+2. Replace every `change-me` value with generated values, and set `PORTHOOK_GATEWAY_IMAGE`/`PORTHOOK_CONTROL_PLANE_IMAGE` to the published images to deploy (pin by version tag or, for stronger immutability, an `@sha256` digest; see [Upgrading](./UPGRADING.md)).
 
    Confirm `PORTHOOK_INTERNAL_SUBNET` does not overlap an existing host, VPN, or Docker network. The stack trusts only this private subnet to supply forwarded client headers.
 
@@ -46,13 +46,17 @@ Use them together with:
    make configcheck-production
    ```
 
-6. Start or update the stack:
+6. Pull the published images and start or update the stack:
 
    ```sh
    docker compose \
      --env-file deploy/compose/.env.production \
      -f deploy/compose/docker-compose.production.yml \
-     up --build -d
+     pull
+   docker compose \
+     --env-file deploy/compose/.env.production \
+     -f deploy/compose/docker-compose.production.yml \
+     up -d
    ```
 
 7. Check readiness:
@@ -372,7 +376,7 @@ Expect existing agents to reconnect if the gateway process restarts.
 
 1. Read [UPGRADING.md](./UPGRADING.md) and the changelog for the target version.
 2. Back up Postgres.
-3. Pull the target source or release assets.
+3. Update `PORTHOOK_GATEWAY_IMAGE`/`PORTHOOK_CONTROL_PLANE_IMAGE` in `.env.production` to the target version tag or digest; see [Upgrading](./UPGRADING.md) for pinning by immutable digest and verifying attestations before deploying.
 4. Validate locally:
 
    ```sh
@@ -383,13 +387,17 @@ Expect existing agents to reconnect if the gateway process restarts.
    make production-hardening-check
    ```
 
-5. Recreate the production stack:
+5. Pull the target images and recreate the production stack:
 
    ```sh
    docker compose \
      --env-file deploy/compose/.env.production \
      -f deploy/compose/docker-compose.production.yml \
-     up --build -d
+     pull
+   docker compose \
+     --env-file deploy/compose/.env.production \
+     -f deploy/compose/docker-compose.production.yml \
+     up -d
    ```
 
 6. Check:

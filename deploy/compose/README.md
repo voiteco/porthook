@@ -4,7 +4,8 @@ This directory contains the first self-hosted Docker Compose paths.
 
 - `docker-compose.yml` runs only `porthook-gateway` with static-token auth for the local MVP smoke path.
 - `docker-compose.control-plane.yml` runs Postgres, `porthook-control-plane`, and `porthook-gateway` with control-plane token validation.
-- `docker-compose.production.yml` runs Postgres, `porthook-control-plane`, `porthook-gateway`, and Caddy for TLS termination.
+- `docker-compose.production.yml` runs Postgres, `porthook-control-plane`, `porthook-gateway`, and Caddy for TLS termination, pulling published `porthook-gateway` and `porthook-control-plane` images from GHCR. This is the recommended deployment path and needs no source checkout or local build.
+- `docker-compose.source-build.yml` is the same production stack but builds `porthook-gateway` and `porthook-control-plane` from this source checkout instead of pulling images. Use it as a contributor when testing local changes.
 
 The local HTTP service and `porthook` agent still run on the host.
 
@@ -115,6 +116,8 @@ Configure these production values:
 
 | Environment variable | Purpose |
 | --- | --- |
+| `PORTHOOK_GATEWAY_IMAGE` | Published gateway image to deploy, pinned by version tag or `@sha256` digest, for example `ghcr.io/voiteco/porthook-gateway:v0.17.0`. Required, no default. |
+| `PORTHOOK_CONTROL_PLANE_IMAGE` | Published control-plane image to deploy, pinned the same way. Required, no default. |
 | `PORTHOOK_ROOT_DOMAIN` | Wildcard tunnel domain, for example `tunnels.example.com`. |
 | `PORTHOOK_INTERNAL_SUBNET` | Private Compose subnet trusted to supply proxy client headers. Change it when the default overlaps another network. |
 | `PORTHOOK_PUBLIC_URL` | Public URL printed for registered tunnels, for example `https://tunnels.example.com`. |
@@ -142,13 +145,17 @@ PORTHOOK_CADDYFILE_PATH=../reverse-proxy/caddy/Caddyfile.control-allowlist
 PORTHOOK_CONTROL_ALLOWED_IPS="203.0.113.0/24 2001:db8:1234::/48"
 ```
 
-Start the production stack:
+Pull the published images and start the production stack:
 
 ```sh
 docker compose \
   --env-file deploy/compose/.env.production \
   -f deploy/compose/docker-compose.production.yml \
-  up --build -d
+  pull
+docker compose \
+  --env-file deploy/compose/.env.production \
+  -f deploy/compose/docker-compose.production.yml \
+  up -d
 ```
 
 The stack listens externally on:
@@ -159,6 +166,17 @@ The stack listens externally on:
 
 The gateway, control plane, and Postgres are only reachable inside the Compose network. Caddy does not route the gateway management listener. The explicit `PORTHOOK_INTERNAL_SUBNET` is configured as `PORTHOOK_TRUSTED_PROXIES` for the gateway and control plane so only peers on that service network can supply client forwarding headers.
 The gateway and control-plane services expose container healthchecks, and the reverse proxy waits for both services to become healthy.
+
+Contributors testing local changes can use the same stack built from source instead:
+
+```sh
+docker compose \
+  --env-file deploy/compose/.env.production \
+  -f deploy/compose/docker-compose.source-build.yml \
+  up --build -d
+```
+
+See [../../docs/UPGRADING.md](../../docs/UPGRADING.md) for pinning by immutable digest and verifying published image and binary attestations.
 
 ## Dashboard
 
