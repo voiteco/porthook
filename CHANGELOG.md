@@ -4,6 +4,19 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+### Added
+- Added reliability metrics — goroutine count, heap memory, database connection pool stats, and a public-request/request-duration latency histogram — exposed on both services' `/metrics` endpoints.
+- Added configurable database connection pool limits (`PORTHOOK_DB_MAX_OPEN_CONNS`, `PORTHOOK_DB_MAX_IDLE_CONNS`, `PORTHOOK_DB_CONN_MAX_LIFETIME`, `PORTHOOK_DB_CONN_MAX_IDLE_TIME`) to the gateway and control plane, and `PORTHOOK_SHUTDOWN_TIMEOUT` to the control plane, matching the gateway's existing setting.
+- Added a reproducible load-generation harness (`scripts/testdata/loadgen`, `make smoke-capacity`) and verified the minimum capacity profile — 100 active tunnels, 500 concurrent WebSocket streams, 100 aggregate requests/second — sustained for 30 minutes against a real Postgres-backed gateway with zero errors and no unbounded goroutine or heap growth.
+- Added a failure-injection test suite (`make smoke-failure-injection`) exercising agent disconnect, gateway graceful shutdown, reverse-proxy restart, control-plane outage, Postgres restart, slow Postgres, and network interruption against real processes, with measured recovery bounds documented in `docs/RELIABILITY.md`.
+- Added an automated backup, restore, upgrade, rollback, and retention-pruning verification suite (`make smoke-backup-restore`) against a real Postgres database with a realistic volume of stored data, including a real upgrade/rollback check against the previous published release's binaries.
+- Added `deploy/prometheus/alerts.yml`, example Prometheus alerting rules for readiness, error rate, latency, database pool saturation, goroutine/heap growth, tunnel churn, and TLS certificate expiry.
+- Added `docs/RELIABILITY.md`, publishing measured single-node capacity, database pool sizing guidance, and documented failure-mode recovery bounds.
+- Added `.github/workflows/soak.yml`, a scheduled (and manually dispatchable) workflow running a multi-hour capacity soak with agent reconnect churn and operational-history retention pruning, plus a larger-scale backup/restore check.
+
+### Fixed
+- Fixed the agent treating a transient `auth_unavailable` error — the control plane being temporarily unreachable — the same as a permanent, non-retryable `invalid_token` error; the agent now retries `auth_unavailable` with the normal reconnect backoff instead of exiting.
+
 ## [0.17.0] - 2026-07-12
 
 ### Added

@@ -357,6 +357,8 @@ Operational runbooks for deployment, backups, token rotation, upgrades, rollback
 
 Metrics and OpenTelemetry tracing configuration are documented in [docs/OBSERVABILITY.md](./docs/OBSERVABILITY.md).
 
+Measured single-node capacity, database pool sizing guidance, and Prometheus alert examples live in [docs/RELIABILITY.md](./docs/RELIABILITY.md).
+
 ## Specification
 
 The public product specification lives in [docs/SPEC.md](./docs/SPEC.md).
