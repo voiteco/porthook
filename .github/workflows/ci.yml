@@ -87,3 +87,58 @@ jobs:
         run: |
           ./scripts/install.sh --version v0.16.0 --dir /tmp/porthook-install-test
           test "$(/tmp/porthook-install-test/porthook version)" = "v0.16.0"
+
+      - name: Upload release binaries for cross-platform install tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-ci
+          path: dist/
+          retention-days: 1
+
+  # These two jobs prove the binaries this run just cross-compiled actually
+  # start on real Linux arm64 and Windows hosts, install.sh/install.ps1's
+  # checksum verification works on each, and their PowerShell/POSIX shell
+  # syntax is valid, none of which the amd64-only `go` job can check.
+  install-linux-arm64:
+    name: Install script (Linux arm64)
+    needs: go
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Download release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-ci
+          path: dist
+
+      - name: Test the install script against the binaries this run built
+        run: |
+          ./scripts/install.sh --local-dir dist --version ci --dir /tmp/porthook-install-test
+          test "$(/tmp/porthook-install-test/porthook version)" = "ci"
+
+  install-windows:
+    name: Install script (Windows)
+    needs: go
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Download release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-ci
+          path: dist
+
+      - name: Test the install script against the binaries this run built
+        shell: pwsh
+        run: |
+          ./scripts/install.ps1 -LocalDir dist -Version ci -InstallDir C:\porthook-install-test
+          if ((& C:\porthook-install-test\porthook.exe version) -ne "ci") {
+            Write-Error "installed version mismatch"
+            exit 1
+          }

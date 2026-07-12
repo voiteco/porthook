@@ -9,10 +9,11 @@ REPO="voiteco/porthook"
 BINARY="porthook"
 VERSION="${PORTHOOK_INSTALL_VERSION:-latest}"
 INSTALL_DIR="${PORTHOOK_INSTALL_DIR:-/usr/local/bin}"
+LOCAL_DIR="${PORTHOOK_INSTALL_LOCAL_DIR:-}"
 
 usage() {
 	cat <<'EOF'
-Usage: install.sh [--version VERSION] [--dir DIR] [--binary NAME]
+Usage: install.sh [--version VERSION] [--dir DIR] [--binary NAME] [--local-dir DIR]
 
 Downloads a porthook release binary, verifies it against that release's
 SHA256SUMS manifest, and installs it. Refuses to install anything that
@@ -23,8 +24,13 @@ fails checksum verification.
                         $PORTHOOK_INSTALL_DIR)
   --binary NAME         porthook (default), porthook-gateway, or
                         porthook-control-plane
+  --local-dir DIR       Verify and install from a local directory (e.g. a
+                        `make release-build` dist/ output) instead of
+                        downloading from GitHub. Skips version resolution
+                        and attestation verification.
 
-Also configurable via PORTHOOK_INSTALL_VERSION and PORTHOOK_INSTALL_DIR.
+Also configurable via PORTHOOK_INSTALL_VERSION, PORTHOOK_INSTALL_DIR, and
+PORTHOOK_INSTALL_LOCAL_DIR.
 EOF
 }
 
@@ -40,6 +46,10 @@ while [ "$#" -gt 0 ]; do
 		;;
 	--binary)
 		BINARY="$2"
+		shift 2
+		;;
+	--local-dir)
+		LOCAL_DIR="$2"
 		shift 2
 		;;
 	-h | --help)
@@ -89,7 +99,7 @@ arm64 | aarch64) arch="arm64" ;;
 	;;
 esac
 
-if [ "${VERSION}" = "latest" ]; then
+if [ -z "${LOCAL_DIR}" ] && [ "${VERSION}" = "latest" ]; then
 	# grep must not use -m1/-q here: an early-exiting reader closes the pipe
 	# while curl is still writing, curl reports that as a failure, and
 	# pipefail then trips set -e even though the value was captured fine.
@@ -103,14 +113,20 @@ if [ "${VERSION}" = "latest" ]; then
 fi
 
 asset="${BINARY}_${os}_${arch}"
-base_url="https://github.com/${REPO}/releases/download/${VERSION}"
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
-echo "install.sh: downloading ${asset} ${VERSION}"
-curl -fsSL -o "${tmp_dir}/${asset}" "${base_url}/${asset}"
-curl -fsSL -o "${tmp_dir}/SHA256SUMS" "${base_url}/SHA256SUMS"
+if [ -n "${LOCAL_DIR}" ]; then
+	echo "install.sh: using local build at ${LOCAL_DIR}"
+	cp "${LOCAL_DIR}/${asset}" "${tmp_dir}/${asset}"
+	cp "${LOCAL_DIR}/SHA256SUMS" "${tmp_dir}/SHA256SUMS"
+else
+	base_url="https://github.com/${REPO}/releases/download/${VERSION}"
+	echo "install.sh: downloading ${asset} ${VERSION}"
+	curl -fsSL -o "${tmp_dir}/${asset}" "${base_url}/${asset}"
+	curl -fsSL -o "${tmp_dir}/SHA256SUMS" "${base_url}/SHA256SUMS"
+fi
 
 echo "install.sh: verifying checksum"
 (
@@ -132,7 +148,7 @@ echo "install.sh: verifying checksum"
 
 chmod +x "${tmp_dir}/${asset}"
 
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+if [ -z "${LOCAL_DIR}" ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
 	echo "install.sh: verifying build provenance attestation"
 	if gh attestation verify "${tmp_dir}/${asset}" --repo "${REPO}" >/dev/null 2>&1; then
 		echo "install.sh: build provenance attestation verified"

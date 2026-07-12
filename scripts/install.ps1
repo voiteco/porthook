@@ -12,10 +12,16 @@ Release to install, e.g. v0.17.0 (default: latest).
 
 .PARAMETER InstallDir
 Install directory (default: $env:LOCALAPPDATA\porthook\bin).
+
+.PARAMETER LocalDir
+Verify and install from a local directory (e.g. a `make release-build`
+dist/ output) instead of downloading from GitHub. Skips version resolution
+and attestation verification.
 #>
 param(
     [string]$Version = "latest",
-    [string]$InstallDir = "$env:LOCALAPPDATA\porthook\bin"
+    [string]$InstallDir = "$env:LOCALAPPDATA\porthook\bin",
+    [string]$LocalDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,7 +37,7 @@ switch ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture
     }
 }
 
-if ($Version -eq "latest") {
+if (-not $LocalDir -and $Version -eq "latest") {
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
     $Version = $release.tag_name
     if (-not $Version) {
@@ -41,17 +47,24 @@ if ($Version -eq "latest") {
 }
 
 $asset = "${Binary}_windows_${arch}.exe"
-$baseUrl = "https://github.com/$repo/releases/download/$Version"
 
 $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmpDir | Out-Null
 
 try {
-    Write-Host "install.ps1: downloading $asset $Version"
     $assetPath = Join-Path $tmpDir $asset
     $sumsPath = Join-Path $tmpDir "SHA256SUMS"
-    Invoke-WebRequest -Uri "$baseUrl/$asset" -OutFile $assetPath
-    Invoke-WebRequest -Uri "$baseUrl/SHA256SUMS" -OutFile $sumsPath
+
+    if ($LocalDir) {
+        Write-Host "install.ps1: using local build at $LocalDir"
+        Copy-Item -Path (Join-Path $LocalDir $asset) -Destination $assetPath
+        Copy-Item -Path (Join-Path $LocalDir "SHA256SUMS") -Destination $sumsPath
+    } else {
+        Write-Host "install.ps1: downloading $asset $Version"
+        $baseUrl = "https://github.com/$repo/releases/download/$Version"
+        Invoke-WebRequest -Uri "$baseUrl/$asset" -OutFile $assetPath
+        Invoke-WebRequest -Uri "$baseUrl/SHA256SUMS" -OutFile $sumsPath
+    }
 
     Write-Host "install.ps1: verifying checksum"
     $expectedLine = Select-String -Path $sumsPath -Pattern "  $asset$|  \*$asset$" | Select-Object -First 1
@@ -66,7 +79,7 @@ try {
         exit 1
     }
 
-    if (Get-Command gh -ErrorAction SilentlyContinue) {
+    if (-not $LocalDir -and (Get-Command gh -ErrorAction SilentlyContinue)) {
         if (gh auth status 2>$null) {
             Write-Host "install.ps1: verifying build provenance attestation"
             $verified = gh attestation verify $assetPath --repo $repo 2>$null
