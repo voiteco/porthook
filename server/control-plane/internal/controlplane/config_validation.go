@@ -121,6 +121,24 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 			addError("PORTHOOK_DNS_RESOLVER_ADDR", err.Error())
 		}
 	}
+	if cfg.ShutdownTimeout <= 0 {
+		addError("PORTHOOK_SHUTDOWN_TIMEOUT", "must be positive")
+	}
+	if cfg.DBMaxOpenConns <= 0 {
+		addError("PORTHOOK_DB_MAX_OPEN_CONNS", "must be positive")
+	}
+	if cfg.DBMaxIdleConns < 0 {
+		addError("PORTHOOK_DB_MAX_IDLE_CONNS", "must not be negative")
+	}
+	if cfg.DBMaxOpenConns > 0 && cfg.DBMaxIdleConns > cfg.DBMaxOpenConns {
+		addWarning("PORTHOOK_DB_MAX_IDLE_CONNS", "exceeds PORTHOOK_DB_MAX_OPEN_CONNS; database/sql will reduce it to match, so the configured value has no effect")
+	}
+	if cfg.DBConnMaxLifetime < 0 {
+		addError("PORTHOOK_DB_CONN_MAX_LIFETIME", "must not be negative")
+	}
+	if cfg.DBConnMaxIdleTime < 0 {
+		addError("PORTHOOK_DB_CONN_MAX_IDLE_TIME", "must not be negative")
+	}
 
 	return report
 }

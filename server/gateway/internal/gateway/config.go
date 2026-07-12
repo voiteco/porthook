@@ -42,6 +42,10 @@ const (
 	defaultRequestLogWriteTimeout  = 1 * time.Second
 	defaultRequestLogRetention     = 30 * 24 * time.Hour
 	defaultRequestLogPruneInterval = time.Hour
+	defaultDBMaxOpenConns          = 20
+	defaultDBMaxIdleConns          = 5
+	defaultDBConnMaxLifetime       = 30 * time.Minute
+	defaultDBConnMaxIdleTime       = 5 * time.Minute
 )
 
 type Config struct {
@@ -83,6 +87,10 @@ type Config struct {
 	RequestLogWriteTimeout     time.Duration
 	RequestLogRetention        time.Duration
 	RequestLogPruneInterval    time.Duration
+	DBMaxOpenConns             int
+	DBMaxIdleConns             int
+	DBConnMaxLifetime          time.Duration
+	DBConnMaxIdleTime          time.Duration
 }
 
 func ConfigFromEnv() Config {
@@ -125,6 +133,10 @@ func ConfigFromEnv() Config {
 		RequestLogWriteTimeout:     envDuration("PORTHOOK_REQUEST_LOG_WRITE_TIMEOUT", defaultRequestLogWriteTimeout),
 		RequestLogRetention:        envDuration("PORTHOOK_REQUEST_LOG_RETENTION", defaultRequestLogRetention),
 		RequestLogPruneInterval:    envDuration("PORTHOOK_REQUEST_LOG_PRUNE_INTERVAL", defaultRequestLogPruneInterval),
+		DBMaxOpenConns:             envInt("PORTHOOK_DB_MAX_OPEN_CONNS", defaultDBMaxOpenConns),
+		DBMaxIdleConns:             envInt("PORTHOOK_DB_MAX_IDLE_CONNS", defaultDBMaxIdleConns),
+		DBConnMaxLifetime:          envDuration("PORTHOOK_DB_CONN_MAX_LIFETIME", defaultDBConnMaxLifetime),
+		DBConnMaxIdleTime:          envDuration("PORTHOOK_DB_CONN_MAX_IDLE_TIME", defaultDBConnMaxIdleTime),
 	})
 }
 
@@ -231,6 +243,18 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.RequestLogPruneInterval < 0 {
 		cfg.RequestLogPruneInterval = defaultRequestLogPruneInterval
+	}
+	if cfg.DBMaxOpenConns <= 0 {
+		cfg.DBMaxOpenConns = defaultDBMaxOpenConns
+	}
+	if cfg.DBMaxIdleConns < 0 {
+		cfg.DBMaxIdleConns = defaultDBMaxIdleConns
+	}
+	if cfg.DBConnMaxLifetime < 0 {
+		cfg.DBConnMaxLifetime = defaultDBConnMaxLifetime
+	}
+	if cfg.DBConnMaxIdleTime < 0 {
+		cfg.DBConnMaxIdleTime = defaultDBConnMaxIdleTime
 	}
 	return cfg
 }

@@ -181,6 +181,21 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	if opts.Production && strings.TrimSpace(cfg.RequestLogDatabaseURL) == "" {
 		addWarning("PORTHOOK_REQUEST_LOG_DATABASE_URL", "is not configured; gateway request logs will be in-memory only")
 	}
+	if cfg.DBMaxOpenConns <= 0 {
+		addError("PORTHOOK_DB_MAX_OPEN_CONNS", "must be positive")
+	}
+	if cfg.DBMaxIdleConns < 0 {
+		addError("PORTHOOK_DB_MAX_IDLE_CONNS", "must not be negative")
+	}
+	if cfg.DBMaxOpenConns > 0 && cfg.DBMaxIdleConns > cfg.DBMaxOpenConns {
+		addWarning("PORTHOOK_DB_MAX_IDLE_CONNS", "exceeds PORTHOOK_DB_MAX_OPEN_CONNS; database/sql will reduce it to match, so the configured value has no effect")
+	}
+	if cfg.DBConnMaxLifetime < 0 {
+		addError("PORTHOOK_DB_CONN_MAX_LIFETIME", "must not be negative")
+	}
+	if cfg.DBConnMaxIdleTime < 0 {
+		addError("PORTHOOK_DB_CONN_MAX_IDLE_TIME", "must not be negative")
+	}
 
 	return report
 }

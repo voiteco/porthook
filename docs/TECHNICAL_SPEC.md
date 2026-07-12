@@ -626,7 +626,13 @@ PORTHOOK_SHUTDOWN_TIMEOUT=5s
 PORTHOOK_REQUEST_LOG_DATABASE_URL=postgres://...
 PORTHOOK_REQUEST_LOG_RETENTION=720h
 PORTHOOK_REQUEST_LOG_PRUNE_INTERVAL=1h
+PORTHOOK_DB_MAX_OPEN_CONNS=20
+PORTHOOK_DB_MAX_IDLE_CONNS=5
+PORTHOOK_DB_CONN_MAX_LIFETIME=30m
+PORTHOOK_DB_CONN_MAX_IDLE_TIME=5m
 ```
+
+`PORTHOOK_DB_MAX_OPEN_CONNS`, `PORTHOOK_DB_MAX_IDLE_CONNS`, `PORTHOOK_DB_CONN_MAX_LIFETIME`, and `PORTHOOK_DB_CONN_MAX_IDLE_TIME` bound the request-log Postgres connection pool (`database/sql` defaults to unlimited open connections otherwise). The gateway and control plane each open their own pool against the same database, so size both with the deployment's `max_connections` in mind.
 
 Agent environment variables:
 
@@ -675,12 +681,26 @@ PORTHOOK_DATABASE_URL=postgres://...
 PORTHOOK_AUDIT_EVENT_RETENTION=2160h
 PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL=1h
 PORTHOOK_DNS_RESOLVER_ADDR=
+PORTHOOK_SHUTDOWN_TIMEOUT=5s
+PORTHOOK_DB_MAX_OPEN_CONNS=20
+PORTHOOK_DB_MAX_IDLE_CONNS=5
+PORTHOOK_DB_CONN_MAX_LIFETIME=30m
+PORTHOOK_DB_CONN_MAX_IDLE_TIME=5m
 ```
 
 `PORTHOOK_DNS_RESOLVER_ADDR` optionally points custom-domain TXT verification
 lookups at a specific `host:port` DNS server instead of the system resolver.
 Useful for split-horizon DNS, a private authoritative zone, or local testing.
 Empty uses the system resolver.
+
+`PORTHOOK_SHUTDOWN_TIMEOUT` bounds how long the control plane waits for
+in-flight requests to finish on `SIGINT`/`SIGTERM` before forcing shutdown,
+matching the gateway's setting of the same name.
+
+`PORTHOOK_DB_MAX_OPEN_CONNS`, `PORTHOOK_DB_MAX_IDLE_CONNS`,
+`PORTHOOK_DB_CONN_MAX_LIFETIME`, and `PORTHOOK_DB_CONN_MAX_IDLE_TIME` bound
+the control plane's Postgres connection pool, same as the gateway's request-log
+pool above.
 
 Duration values use Go duration syntax such as `500ms`, `10s`, `1m`, or `720h`. Request-log and audit-event pruning can be disabled by setting the matching retention or prune interval to `0s`.
 

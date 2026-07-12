@@ -124,6 +124,10 @@ func openRequestLogStore(ctx context.Context, cfg gateway.Config) (*gateway.Post
 	if err != nil {
 		return nil, nil, fmt.Errorf("open request log database: %w", err)
 	}
+	db.SetMaxOpenConns(cfg.DBMaxOpenConns)
+	db.SetMaxIdleConns(cfg.DBMaxIdleConns)
+	db.SetConnMaxLifetime(cfg.DBConnMaxLifetime)
+	db.SetConnMaxIdleTime(cfg.DBConnMaxIdleTime)
 	store, err := gateway.NewPostgresRequestLogStore(db)
 	if err != nil {
 		_ = db.Close()

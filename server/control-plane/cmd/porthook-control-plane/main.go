@@ -136,6 +136,10 @@ func stores(ctx context.Context, cfg controlplane.Config) (tokens.Store, adminto
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, fmt.Errorf("open database: %w", err)
 	}
+	db.SetMaxOpenConns(cfg.DBMaxOpenConns)
+	db.SetMaxIdleConns(cfg.DBMaxIdleConns)
+	db.SetConnMaxLifetime(cfg.DBConnMaxLifetime)
+	db.SetConnMaxIdleTime(cfg.DBConnMaxIdleTime)
 	tokenStore, err := tokens.NewPostgresStore(db)
 	if err != nil {
 		_ = db.Close()

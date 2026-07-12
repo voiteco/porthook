@@ -2,7 +2,10 @@
 
 package gateway
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestConfigFromEnvSupportsManagementAddr(t *testing.T) {
 	t.Setenv("PORTHOOK_MANAGEMENT_ADDR", "127.0.0.1:19082")
@@ -102,4 +105,61 @@ func TestValidateConfigDoesNotWarnWhenPublicURLHostMatchesRootDomain(t *testing.
 			t.Fatalf("warnings = %+v, want no PORTHOOK_PUBLIC_URL warning", report.Warnings)
 		}
 	}
+}
+
+func TestConfigFromEnvSupportsDBPoolLimits(t *testing.T) {
+	t.Setenv("PORTHOOK_DB_MAX_OPEN_CONNS", "10")
+	t.Setenv("PORTHOOK_DB_MAX_IDLE_CONNS", "3")
+	t.Setenv("PORTHOOK_DB_CONN_MAX_LIFETIME", "15m")
+	t.Setenv("PORTHOOK_DB_CONN_MAX_IDLE_TIME", "2m")
+
+	cfg := ConfigFromEnv()
+	if cfg.DBMaxOpenConns != 10 {
+		t.Fatalf("DBMaxOpenConns = %d, want 10", cfg.DBMaxOpenConns)
+	}
+	if cfg.DBMaxIdleConns != 3 {
+		t.Fatalf("DBMaxIdleConns = %d, want 3", cfg.DBMaxIdleConns)
+	}
+	if cfg.DBConnMaxLifetime != 15*time.Minute {
+		t.Fatalf("DBConnMaxLifetime = %s, want 15m", cfg.DBConnMaxLifetime)
+	}
+	if cfg.DBConnMaxIdleTime != 2*time.Minute {
+		t.Fatalf("DBConnMaxIdleTime = %s, want 2m", cfg.DBConnMaxIdleTime)
+	}
+}
+
+func TestConfigFromEnvDefaultsDBPoolLimits(t *testing.T) {
+	cfg := ConfigFromEnv()
+	if cfg.DBMaxOpenConns != defaultDBMaxOpenConns {
+		t.Fatalf("DBMaxOpenConns = %d, want default %d", cfg.DBMaxOpenConns, defaultDBMaxOpenConns)
+	}
+	if cfg.DBMaxIdleConns != defaultDBMaxIdleConns {
+		t.Fatalf("DBMaxIdleConns = %d, want default %d", cfg.DBMaxIdleConns, defaultDBMaxIdleConns)
+	}
+}
+
+func TestValidateConfigDefaultsZeroDBMaxOpenConnsInsteadOfErroring(t *testing.T) {
+	cfg := testConfig()
+	cfg.DBMaxOpenConns = 0
+
+	report := ValidateConfig(cfg, ConfigValidationOptions{})
+	for _, issue := range report.Errors {
+		if issue.Field == "PORTHOOK_DB_MAX_OPEN_CONNS" {
+			t.Fatalf("normalizeConfig should have defaulted DBMaxOpenConns before validation ran; unexpected error: %+v", issue)
+		}
+	}
+}
+
+func TestValidateConfigWarnsWhenDBMaxIdleConnsExceedsMaxOpenConns(t *testing.T) {
+	cfg := testConfig()
+	cfg.DBMaxOpenConns = 5
+	cfg.DBMaxIdleConns = 50
+
+	report := ValidateConfig(cfg, ConfigValidationOptions{})
+	for _, issue := range report.Warnings {
+		if issue.Field == "PORTHOOK_DB_MAX_IDLE_CONNS" {
+			return
+		}
+	}
+	t.Fatalf("warnings = %+v, want PORTHOOK_DB_MAX_IDLE_CONNS warning", report.Warnings)
 }

@@ -4,6 +4,7 @@ package controlplane
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -12,6 +13,11 @@ const (
 	defaultGatewayManagementTimeout = 5 * time.Second
 	defaultAuditEventRetention      = 90 * 24 * time.Hour
 	defaultAuditEventPruneInterval  = time.Hour
+	defaultShutdownTimeout          = 5 * time.Second
+	defaultDBMaxOpenConns           = 20
+	defaultDBMaxIdleConns           = 5
+	defaultDBConnMaxLifetime        = 30 * time.Minute
+	defaultDBConnMaxIdleTime        = 5 * time.Minute
 )
 
 type Config struct {
@@ -30,7 +36,12 @@ type Config struct {
 	// lookups at a specific "host:port" DNS server instead of the system
 	// resolver. Useful for split-horizon DNS, a private authoritative
 	// zone, or local testing. Empty uses the system resolver.
-	DNSResolverAddr string
+	DNSResolverAddr   string
+	ShutdownTimeout   time.Duration
+	DBMaxOpenConns    int
+	DBMaxIdleConns    int
+	DBConnMaxLifetime time.Duration
+	DBConnMaxIdleTime time.Duration
 }
 
 func ConfigFromEnv() Config {
@@ -46,9 +57,29 @@ func ConfigFromEnv() Config {
 		AuditEventRetention:      envDuration("PORTHOOK_AUDIT_EVENT_RETENTION", defaultAuditEventRetention),
 		AuditEventPruneInterval:  envDuration("PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL", defaultAuditEventPruneInterval),
 		DNSResolverAddr:          os.Getenv("PORTHOOK_DNS_RESOLVER_ADDR"),
+		ShutdownTimeout:          envDuration("PORTHOOK_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
+		DBMaxOpenConns:           envInt("PORTHOOK_DB_MAX_OPEN_CONNS", defaultDBMaxOpenConns),
+		DBMaxIdleConns:           envInt("PORTHOOK_DB_MAX_IDLE_CONNS", defaultDBMaxIdleConns),
+		DBConnMaxLifetime:        envDuration("PORTHOOK_DB_CONN_MAX_LIFETIME", defaultDBConnMaxLifetime),
+		DBConnMaxIdleTime:        envDuration("PORTHOOK_DB_CONN_MAX_IDLE_TIME", defaultDBConnMaxIdleTime),
 	}
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
+	}
+	if cfg.ShutdownTimeout <= 0 {
+		cfg.ShutdownTimeout = defaultShutdownTimeout
+	}
+	if cfg.DBMaxOpenConns <= 0 {
+		cfg.DBMaxOpenConns = defaultDBMaxOpenConns
+	}
+	if cfg.DBMaxIdleConns < 0 {
+		cfg.DBMaxIdleConns = defaultDBMaxIdleConns
+	}
+	if cfg.DBConnMaxLifetime < 0 {
+		cfg.DBConnMaxLifetime = defaultDBConnMaxLifetime
+	}
+	if cfg.DBConnMaxIdleTime < 0 {
+		cfg.DBConnMaxIdleTime = defaultDBConnMaxIdleTime
 	}
 	return cfg
 }
@@ -59,6 +90,18 @@ func envString(name, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func envInt(name string, fallback int) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func envDuration(name string, fallback time.Duration) time.Duration {
