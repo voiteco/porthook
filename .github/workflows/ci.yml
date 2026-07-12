@@ -82,3 +82,8 @@ jobs:
 
       - name: Build Docker images
         run: make docker-build VERSION=ci
+
+      - name: Test the install script against a real published release
+        run: |
+          ./scripts/install.sh --version v0.16.0 --dir /tmp/porthook-install-test
+          test "$(/tmp/porthook-install-test/porthook version)" = "v0.16.0"
