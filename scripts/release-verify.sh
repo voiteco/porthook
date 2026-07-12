@@ -10,6 +10,8 @@ expected_binaries=(
 	"porthook_linux_arm64"
 	"porthook_darwin_amd64"
 	"porthook_darwin_arm64"
+	"porthook_windows_amd64.exe"
+	"porthook_windows_arm64.exe"
 	"porthook-gateway_linux_amd64"
 	"porthook-gateway_linux_arm64"
 	"porthook-gateway_darwin_amd64"
@@ -18,6 +20,13 @@ expected_binaries=(
 	"porthook-control-plane_linux_arm64"
 	"porthook-control-plane_darwin_amd64"
 	"porthook-control-plane_darwin_arm64"
+)
+
+# Non-executable assets shipped alongside the binaries: checked for presence
+# and included in the checksum manifest, but not for the executable bit.
+expected_files=(
+	"LICENSE-agent-Apache-2.0.txt"
+	"LICENSE-server-AGPL-3.0.txt"
 )
 
 fail() {
@@ -43,6 +52,17 @@ for binary in "${expected_binaries[@]}"; do
 		fail "binary is not executable: ${binary}"
 	fi
 	printf '%s\n' "${binary}" >>"${tmp_expected}"
+done
+
+for file in "${expected_files[@]}"; do
+	path="${DIST_DIR}/${file}"
+	if [[ ! -f "${path}" ]]; then
+		fail "missing file ${file}"
+	fi
+	if [[ ! -s "${path}" ]]; then
+		fail "file is empty: ${file}"
+	fi
+	printf '%s\n' "${file}" >>"${tmp_expected}"
 done
 
 find "${DIST_DIR}" -maxdepth 1 -type f -print | while IFS= read -r path; do

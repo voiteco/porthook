@@ -22,7 +22,20 @@ RUN target_os="${TARGETOS:-linux}"; \
 
 FROM scratch
 
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG BUILD_DATE
+
+LABEL org.opencontainers.image.title="Porthook Control Plane" \
+      org.opencontainers.image.description="Self-hosted token, reservation, access-policy, and custom-domain control plane for Porthook." \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.revision="$REVISION" \
+      org.opencontainers.image.created="$BUILD_DATE" \
+      org.opencontainers.image.source="https://github.com/voiteco/porthook" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
+
 COPY --from=build /out/porthook-control-plane /porthook-control-plane
+COPY LICENSES/AGPL-3.0.txt /LICENSE
 
 USER 65532:65532
 

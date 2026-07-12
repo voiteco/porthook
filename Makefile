@@ -2,8 +2,11 @@ GO ?= go
 BIN_DIR ?= bin
 DIST_DIR ?= dist
 VERSION ?= dev
+GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS ?= -s -w -X main.version=$(VERSION)
 RELEASE_TARGETS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+RELEASE_CLI_ONLY_TARGETS ?= windows/amd64 windows/arm64
 COMPOSE ?= docker compose
 CONTROL_COMPOSE_FILE ?= deploy/compose/docker-compose.control-plane.yml
 CONTROL_COMPOSE_ENV ?= deploy/compose/.env.control-plane
@@ -24,10 +27,18 @@ clean:
 	rm -rf $(BIN_DIR) $(DIST_DIR)
 
 docker-build-gateway:
-	docker build --build-arg VERSION=$(VERSION) -f server/gateway/Dockerfile -t porthook-gateway:dev .
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg REVISION=$(GIT_COMMIT) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		-f server/gateway/Dockerfile -t porthook-gateway:dev .
 
 docker-build-control-plane:
-	docker build --build-arg VERSION=$(VERSION) -f server/control-plane/Dockerfile -t porthook-control-plane:dev .
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg REVISION=$(GIT_COMMIT) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		-f server/control-plane/Dockerfile -t porthook-control-plane:dev .
 
 docker-build: docker-build-gateway docker-build-control-plane
 
@@ -35,6 +46,7 @@ compose-config:
 	$(COMPOSE) -f deploy/compose/docker-compose.yml config
 	$(COMPOSE) --env-file deploy/compose/.env.control-plane.example -f deploy/compose/docker-compose.control-plane.yml config
 	$(COMPOSE) --env-file deploy/compose/.env.production.example -f deploy/compose/docker-compose.production.yml config
+	$(COMPOSE) --env-file deploy/compose/.env.production.example -f deploy/compose/docker-compose.source-build.yml config
 
 compose-up:
 	$(COMPOSE) --env-file $(CONTROL_COMPOSE_ENV) -f $(CONTROL_COMPOSE_FILE) up --build
@@ -83,10 +95,19 @@ release-build:
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook-gateway_$${os}_$${arch} ./server/gateway/cmd/porthook-gateway; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook-control-plane_$${os}_$${arch} ./server/control-plane/cmd/porthook-control-plane; \
 	done
+	set -eu; for target in $(RELEASE_CLI_ONLY_TARGETS); do \
+		os=$${target%/*}; \
+		arch=$${target#*/}; \
+		ext=""; \
+		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -trimpath -o $(DIST_DIR)/porthook_$${os}_$${arch}$${ext} ./agent/cmd/porthook; \
+	done
+	cp LICENSES/Apache-2.0.txt $(DIST_DIR)/LICENSE-agent-Apache-2.0.txt
+	cp LICENSES/AGPL-3.0.txt $(DIST_DIR)/LICENSE-server-AGPL-3.0.txt
 
 release-checksums:
 	cd $(DIST_DIR) && set -eu; \
-	files="$$(printf '%s\n' porthook-control-plane_* porthook-gateway_* porthook_* | sort)"; \
+	files="$$(printf '%s\n' porthook-control-plane_* porthook-gateway_* porthook_* LICENSE-agent-Apache-2.0.txt LICENSE-server-AGPL-3.0.txt | sort)"; \
 	if [ "$$(uname -s)" = "Darwin" ]; then \
 		shasum -a 256 $$files > SHA256SUMS; \
 	elif command -v sha256sum >/dev/null 2>&1; then \

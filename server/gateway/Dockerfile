@@ -22,7 +22,20 @@ RUN target_os="${TARGETOS:-linux}"; \
 
 FROM scratch
 
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG BUILD_DATE
+
+LABEL org.opencontainers.image.title="Porthook Gateway" \
+      org.opencontainers.image.description="Public-facing reverse tunnel gateway for Porthook." \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.revision="$REVISION" \
+      org.opencontainers.image.created="$BUILD_DATE" \
+      org.opencontainers.image.source="https://github.com/voiteco/porthook" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
+
 COPY --from=build /out/porthook-gateway /porthook-gateway
+COPY LICENSES/AGPL-3.0.txt /LICENSE
 
 USER 65532:65532
 
