@@ -6,7 +6,7 @@ The objective of this roadmap is to take the public self-hosted Porthook product
 
 This document is the execution source of truth for that work. Tasks are ordered by dependency and risk. A task is complete only after its implementation, tests, documentation, commit, push, and required CI checks are complete.
 
-Current phase: Blocks 1 through 5 are complete. Block 6 is ready to start.
+Current phase: Blocks 1 through 6 are complete. Block 7 is ready to start.
 
 ## Supported v1 Scope
 

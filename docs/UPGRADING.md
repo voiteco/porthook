@@ -2,6 +2,20 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Upgrade from 0.15.1 to 0.16.0
+
+Version 0.16.0 adds public WebSocket tunneling under protocol revision 0.3 (additive capability negotiation, so `v0.2` agents keep working for HTTP), a configurable request/idle/max-lifetime stream deadline policy, and verifies the real TLS and custom-domain edge end-to-end. There is no database migration and no required configuration change.
+
+Before upgrading:
+
+1. Deploy the new gateway, agent, and control-plane binaries or images together; mixed old/new pairs keep working for HTTP but only two new binaries support WebSocket tunnels.
+2. If the previous fixed 30-second stream deadline was relied on for a specific timeout behavior, review `PORTHOOK_STREAM_REQUEST_TIMEOUT`, `PORTHOOK_STREAM_IDLE_TIMEOUT`, and `PORTHOOK_STREAM_MAX_LIFETIME` and set them explicitly if the new defaults don't match.
+3. If routing custom domains through the reverse proxy, add an explicit Caddy site block per custom domain; see [`Caddyfile.custom-domain-example`](../deploy/reverse-proxy/caddy/Caddyfile.custom-domain-example) and [Domains and TLS](./DOMAINS_TLS.md).
+4. Optionally set `PORTHOOK_CA_FILE` on the agent to trust a gateway certificate issued by a private CA, `PORTHOOK_CONNECT_ADDR` to test a new edge before DNS points at it, or `PORTHOOK_DNS_RESOLVER_ADDR` on the control plane for split-horizon custom-domain TXT verification.
+5. Run `make smoke-websocket` and `make smoke-tls-edge` from the release source when validating a source-based deployment.
+
+Rollback to 0.15.1 is code-only. No 0.16.0 database migration needs to be reverted, but a 0.15.1 agent or gateway will reject WebSocket tunnel attempts with a clear error instead of tunneling them.
+
 ## Upgrade from 0.15.0 to 0.15.1
 
 The current 0.15.x line isolates gateway management from wildcard tunnel traffic. Health, readiness, metrics, tunnel inventory, runtime diagnostics, and request logs move to a private gateway listener. Dashboard and CLI operator workflows now use authenticated control-plane proxy endpoints, and CLI operational export uses schema version 3.

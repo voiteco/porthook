@@ -4,6 +4,8 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-12
+
 ### Added
 - Added protocol revision 0.3 with additive capability negotiation: peers no longer need an exact `protocol_version` match, only the required capability set (unchanged since 0.2), so agents and gateways built at different revisions keep interoperating for HTTP.
 - Added public WebSocket tunneling: the gateway relays a public WebSocket upgrade to the agent's local target over the existing multiplexed tunnel connection, gated by the new optional `websocket_tunnel` capability so agents that lack it keep working for HTTP and get a clear `501` for WebSocket attempts on their tunnels.
