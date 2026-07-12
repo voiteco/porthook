@@ -209,17 +209,17 @@ Target: `v0.17.0`
 Tasks:
 
 - [ ] Publish versioned Linux `amd64` and `arm64` gateway and control-plane images to GHCR.
-- [ ] Add immutable version, commit, architecture, license, and source OCI labels.
+- [x] Add immutable version, commit, architecture, license, and source OCI labels.
 - [ ] Publish architecture manifests and immutable digest references.
-- [ ] Provide a release Compose bundle that pulls published images and does not require a source checkout or local build.
-- [ ] Keep source-build Compose files available for contributors without making them the production default.
+- [x] Provide a release Compose bundle that pulls published images and does not require a source checkout or local build.
+- [x] Keep source-build Compose files available for contributors without making them the production default.
 - [ ] Publish Linux, macOS, and Windows CLI agent artifacts for supported architectures.
-- [ ] Package binaries consistently, including license notices, version output, checksums, and installation metadata.
+- [x] Package binaries consistently, including license notices, version output, checksums, and installation metadata.
 - [ ] Generate SPDX or CycloneDX SBOMs for binaries and images.
 - [ ] Add keyless signing and build provenance/attestations for release artifacts and images.
-- [ ] Provide a checksum-verifying installer or maintained package-manager path without bypassing artifact verification.
-- [ ] Test clean installation and startup from release artifacts on Linux `amd64`, Linux `arm64`, macOS, and Windows.
-- [ ] Document upgrades by immutable image tag or digest and prevent accidental deployment of development tags.
+- [x] Provide a checksum-verifying installer or maintained package-manager path without bypassing artifact verification.
+- [x] Test clean installation and startup from release artifacts on Linux `amd64`, Linux `arm64`, macOS, and Windows.
+- [x] Document upgrades by immutable image tag or digest and prevent accidental deployment of development tags.
 
 Exit gate:
 
