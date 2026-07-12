@@ -107,6 +107,73 @@ Use filesystem permissions that allow only the reverse proxy process to read the
 
 Custom domains need certificates that cover each custom hostname. A wildcard certificate for `*.tunnels.example.com` does not cover `preview.customer.com`. Use your reverse proxy or certificate automation to provision the custom-domain certificate before sending user traffic to that hostname.
 
+## Certificate Lifecycle
+
+Porthook's reverse proxy loads certificate files; it does not obtain, renew, or reload them on its own. Certificate material is never committed to this repository, and test certificates used in CI are generated fresh at test time and discarded.
+
+### Issuance
+
+The checked-in Caddyfile shares one certificate across the wildcard, agent, and control-plane hostnames (`PORTHOOK_TLS_CERT_FILE`/`PORTHOOK_TLS_KEY_FILE`), so that certificate needs a SAN list covering all three, for example with certbot and a DNS plugin (required for the wildcard SAN, which only DNS-01 validation can issue):
+
+```sh
+certbot certonly --dns-<provider> \
+  -d '*.tunnels.example.com' \
+  -d agent.example.com \
+  -d control.example.com
+```
+
+Custom domains are not covered by that certificate and are not subdomains of `PORTHOOK_ROOT_DOMAIN`; issue a separate certificate per custom hostname (HTTP-01 is sufficient for a single non-wildcard name) and route it with its own Caddy block, as in [`Caddyfile.custom-domain-example`](../deploy/reverse-proxy/caddy/Caddyfile.custom-domain-example). Private or air-gapped deployments can instead issue from an internal CA; operators must then trust that CA where they verify these hostnames.
+
+### Renewal
+
+Most ACME clients renew automatically on a timer (`systemctl list-timers | grep certbot`, or an equivalent cron job) and overwrite the files at `PORTHOOK_TLS_CERT_PATH`/`PORTHOOK_TLS_KEY_PATH` in place. Renewal alone does not make Caddy pick up the new files; it still serves the certificate it loaded at startup until reloaded (see below). Wire a reload into the renewal hook so this happens automatically:
+
+```sh
+certbot renew --deploy-hook "docker compose -f deploy/compose/docker-compose.production.yml exec reverse-proxy caddy reload --config /etc/caddy/Caddyfile"
+```
+
+### Reload
+
+Reload Caddy without dropping in-flight connections after any certificate or key file changes:
+
+```sh
+docker compose exec reverse-proxy caddy reload --config /etc/caddy/Caddyfile
+```
+
+Validate that a new certificate and key actually pair before reloading; a mismatched pair fails to load and Caddy keeps serving the old certificate:
+
+```sh
+openssl x509 -noout -modulus -in fullchain.pem | openssl md5
+openssl rsa -noout -modulus -in privkey.pem | openssl md5
+# the two hashes above must match
+```
+
+### Expiry Monitoring
+
+Check a live hostname's served certificate:
+
+```sh
+echo | openssl s_client -connect control.example.com:443 -servername control.example.com 2>/dev/null | openssl x509 -noout -enddate
+```
+
+Or the certificate file directly:
+
+```sh
+openssl x509 -in /etc/letsencrypt/live/tunnels.example.com/fullchain.pem -noout -enddate
+```
+
+Alert before expiry, since the shared wildcard/agent/control-plane certificate fronts every public surface; a scheduled job comparing `-enddate` to the current time, or an external TLS-expiry monitor, both work.
+
+### Rollback
+
+Keep the previous certificate and key before overwriting them; certbot already retains prior versions under `/etc/letsencrypt/archive/`. If a renewed or rotated certificate is bad (wrong SAN list, mismatched key, or otherwise fails to load), point `PORTHOOK_TLS_CERT_PATH`/`PORTHOOK_TLS_KEY_PATH` (or a custom domain's mounted path) back at the last-known-good files and reload:
+
+```sh
+docker compose exec reverse-proxy caddy reload --config /etc/caddy/Caddyfile
+```
+
+Use filesystem permissions that allow only the reverse proxy process to read any private key, including during rollback.
+
 ## Porthook Configuration
 
 Production gateway settings should match the public DNS and TLS shape:
