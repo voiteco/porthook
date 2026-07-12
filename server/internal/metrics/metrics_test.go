@@ -3,6 +3,7 @@
 package metrics
 
 import (
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -84,6 +85,32 @@ func TestHistogramConcurrentObserveIsRaceFree(t *testing.T) {
 	h.WriteTo(&buf, "porthook_test_concurrent_seconds", "Test concurrency.")
 	if !strings.Contains(buf.String(), "porthook_test_concurrent_seconds_count 100\n") {
 		t.Fatalf("output = %q, want count of 100", buf.String())
+	}
+}
+
+func TestWriteRuntimeStatsIncludesGoroutinesAndHeap(t *testing.T) {
+	var buf strings.Builder
+	WriteRuntimeStats(&buf, "porthook_test")
+	got := buf.String()
+
+	for _, want := range []string{
+		"porthook_test_goroutines",
+		"porthook_test_heap_alloc_bytes",
+		"porthook_test_heap_sys_bytes",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output = %q, want it to contain %q", got, want)
+		}
+	}
+
+	// /proc/self/fd only exists on Linux; on other platforms the metric is
+	// correctly omitted rather than reporting a misleading value.
+	hasFDMetric := strings.Contains(got, "porthook_test_open_fds")
+	if runtime.GOOS == "linux" && !hasFDMetric {
+		t.Fatalf("output = %q, want porthook_test_open_fds on linux", got)
+	}
+	if runtime.GOOS != "linux" && hasFDMetric {
+		t.Fatalf("output = %q, want no porthook_test_open_fds on %s", got, runtime.GOOS)
 	}
 }
 
