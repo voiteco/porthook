@@ -359,6 +359,10 @@ Metrics and OpenTelemetry tracing configuration are documented in [docs/OBSERVAB
 
 Measured single-node capacity, database pool sizing guidance, and Prometheus alert examples live in [docs/RELIABILITY.md](./docs/RELIABILITY.md).
 
+What `1.x` guarantees to keep working — protocol, API, configuration, and database compatibility — is documented in [docs/COMPATIBILITY.md](./docs/COMPATIBILITY.md).
+
+Production-shaped install, upgrade, and backup/restore rehearsals ahead of `v1.0.0` are documented in [docs/RELEASE_REHEARSAL.md](./docs/RELEASE_REHEARSAL.md).
+
 ## Specification
 
 The public product specification lives in [docs/SPEC.md](./docs/SPEC.md).
