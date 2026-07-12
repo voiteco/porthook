@@ -62,13 +62,20 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	} else if opts.Production && looksLikePlaceholderSecret(cfg.ManagementToken) {
 		addError("PORTHOOK_MANAGEMENT_TOKEN", "must be replaced with a generated secret in production mode")
 	}
-	if err := validateRootDomain(cfg.RootDomain); err != nil {
-		addError("PORTHOOK_ROOT_DOMAIN", err.Error())
+	rootDomainErr := validateRootDomain(cfg.RootDomain)
+	if rootDomainErr != nil {
+		addError("PORTHOOK_ROOT_DOMAIN", rootDomainErr.Error())
 	} else if opts.Production && strings.EqualFold(cfg.RootDomain, "localhost") {
 		addError("PORTHOOK_ROOT_DOMAIN", "must not be localhost in production mode")
 	}
-	if err := validateHTTPURL("PORTHOOK_PUBLIC_URL", cfg.PublicURL, opts.Production); err != nil {
-		addError("PORTHOOK_PUBLIC_URL", err.Error())
+	publicURLErr := validateHTTPURL("PORTHOOK_PUBLIC_URL", cfg.PublicURL, opts.Production)
+	if publicURLErr != nil {
+		addError("PORTHOOK_PUBLIC_URL", publicURLErr.Error())
+	}
+	if rootDomainErr == nil && publicURLErr == nil {
+		if publicHost, ok := hostnameWithoutPort(cfg.PublicURL); ok && !strings.EqualFold(publicHost, cfg.RootDomain) {
+			addWarning("PORTHOOK_PUBLIC_URL", fmt.Sprintf("host %q does not match PORTHOOK_ROOT_DOMAIN %q; the gateway announces tunnel URLs on PORTHOOK_ROOT_DOMAIN and only reuses PORTHOOK_PUBLIC_URL's scheme and port, so this host is likely a misconfiguration", publicHost, cfg.RootDomain))
+		}
 	}
 
 	controlPlaneConfigured := strings.TrimSpace(cfg.ControlPlaneURL) != ""
@@ -222,6 +229,19 @@ func validateHTTPURL(field, value string, requireHTTPS bool) error {
 		return fmt.Errorf("%s must use https in production mode", field)
 	}
 	return nil
+}
+
+// hostnameWithoutPort returns rawURL's host with any port stripped, or
+// ok=false if rawURL does not parse or has no host.
+func hostnameWithoutPort(rawURL string) (string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Host == "" {
+		return "", false
+	}
+	if host, _, err := net.SplitHostPort(parsed.Host); err == nil {
+		return host, true
+	}
+	return parsed.Host, true
 }
 
 func looksLikePlaceholderSecret(value string) bool {

@@ -76,3 +76,30 @@ func TestValidateConfigRejectsInvalidManagementAddr(t *testing.T) {
 	}
 	t.Fatalf("errors = %+v, want PORTHOOK_MANAGEMENT_ADDR error", report.Errors)
 }
+
+func TestValidateConfigWarnsWhenPublicURLHostDoesNotMatchRootDomain(t *testing.T) {
+	cfg := testConfig()
+	cfg.RootDomain = "tunnels.example.com"
+	cfg.PublicURL = "https://totally-different-host.example"
+
+	report := ValidateConfig(cfg, ConfigValidationOptions{})
+	for _, issue := range report.Warnings {
+		if issue.Field == "PORTHOOK_PUBLIC_URL" {
+			return
+		}
+	}
+	t.Fatalf("warnings = %+v, want PORTHOOK_PUBLIC_URL warning", report.Warnings)
+}
+
+func TestValidateConfigDoesNotWarnWhenPublicURLHostMatchesRootDomain(t *testing.T) {
+	cfg := testConfig()
+	cfg.RootDomain = "tunnels.example.com"
+	cfg.PublicURL = "https://tunnels.example.com:8443"
+
+	report := ValidateConfig(cfg, ConfigValidationOptions{})
+	for _, issue := range report.Warnings {
+		if issue.Field == "PORTHOOK_PUBLIC_URL" {
+			t.Fatalf("warnings = %+v, want no PORTHOOK_PUBLIC_URL warning", report.Warnings)
+		}
+	}
+}

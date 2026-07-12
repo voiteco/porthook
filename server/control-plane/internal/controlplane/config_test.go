@@ -83,3 +83,34 @@ func TestValidateConfigRequiresGatewayManagementToken(t *testing.T) {
 	}
 	t.Fatalf("errors = %+v, want gateway management token error", report.Errors)
 }
+
+func TestConfigFromEnvSupportsDNSResolverAddr(t *testing.T) {
+	t.Setenv("PORTHOOK_DNS_RESOLVER_ADDR", "127.0.0.1:15353")
+
+	if got := ConfigFromEnv().DNSResolverAddr; got != "127.0.0.1:15353" {
+		t.Fatalf("DNSResolverAddr = %q, want 127.0.0.1:15353", got)
+	}
+}
+
+func TestValidateConfigAllowsEmptyDNSResolverAddr(t *testing.T) {
+	cfg := Config{}
+
+	report := ValidateConfig(cfg, ConfigValidationOptions{})
+	for _, issue := range report.Errors {
+		if issue.Field == "PORTHOOK_DNS_RESOLVER_ADDR" {
+			t.Fatalf("errors = %+v, want no PORTHOOK_DNS_RESOLVER_ADDR error", report.Errors)
+		}
+	}
+}
+
+func TestValidateConfigRejectsInvalidDNSResolverAddr(t *testing.T) {
+	cfg := Config{DNSResolverAddr: "not-a-host-port"}
+
+	report := ValidateConfig(cfg, ConfigValidationOptions{})
+	for _, issue := range report.Errors {
+		if issue.Field == "PORTHOOK_DNS_RESOLVER_ADDR" {
+			return
+		}
+	}
+	t.Fatalf("errors = %+v, want PORTHOOK_DNS_RESOLVER_ADDR error", report.Errors)
+}

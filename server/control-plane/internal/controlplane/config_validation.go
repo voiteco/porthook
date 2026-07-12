@@ -116,6 +116,11 @@ func ValidateConfig(cfg Config, opts ConfigValidationOptions) ConfigValidationRe
 	if cfg.AuditEventPruneInterval < 0 {
 		addError("PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL", "must not be negative")
 	}
+	if resolverAddr := strings.TrimSpace(cfg.DNSResolverAddr); resolverAddr != "" {
+		if err := validateHostPortAddr(resolverAddr); err != nil {
+			addError("PORTHOOK_DNS_RESOLVER_ADDR", err.Error())
+		}
+	}
 
 	return report
 }
@@ -141,6 +146,18 @@ func validateListenAddr(value string) error {
 	_, port, err := net.SplitHostPort(value)
 	if err != nil {
 		return fmt.Errorf("must be a listen address such as :8082 or 127.0.0.1:8082")
+	}
+	parsed, err := strconv.Atoi(port)
+	if err != nil || parsed <= 0 || parsed > 65535 {
+		return fmt.Errorf("must include a TCP port between 1 and 65535")
+	}
+	return nil
+}
+
+func validateHostPortAddr(value string) error {
+	_, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return fmt.Errorf("must be a \"host:port\" address")
 	}
 	parsed, err := strconv.Atoi(port)
 	if err != nil || parsed <= 0 || parsed > 65535 {
