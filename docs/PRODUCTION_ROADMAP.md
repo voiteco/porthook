@@ -258,14 +258,14 @@ Targets: `v0.19.0`, `v1.0.0-rc.N`, and `v1.0.0`
 Tasks:
 
 - [ ] Freeze new features at `v0.19.0`; accept only release blockers, compatibility fixes, tests, and documentation afterward.
-- [ ] Publish the stable protocol/API/configuration/database compatibility matrix.
-- [ ] Publish the `1.x` deprecation, migration, supported-version, and security-fix policies.
-- [ ] Complete clean production-shaped installations on Linux `amd64` and `arm64` hosts.
-- [ ] Upgrade durable deployments from `v0.14.0` and `v0.17.0` through the documented paths.
-- [ ] Restore a production-shaped backup on a fresh host and verify tokens, reservations, policies, domains, audit events, and request history.
-- [ ] Rehearse code rollback and database-compatible rollback for every migration introduced after `v0.14.0`.
-- [ ] Complete at least two independent self-hosted deployment evaluations using only public documentation.
-- [ ] Perform a final security review against the threat model and resolve all release-blocking findings.
+- [x] Publish the stable protocol/API/configuration/database compatibility matrix.
+- [x] Publish the `1.x` deprecation, migration, supported-version, and security-fix policies.
+- [x] Complete clean production-shaped installations on Linux `amd64` and `arm64` hosts.
+- [x] Upgrade durable deployments from `v0.14.0` and `v0.17.0` through the documented paths.
+- [x] Restore a production-shaped backup on a fresh host and verify tokens, reservations, policies, domains, audit events, and request history.
+- [x] Rehearse code rollback and database-compatible rollback for every migration introduced after `v0.14.0`.
+- [ ] Complete at least two independent self-hosted deployment evaluations using only public documentation. (Deferred: revisit before promoting the qualified RC to `v1.0.0`, not before `v1.0.0-rc.1`. Needs genuinely independent evaluators, not the assistant that built the codebase.)
+- [x] Perform a final security review against the threat model and resolve all release-blocking findings.
 - [ ] Publish `v1.0.0-rc.1` from the complete release pipeline.
 - [ ] Allow only blocker fixes in subsequent release candidates and repeat affected qualification suites.
 - [ ] Run the selected release candidate for at least 14 days without an unresolved P0 or P1 defect.
