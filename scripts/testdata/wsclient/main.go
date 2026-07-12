@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Command wsclient is a minimal WebSocket test client used only by
-// scripts/smoke-websocket.sh to drive a real public WebSocket upgrade
-// through a real gateway and agent binary pair, proving the tunneled
-// round trip actually works end to end. It connects, exchanges a text and
-// a binary message with the echo service on the other end, verifies the
-// negotiated subprotocol, and exits non-zero with a message on any
-// mismatch.
+// Command wsclient is a minimal WebSocket test client used by
+// scripts/smoke-websocket.sh and scripts/smoke-tls-edge.sh to drive a real
+// public WebSocket upgrade through a real gateway and agent binary pair,
+// proving the tunneled round trip actually works end to end. It connects,
+// exchanges a text and a binary message with the echo service on the other
+// end, verifies the negotiated subprotocol, and exits non-zero with a
+// message on any mismatch. An optional CA certificate file lets it complete
+// a real TLS handshake for a wss:// URL signed by a private CA.
 package main
 
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
@@ -20,8 +24,8 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: wsclient <ws-url> <host>")
+	if len(os.Args) != 3 && len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: wsclient <ws-url> <host> [ca-file]")
 		os.Exit(2)
 	}
 	url := os.Args[1]
@@ -30,10 +34,20 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
+	dialOpts := &websocket.DialOptions{
 		Host:         host,
 		Subprotocols: []string{"echo.v1"},
-	})
+	}
+	if len(os.Args) == 4 {
+		httpClient, err := httpClientTrusting(os.Args[3], host)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "load CA file failed: %v\n", err)
+			os.Exit(1)
+		}
+		dialOpts.HTTPClient = httpClient
+	}
+
+	conn, _, err := websocket.Dial(ctx, url, dialOpts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dial failed: %v\n", err)
 		os.Exit(1)
@@ -80,4 +94,23 @@ func main() {
 	}
 
 	fmt.Println("websocket smoke check passed")
+}
+
+// httpClientTrusting returns a client that trusts the CA certificate(s) in
+// caFile and always presents serverName as the TLS SNI, regardless of the
+// dialed URL's host. This lets the dial URL stay an IP literal (avoiding any
+// dependency on DNS) while the TLS handshake still targets the certificate
+// issued for the real hostname.
+func httpClientTrusting(caFile, serverName string) (*http.Client, error) {
+	pemData, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("read CA file: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pemData) {
+		return nil, fmt.Errorf("no certificates found in %s", caFile)
+	}
+	return &http.Client{
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: serverName}},
+	}, nil
 }

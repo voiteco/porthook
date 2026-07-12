@@ -1,0 +1,17 @@
+# Example custom-domain site block. Custom domains are not subdomains of
+# PORTHOOK_ROOT_DOMAIN, so the wildcard block in Caddyfile does not match
+# them: each custom domain needs its own explicit site block routed to the
+# same gateway public listener.
+#
+# Add one block like this per active custom domain and reload Caddy
+# (`docker compose exec reverse-proxy caddy reload --config /etc/caddy/Caddyfile`),
+# or `import` a separate file per domain from the main Caddyfile so domains
+# can be added and removed without touching it directly. Complete the
+# domain's create/verify/activate lifecycle in the control plane first (see
+# docs/DOMAINS_TLS.md) so the gateway has an active mapping to route to
+# before sending it public traffic.
+preview.customer.example {
+	tls /certs/preview.customer.example/fullchain.pem /certs/preview.customer.example/privkey.pem
+	encode zstd gzip
+	reverse_proxy porthook-gateway:8080
+}
