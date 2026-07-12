@@ -151,6 +151,8 @@ This run was stopped by the tool environment orchestrating it at the 33-minute m
 
 The roadmap's full 72-hour soak exceeds GitHub-hosted Actions runners' hard 6-hour job limit, so it cannot run unattended in this repository's CI. `.github/workflows/soak.yml` runs a bounded but meaningfully long soak (default 5 hours) on a weekly schedule and on demand; the full 72-hour run is an operator-executed procedure using the same script with `PORTHOOK_SMOKE_DURATION=72h`, run outside CI (for example on a long-lived operator machine or a self-hosted runner without the 6-hour cap), ahead of the `v1.0.0` release rehearsal in a later roadmap block.
 
+For `v0.18.0`, the 33-minute representative soak plus the weekly 5-hour scheduled soak were accepted as sufficient in place of the literal 72-hour run — a deliberate, explicit tradeoff, not an oversight. Revisit before `v1.0.0`.
+
 ## Metrics and Alerting
 
 `docs/OBSERVABILITY.md` documents every metric exposed by `/metrics` on both services. `deploy/prometheus/alerts.yml` has example alerting rules for gateway/control-plane availability, error rate, latency, database pool saturation, goroutine/heap growth, tunnel churn, and TLS certificate expiry (via `blackbox_exporter`, since Porthook's reference deployment terminates TLS at Caddy, not in the gateway itself). Validate the rule file with `promtool check rules deploy/prometheus/alerts.yml` before deploying it.
