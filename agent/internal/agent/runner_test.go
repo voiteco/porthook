@@ -5,10 +5,20 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1107,4 +1117,320 @@ func readAuthAndRegistration(t *testing.T, ctx context.Context, conn *websocket.
 	if err := wsjson.Write(ctx, conn, registered); err != nil {
 		t.Fatalf("write registered returned error: %v", err)
 	}
+}
+
+func TestRunnerConnectAddrDoesNotRedirectLocalTargetForwarding(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/webhook" {
+			t.Errorf("path = %s, want /webhook", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("local-ok"))
+	}))
+	defer local.Close()
+
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		ctx := r.Context()
+		readAuthAndRegistration(t, ctx, conn)
+
+		tunnelReq, err := messages.NewStream(messages.TypeHTTPRequest, "str_test", "tun_test", httpwire.Request{
+			Method: http.MethodGet,
+			Path:   "/webhook",
+		})
+		if err != nil {
+			t.Errorf("NewStream returned error: %v", err)
+			return
+		}
+		if err := wsjson.Write(ctx, conn, tunnelReq); err != nil {
+			t.Errorf("write tunnel request returned error: %v", err)
+			return
+		}
+
+		var response messages.Envelope
+		if err := wsjson.Read(ctx, conn, &response); err != nil {
+			t.Errorf("read tunnel response returned error: %v", err)
+			return
+		}
+		payload, err := messages.DecodePayload[httpwire.Response](response)
+		if err != nil {
+			t.Errorf("DecodePayload returned error: %v", err)
+			return
+		}
+		// If ConnectAddr leaked into local-target forwarding, the local
+		// request would have been redirected to the gateway's own address
+		// instead of the local server, and this gateway handler would have
+		// answered it with 404 (any path other than agentWebSocketPath)
+		// instead of the local server ever seeing it.
+		if payload.Status != http.StatusOK || string(payload.Body) != "local-ok" {
+			t.Errorf("local response = (%d, %q), want (200, \"local-ok\"): ConnectAddr must not affect local-target forwarding", payload.Status, string(payload.Body))
+		}
+	}))
+	defer gateway.Close()
+
+	gatewayAddr := strings.TrimPrefix(gateway.URL, "http://")
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:          gateway.URL,
+		Token:              "dev-token",
+		RequestedSubdomain: "demo",
+		LocalTarget:        local.URL,
+		AgentVersion:       "test",
+		RequestTimeout:     5 * time.Second,
+		ConnectAddr:        gatewayAddr,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestLoadCACertPoolReturnsNilForEmptyPath(t *testing.T) {
+	pool, err := loadCACertPool("")
+	if err != nil {
+		t.Fatalf("loadCACertPool returned error: %v", err)
+	}
+	if pool != nil {
+		t.Fatalf("pool = %v, want nil", pool)
+	}
+}
+
+func TestLoadCACertPoolAppendsValidPEM(t *testing.T) {
+	certPath := writeTempCert(t, generateTestCert(t))
+
+	pool, err := loadCACertPool(certPath)
+	if err != nil {
+		t.Fatalf("loadCACertPool returned error: %v", err)
+	}
+	if pool == nil {
+		t.Fatal("pool = nil, want non-nil")
+	}
+}
+
+func TestLoadCACertPoolMissingFileReturnsError(t *testing.T) {
+	if _, err := loadCACertPool(filepath.Join(t.TempDir(), "missing.pem")); err == nil {
+		t.Fatal("loadCACertPool returned nil error for a missing file")
+	}
+}
+
+func TestLoadCACertPoolInvalidPEMReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "invalid.pem")
+	if err := os.WriteFile(path, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	if _, err := loadCACertPool(path); err == nil {
+		t.Fatal("loadCACertPool returned nil error for invalid PEM content")
+	}
+}
+
+func TestRunnerConnectsToGatewayOverTLSWithCACertFile(t *testing.T) {
+	var connections atomic.Int32
+	gateway := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		connections.Add(1)
+		readAuthAndRegistration(t, r.Context(), conn)
+	}))
+	defer gateway.Close()
+
+	certPath := writeTempCert(t, gateway.Certificate())
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:          gateway.URL,
+		Token:              "dev-token",
+		RequestedSubdomain: "demo",
+		LocalTarget:        "http://127.0.0.1:1",
+		AgentVersion:       "test",
+		RequestTimeout:     5 * time.Second,
+		CACertFile:         certPath,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("connections = %d, want 1", got)
+	}
+}
+
+func TestRunnerFailsClosedAgainstUntrustedGatewayCert(t *testing.T) {
+	gateway := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("gateway handler should not be reached without a trusted certificate")
+		http.NotFound(w, r)
+	}))
+	defer gateway.Close()
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:             gateway.URL,
+		Token:                 "dev-token",
+		RequestedSubdomain:    "demo",
+		LocalTarget:           "http://127.0.0.1:1",
+		AgentVersion:          "test",
+		HandshakeTimeout:      100 * time.Millisecond,
+		ReconnectInitialDelay: 100 * time.Millisecond,
+		ReconnectMaxDelay:     100 * time.Millisecond,
+		ReconnectJitter:       0,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !strings.Contains(output.String(), "certificate") && !strings.Contains(output.String(), "x509") {
+		t.Fatalf("output = %q, want a certificate trust error", output.String())
+	}
+}
+
+func TestRunnerConnectsViaConnectAddrOverrideWithoutDNS(t *testing.T) {
+	const fakeHost = "gateway.porthook-connect-test.invalid"
+
+	cert := generateCertForHost(t, fakeHost)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen returned error: %v", err)
+	}
+
+	var connections atomic.Int32
+	var sniSeen atomic.Value
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != agentWebSocketPath {
+				http.NotFound(w, r)
+				return
+			}
+			if r.TLS != nil {
+				sniSeen.Store(r.TLS.ServerName)
+			}
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				t.Errorf("Accept returned error: %v", err)
+				return
+			}
+			defer conn.Close(websocket.StatusNormalClosure, "")
+
+			connections.Add(1)
+			readAuthAndRegistration(t, r.Context(), conn)
+		}),
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert.tlsCert}},
+	}
+	go server.ServeTLS(listener, "", "")
+	defer server.Close()
+
+	certPath := writeTempCert(t, cert.x509Cert)
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:          fmt.Sprintf("https://%s:%d", fakeHost, listener.Addr().(*net.TCPAddr).Port),
+		Token:              "dev-token",
+		RequestedSubdomain: "demo",
+		LocalTarget:        "http://127.0.0.1:1",
+		AgentVersion:       "test",
+		RequestTimeout:     5 * time.Second,
+		CACertFile:         certPath,
+		ConnectAddr:        listener.Addr().String(),
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("connections = %d, want 1", got)
+	}
+	if got, _ := sniSeen.Load().(string); got != fakeHost {
+		t.Fatalf("TLS SNI = %q, want %q", got, fakeHost)
+	}
+}
+
+type testCert struct {
+	tlsCert  tls.Certificate
+	x509Cert *x509.Certificate
+}
+
+// generateCertForHost creates a self-signed certificate for host, entirely
+// in-process, so tests can exercise real TLS handshakes and SNI without
+// shelling out to openssl or touching DNS.
+func generateCertForHost(t *testing.T, host string) testCert {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey returned error: %v", err)
+	}
+
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: host},
+		DNSNames:              []string{host},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("CreateCertificate returned error: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("ParseCertificate returned error: %v", err)
+	}
+
+	return testCert{
+		tlsCert:  tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key},
+		x509Cert: cert,
+	}
+}
+
+func generateTestCert(t *testing.T) *x509.Certificate {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+	return server.Certificate()
+}
+
+func writeTempCert(t *testing.T, cert *x509.Certificate) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+	if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	return path
 }

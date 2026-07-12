@@ -42,6 +42,18 @@ type Config struct {
 	ReconnectInitialDelay time.Duration
 	ReconnectMaxDelay     time.Duration
 	ReconnectJitter       time.Duration
+
+	// CACertFile optionally points at a PEM file of extra CA certificates to
+	// trust, in addition to the system trust store, when connecting to the
+	// gateway over TLS. Useful for gateways behind a private or internal CA.
+	CACertFile string
+
+	// ConnectAddr optionally overrides the TCP address dialed to reach the
+	// gateway, as "host:port", while the Host header and TLS SNI still use
+	// ServerURL's host. Mirrors curl's --resolve: useful for testing a new
+	// edge deployment against its real hostname and certificate before DNS
+	// points at it.
+	ConnectAddr string
 }
 
 func ConfigFromEnv() Config {
@@ -59,6 +71,8 @@ func ConfigFromEnv() Config {
 		ReconnectInitialDelay: envDuration("PORTHOOK_RECONNECT_INITIAL_DELAY", defaultReconnectInitialDelay),
 		ReconnectMaxDelay:     envDuration("PORTHOOK_RECONNECT_MAX_DELAY", defaultReconnectMaxDelay),
 		ReconnectJitter:       envDuration("PORTHOOK_RECONNECT_JITTER", defaultReconnectJitter),
+		CACertFile:            os.Getenv("PORTHOOK_CA_FILE"),
+		ConnectAddr:           os.Getenv("PORTHOOK_CONNECT_ADDR"),
 	}
 
 	if fileCfg, ok, err := LoadConfigFile(); err == nil && ok {

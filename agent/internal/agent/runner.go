@@ -4,11 +4,16 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,12 +31,17 @@ import (
 const agentWebSocketPath = "/agent/connect"
 
 type Runner struct {
-	cfg        Config
-	logger     *slog.Logger
-	output     io.Writer
+	cfg    Config
+	logger *slog.Logger
+	output io.Writer
+	// httpClient forwards requests to the local target and is never subject
+	// to CACertFile/ConnectAddr: those only affect the gateway connection.
 	httpClient *http.Client
-	sendMu     sync.Mutex
-	outputMu   sync.Mutex
+	// gatewayHTTPClient dials the gateway itself and honors CACertFile and
+	// ConnectAddr.
+	gatewayHTTPClient *http.Client
+	sendMu            sync.Mutex
+	outputMu          sync.Mutex
 
 	activeMu      sync.Mutex
 	activeStreams map[string]*activeStream
@@ -60,15 +70,56 @@ func NewRunner(cfg Config, logger *slog.Logger, output io.Writer) *Runner {
 	}
 	cfg = normalizeConfig(cfg)
 
-	return &Runner{
-		cfg:    cfg,
-		logger: logger,
-		output: output,
-		httpClient: &http.Client{
-			Timeout: cfg.RequestTimeout,
-		},
-		activeStreams: make(map[string]*activeStream),
+	var transport *http.Transport
+	if pool, err := loadCACertPool(cfg.CACertFile); err != nil {
+		logger.Warn("ignoring invalid CA certificate file", "file", cfg.CACertFile, "error", err)
+	} else if pool != nil {
+		transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
 	}
+	if connectAddr := strings.TrimSpace(cfg.ConnectAddr); connectAddr != "" {
+		if transport == nil {
+			transport = &http.Transport{}
+		}
+		transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, network, connectAddr)
+		}
+	}
+
+	gatewayHTTPClient := &http.Client{Timeout: cfg.RequestTimeout}
+	if transport != nil {
+		gatewayHTTPClient.Transport = transport
+	}
+
+	return &Runner{
+		cfg:               cfg,
+		logger:            logger,
+		output:            output,
+		httpClient:        &http.Client{Timeout: cfg.RequestTimeout},
+		gatewayHTTPClient: gatewayHTTPClient,
+		activeStreams:     make(map[string]*activeStream),
+	}
+}
+
+// loadCACertPool returns the system trust store with the PEM certificates
+// from path appended, or (nil, nil) if path is empty.
+func loadCACertPool(path string) (*x509.CertPool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	pemData, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read CA certificate file: %w", err)
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pemData) {
+		return nil, errors.New("no valid certificates found in CA certificate file")
+	}
+	return pool, nil
 }
 
 func (r *Runner) Run(ctx context.Context) error {
@@ -109,7 +160,7 @@ func (r *Runner) runOnce(ctx context.Context, wsURL string, restored bool) (bool
 	handshakeCtx, cancel := contextWithTimeout(ctx, r.cfg.HandshakeTimeout)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(handshakeCtx, wsURL, nil)
+	conn, _, err := websocket.Dial(handshakeCtx, wsURL, &websocket.DialOptions{HTTPClient: r.gatewayHTTPClient})
 	if err != nil {
 		return false, fmt.Errorf("connect to gateway %s: %w", wsURL, err)
 	}
