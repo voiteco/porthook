@@ -87,6 +87,8 @@ The attacker cannot modify the operator's reverse-proxy configuration, control-p
 | A mixed-version agent silently misinterprets a streamed or WebSocket message. | Capability negotiation, compatibility tests, and explicit version failures. | Block 5 |
 | A proxy routes a custom domain without the intended certificate or host preservation. | Test a real Caddy TLS edge and document domain, certificate, and rollback procedures. | Block 6 |
 | A dependency, source change, or secret reaches the repository unnoticed. | Required race, fuzz-seed, vulnerability, CodeQL, dependency-update, and secret-scan checks. | Block 2 |
+| A control-plane or database outage silently turns an access-policy-protected tunnel public instead of failing. | Access-policy evaluation is a per-request control-plane dependency (unlike token validation, which is checked once at registration); an outage makes the gateway fail closed with `503`, verified against a real control-plane and Postgres outage, not assumed. | Block 8 |
+| An agent gives up permanently instead of retrying after a transient `auth_unavailable` response (a control-plane outage, not an invalid credential), requiring manual intervention to restore tunnels once the outage clears. | The agent retries `auth_unavailable` with the normal reconnect backoff; only `invalid_token` and `unsupported_protocol` remain permanent, since retrying those can never succeed. Found and fixed while building the failure-injection suite, not assumed correct beforehand. | Block 8 |
 
 ## Accepted v1 Risks
 
