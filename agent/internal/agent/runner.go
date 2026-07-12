@@ -229,6 +229,14 @@ func (r *Runner) authenticate(ctx context.Context, conn *websocket.Conn) error {
 		if err != nil {
 			return permanent(err)
 		}
+		// auth_unavailable means the gateway could not reach its token
+		// validator (for example a control-plane outage), not that the
+		// token itself is invalid. That is a transient condition worth
+		// retrying with the normal reconnect backoff, unlike invalid_token
+		// or unsupported_protocol, where retrying can never succeed.
+		if payload.Code == "auth_unavailable" {
+			return formatAuthError(payload)
+		}
 		return permanent(formatAuthError(payload))
 	default:
 		return permanent(fmt.Errorf("unexpected auth response %s", resp.Type))
