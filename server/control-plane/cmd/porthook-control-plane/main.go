@@ -71,7 +71,7 @@ func run(args []string, stdout io.Writer) error {
 	adminTokenService := admintokens.NewService(adminTokenStore)
 	reservationService := reserved.NewService(reservationStore)
 	accessPolicyService := access.NewService(accessStore)
-	customDomainService := customdomains.NewService(customDomainStore)
+	customDomainService := customdomains.NewServiceWithResolver(customDomainStore, customdomains.NewTXTResolver(cfg.DNSResolverAddr))
 	server := controlplane.NewServerWithAdminTokens(cfg, tokenService, reservationService, accessPolicyService, customDomainService, auditEventStore, adminTokenService)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

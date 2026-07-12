@@ -26,6 +26,11 @@ type Config struct {
 	Version                  string
 	AuditEventRetention      time.Duration
 	AuditEventPruneInterval  time.Duration
+	// DNSResolverAddr optionally points custom-domain TXT verification
+	// lookups at a specific "host:port" DNS server instead of the system
+	// resolver. Useful for split-horizon DNS, a private authoritative
+	// zone, or local testing. Empty uses the system resolver.
+	DNSResolverAddr string
 }
 
 func ConfigFromEnv() Config {
@@ -40,6 +45,7 @@ func ConfigFromEnv() Config {
 		DatabaseURL:              os.Getenv("PORTHOOK_DATABASE_URL"),
 		AuditEventRetention:      envDuration("PORTHOOK_AUDIT_EVENT_RETENTION", defaultAuditEventRetention),
 		AuditEventPruneInterval:  envDuration("PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL", defaultAuditEventPruneInterval),
+		DNSResolverAddr:          os.Getenv("PORTHOOK_DNS_RESOLVER_ADDR"),
 	}
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr

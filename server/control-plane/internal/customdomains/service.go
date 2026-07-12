@@ -302,3 +302,30 @@ type netTXTResolver struct{}
 func (netTXTResolver) LookupTXT(ctx context.Context, name string) ([]string, error) {
 	return net.DefaultResolver.LookupTXT(ctx, name)
 }
+
+// NewTXTResolver returns the system DNS resolver when addr is empty, or a
+// resolver that sends every TXT query to the given "host:port" DNS server
+// instead. Use a custom addr for split-horizon DNS, a private authoritative
+// zone, or local testing.
+func NewTXTResolver(addr string) TXTResolver {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return netTXTResolver{}
+	}
+	return &customTXTResolver{addr: addr}
+}
+
+type customTXTResolver struct {
+	addr string
+}
+
+func (r *customTXTResolver) LookupTXT(ctx context.Context, name string) ([]string, error) {
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, network, r.addr)
+		},
+	}
+	return resolver.LookupTXT(ctx, name)
+}
