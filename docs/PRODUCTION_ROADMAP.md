@@ -186,12 +186,12 @@ Target: `v0.16.0`
 
 Tasks:
 
-- [ ] Add an end-to-end edge smoke environment using Caddy and certificates generated at test time.
-- [ ] Verify wildcard tunnel HTTPS, the dedicated agent WebSocket hostname, and the protected control-plane hostname.
-- [ ] Verify certificate coverage and routing for separate wildcard, agent, control-plane, and custom-domain names.
-- [ ] Add a supported Caddy configuration path for routing explicitly configured custom domains to the gateway.
-- [ ] Run the complete custom-domain create, DNS verification, activation, TLS, routing, access-policy, and deletion lifecycle.
-- [ ] Verify `X-Forwarded-*`, original host, request ID, and client-address behavior across the edge.
+- [x] Add an end-to-end edge smoke environment using Caddy and certificates generated at test time.
+- [x] Verify wildcard tunnel HTTPS, the dedicated agent WebSocket hostname, and the protected control-plane hostname.
+- [x] Verify certificate coverage and routing for separate wildcard, agent, control-plane, and custom-domain names.
+- [x] Add a supported Caddy configuration path for routing explicitly configured custom domains to the gateway.
+- [x] Run the complete custom-domain create, DNS verification, activation, TLS, routing, access-policy, and deletion lifecycle.
+- [x] Verify `X-Forwarded-*`, original host, request ID, and client-address behavior across the edge.
 - [ ] Add configuration checks for inconsistent public URL, root domain, proxy, and certificate settings where they can be validated safely.
 - [ ] Document certificate issuance, renewal, reload, expiry monitoring, and rollback without committing certificate material.
 - [ ] Run the TLS edge smoke in CI and the release workflow.

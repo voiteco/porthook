@@ -645,7 +645,20 @@ PORTHOOK_WS_PONG_TIMEOUT=5s
 PORTHOOK_RECONNECT_INITIAL_DELAY=500ms
 PORTHOOK_RECONNECT_MAX_DELAY=5s
 PORTHOOK_RECONNECT_JITTER=250ms
+PORTHOOK_CA_FILE=
+PORTHOOK_CONNECT_ADDR=
 ```
+
+`PORTHOOK_CA_FILE` optionally names a PEM file of extra CA certificates the
+agent should trust, on top of the system trust store, when connecting to the
+gateway over TLS. Use it when the gateway's certificate is issued by a
+private or internal CA rather than a public one.
+
+`PORTHOOK_CONNECT_ADDR` optionally overrides the TCP address dialed to reach
+the gateway, as `host:port`, while the HTTP Host header and TLS SNI still use
+`PORTHOOK_SERVER_URL`'s host. This mirrors curl's `--resolve`: it lets you
+test a new edge deployment against its real hostname and certificate before
+DNS points at it.
 
 Static token authentication is acceptable for the first proof of concept.
 
@@ -661,7 +674,13 @@ PORTHOOK_GATEWAY_MANAGEMENT_TOKEN=management-secret
 PORTHOOK_DATABASE_URL=postgres://...
 PORTHOOK_AUDIT_EVENT_RETENTION=2160h
 PORTHOOK_AUDIT_EVENT_PRUNE_INTERVAL=1h
+PORTHOOK_DNS_RESOLVER_ADDR=
 ```
+
+`PORTHOOK_DNS_RESOLVER_ADDR` optionally points custom-domain TXT verification
+lookups at a specific `host:port` DNS server instead of the system resolver.
+Useful for split-horizon DNS, a private authoritative zone, or local testing.
+Empty uses the system resolver.
 
 Duration values use Go duration syntax such as `500ms`, `10s`, `1m`, or `720h`. Request-log and audit-event pruning can be disabled by setting the matching retention or prune interval to `0s`.
 

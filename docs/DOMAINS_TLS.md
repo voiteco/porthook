@@ -53,6 +53,7 @@ agent.example.com      CNAME  porthook-edge.example.net.
 Operational notes:
 
 - Lower TTLs before a cutover, for example 60-300 seconds, then raise them once the deployment is stable.
+- To test a new edge against its real hostname and certificate before DNS points at it, set `PORTHOOK_CONNECT_ADDR=host:port` on the agent to dial that literal address while still sending the real hostname as the HTTP Host header and TLS SNI (curl's `--resolve` does the same for manual `curl` checks).
 - Keep the wildcard record scoped to the tunnel root, such as `*.tunnels.example.com`, instead of `*.example.com`.
 - The control-plane hostname should resolve only where operators need it if you use a private DNS zone or VPN.
 - DNS only brings traffic to the edge. The reverse proxy must still route wildcard tunnel traffic to the gateway public listener and agent traffic to the gateway agent listener.
@@ -72,6 +73,8 @@ preview.customer.com  CNAME  porthook-edge.example.net.
 ```
 
 The gateway routes custom domains by the HTTP `Host` header. Your reverse proxy must preserve the original host when forwarding to the gateway public listener.
+
+Custom domains are not subdomains of `PORTHOOK_ROOT_DOMAIN`, so a wildcard reverse-proxy site block does not match them. Each custom domain needs its own explicit site block routed to the gateway public listener; see [`deploy/reverse-proxy/caddy/Caddyfile.custom-domain-example`](../deploy/reverse-proxy/caddy/Caddyfile.custom-domain-example) for the pattern.
 
 ## TLS Certificates
 
@@ -196,6 +199,7 @@ Operational behavior:
 - Access policies are attached to the reserved subdomain and apply to both `demo.tunnels.example.com` and any custom domains mapped to that reservation.
 - Gateway request logs include the original host and mark custom-domain routes.
 - The gateway caches active custom-domain lookup results briefly. Tune `PORTHOOK_CUSTOM_DOMAIN_CACHE_TTL` for active mappings and `PORTHOOK_CUSTOM_DOMAIN_MISS_TTL` for misses such as `pending_verification` when you need faster mapping changes.
+- The control plane looks up TXT verification records with the system DNS resolver by default. Set `PORTHOOK_DNS_RESOLVER_ADDR` on the control plane to a `host:port` DNS server to use a split-horizon zone, a private authoritative server, or a local resolver for testing instead.
 
 ## Verification
 
