@@ -110,6 +110,7 @@ func newServerWithRequestLogWriter(cfg Config, logger *slog.Logger, requestLogSt
 		reserved:        reservedAuthorizer,
 		access:          accessPolicyEvaluator,
 		domains:         customDomainResolver,
+		metrics:         newMetrics(),
 		startedAt:       time.Now().UTC(),
 		requestLogs:     newRequestLogBuffer(cfg.RequestLogLimit),
 		requestLogStore: requestLogStore,
@@ -943,7 +944,7 @@ func (s *Server) handlePublicRequest(w http.ResponseWriter, r *http.Request) {
 		logEntry := requestLogEntryFromPublicRequest(r, entry, s.clientIP(r))
 		s.logPublicRequest(r, entry)
 		s.recordRequestLog(logEntry)
-		s.recordPublicRequestMetrics(status, outcome)
+		s.recordPublicRequestMetrics(status, outcome, time.Since(started))
 		telemetry.RecordSpan(r.Context(), status, outcome, requestErr,
 			attribute.String("porthook.subdomain", subdomain),
 			attribute.String("porthook.custom_domain", customDomain),

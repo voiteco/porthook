@@ -162,6 +162,7 @@ func NewServerWithAdminTokens(cfg Config, service *tokens.Service, reservationSe
 		customDomains:     customDomainService,
 		adminTokens:       adminTokenService,
 		logger:            slog.Default(),
+		metrics:           newMetrics(),
 		startedAt:         time.Now().UTC(),
 		auditEvents:       auditEventStore,
 		gatewayHTTPClient: &http.Client{Timeout: cfg.GatewayManagementTimeout},
@@ -273,7 +274,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/v1/reserved-subdomains", s.handleReservedSubdomains)
 	mux.HandleFunc("/api/v1/reserved-subdomains/", s.handleReservedSubdomainByID)
 	mux.HandleFunc("/api/v1/reserved-subdomains/authorize", s.handleAuthorizeReservedSubdomain)
-	return requestid.Middleware(telemetry.HTTPHandler(s.withClientIPTrace(mux), "control_plane.http"))
+	return requestid.Middleware(telemetry.HTTPHandler(s.withClientIPTrace(s.latencyMiddleware(mux)), "control_plane.http"))
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {

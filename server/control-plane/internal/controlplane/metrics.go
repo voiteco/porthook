@@ -4,10 +4,13 @@ package controlplane
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"sync/atomic"
 	"time"
+
+	porthookmetrics "github.com/voiteco/porthook/server/internal/metrics"
 )
 
 type metrics struct {
@@ -41,6 +44,21 @@ type metrics struct {
 	customDomainLookupErrorsTotal        atomic.Uint64
 	authFailuresTotal                    atomic.Uint64
 	readinessFailuresTotal               atomic.Uint64
+	requestDuration                      *porthookmetrics.Histogram
+}
+
+func newMetrics() metrics {
+	return metrics{requestDuration: porthookmetrics.NewHistogram(porthookmetrics.DefaultLatencyBuckets)}
+}
+
+// latencyMiddleware records how long next takes to handle every request,
+// regardless of which endpoint served it.
+func (s *Server) latencyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		next.ServeHTTP(w, r)
+		s.metrics.requestDuration.Observe(time.Since(started))
+	})
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +101,19 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetric(w, "porthook_control_plane_custom_domain_lookup_errors_total", "Custom domain lookup requests that failed before producing a result.", "counter", s.metrics.customDomainLookupErrorsTotal.Load())
 	writeMetric(w, "porthook_control_plane_auth_failures_total", "Bearer authorization failures on control-plane endpoints.", "counter", s.metrics.authFailuresTotal.Load())
 	writeMetric(w, "porthook_control_plane_readiness_failures_total", "Readiness checks that failed.", "counter", s.metrics.readinessFailuresTotal.Load())
+
+	s.metrics.requestDuration.WriteTo(w, "porthook_control_plane_request_duration_seconds", "HTTP request duration in seconds.")
+	porthookmetrics.WriteRuntimeStats(w, "porthook_control_plane")
+	if statser, ok := s.auditEvents.(dbStatser); ok {
+		porthookmetrics.WriteDBPoolStats(w, "porthook_control_plane", statser.Stats())
+	}
+}
+
+// dbStatser is implemented by stores backed by a real connection pool
+// (currently only *PostgresAuditEventStore, which shares its *sql.DB with
+// every other Postgres store the control plane uses).
+type dbStatser interface {
+	Stats() sql.DBStats
 }
 
 func (s *Server) readinessGauge(r *http.Request) uint64 {

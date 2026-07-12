@@ -423,6 +423,11 @@ func TestMetricsEndpoint(t *testing.T) {
 		"porthook_control_plane_token_admin_creates_total 1",
 		"porthook_control_plane_token_validations_total 1",
 		"porthook_control_plane_token_validation_valid_total 1",
+		"# TYPE porthook_control_plane_request_duration_seconds histogram",
+		"porthook_control_plane_request_duration_seconds_count 2",
+		"porthook_control_plane_goroutines ",
+		"porthook_control_plane_heap_alloc_bytes ",
+		"porthook_control_plane_heap_sys_bytes ",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics = %q, want %q", body, want)

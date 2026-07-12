@@ -23,6 +23,13 @@ func NewPostgresAuditEventStore(db *sql.DB) (*PostgresAuditEventStore, error) {
 	return &PostgresAuditEventStore{db: db}, nil
 }
 
+// Stats returns the underlying connection pool's current statistics. The
+// control plane's Postgres stores all share one *sql.DB, so this pool
+// covers tokens, reservations, access policies, and custom domains too.
+func (s *PostgresAuditEventStore) Stats() sql.DBStats {
+	return s.db.Stats()
+}
+
 func (s *PostgresAuditEventStore) Migrate(ctx context.Context) error {
 	if err := s.applyMigrations(ctx, AuditPostgresMigrations()); err != nil {
 		return fmt.Errorf("apply audit event migrations: %w", err)

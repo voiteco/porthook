@@ -22,6 +22,11 @@ func NewPostgresRequestLogStore(db *sql.DB) (*PostgresRequestLogStore, error) {
 	return &PostgresRequestLogStore{db: db}, nil
 }
 
+// Stats returns the underlying connection pool's current statistics.
+func (s *PostgresRequestLogStore) Stats() sql.DBStats {
+	return s.db.Stats()
+}
+
 func (s *PostgresRequestLogStore) Migrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("database is required")

@@ -11,6 +11,16 @@ Operators and the dashboard should read gateway metrics through `GET /api/v1/gat
 
 OpenTelemetry tracing is disabled by default. Enable it only when you intentionally send traces to an OTLP collector or want local stdout trace debugging.
 
+## Metrics
+
+Both `/metrics` endpoints are hand-rolled Prometheus text-exposition format (no `client_golang` dependency) and include, per service:
+
+- Request/operation counters (for example `porthook_gateway_public_requests_total`, `porthook_control_plane_token_validations_total`) and outcome breakdowns for the operations each service handles.
+- Point-in-time gauges for current state (active tunnels, token/reservation/policy/domain inventory counts, control-plane readiness).
+- `<prefix>_public_request_duration_seconds` (gateway) / `<prefix>_request_duration_seconds` (control plane): a fixed-bucket latency histogram (`porthook_gateway_public_request_duration_seconds` covers every public tunnel request; `porthook_control_plane_request_duration_seconds` covers every control-plane HTTP request, recorded by a wrapping middleware so no individual handler needs to instrument itself).
+- `<prefix>_goroutines`, `<prefix>_heap_alloc_bytes`, `<prefix>_heap_sys_bytes`: current goroutine count and heap memory from the Go runtime.
+- `<prefix>_db_open_connections`, `<prefix>_db_in_use_connections`, `<prefix>_db_idle_connections`, `<prefix>_db_wait_count_total`: the Postgres connection pool's current state, present only when a database is configured (`PORTHOOK_REQUEST_LOG_DATABASE_URL` for the gateway, `PORTHOOK_DATABASE_URL` for the control plane). See [Reliability and Capacity](./RELIABILITY.md) for the pool-sizing environment variables and alert examples built on these metrics.
+
 ## Trace Coverage
 
 The OpenTelemetry MVP records:

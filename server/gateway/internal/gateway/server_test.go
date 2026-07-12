@@ -3337,6 +3337,11 @@ func TestManagementHandlerMetricsEndpoint(t *testing.T) {
 		"porthook_gateway_public_request_errors_total 0",
 		"porthook_gateway_public_request_no_active_session_total 1",
 		"porthook_gateway_tunnel_registration_failures_total 0",
+		"# TYPE porthook_gateway_public_request_duration_seconds histogram",
+		"porthook_gateway_public_request_duration_seconds_count 1",
+		"porthook_gateway_goroutines ",
+		"porthook_gateway_heap_alloc_bytes ",
+		"porthook_gateway_heap_sys_bytes ",
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("metrics = %q, want %q", string(body), want)

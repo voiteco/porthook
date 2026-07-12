@@ -3,10 +3,13 @@
 package gateway
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"sync/atomic"
 	"time"
+
+	porthookmetrics "github.com/voiteco/porthook/server/internal/metrics"
 )
 
 type metrics struct {
@@ -31,6 +34,11 @@ type metrics struct {
 	authFailuresTotal                     atomic.Uint64
 	tunnelRegistrationsTotal              atomic.Uint64
 	tunnelRegistrationFailuresTotal       atomic.Uint64
+	publicRequestDuration                 *porthookmetrics.Histogram
+}
+
+func newMetrics() metrics {
+	return metrics{publicRequestDuration: porthookmetrics.NewHistogram(porthookmetrics.DefaultLatencyBuckets)}
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -63,10 +71,23 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeMetric(w, "porthook_gateway_auth_failures_total", "Agent authentication failures.", "counter", s.metrics.authFailuresTotal.Load())
 	writeMetric(w, "porthook_gateway_tunnel_registrations_total", "Successful tunnel registrations.", "counter", s.metrics.tunnelRegistrationsTotal.Load())
 	writeMetric(w, "porthook_gateway_tunnel_registration_failures_total", "Tunnel registration attempts that failed after agent authentication.", "counter", s.metrics.tunnelRegistrationFailuresTotal.Load())
+
+	s.metrics.publicRequestDuration.WriteTo(w, "porthook_gateway_public_request_duration_seconds", "Public HTTP request duration in seconds.")
+	porthookmetrics.WriteRuntimeStats(w, "porthook_gateway")
+	if statser, ok := s.requestLogStore.(dbStatser); ok {
+		porthookmetrics.WriteDBPoolStats(w, "porthook_gateway", statser.Stats())
+	}
 }
 
-func (s *Server) recordPublicRequestMetrics(status int, outcome string) {
+// dbStatser is implemented by request log stores backed by a real
+// connection pool (currently only *PostgresRequestLogStore).
+type dbStatser interface {
+	Stats() sql.DBStats
+}
+
+func (s *Server) recordPublicRequestMetrics(status int, outcome string, duration time.Duration) {
 	s.metrics.publicRequestsTotal.Add(1)
+	s.metrics.publicRequestDuration.Observe(duration)
 	if status >= 500 {
 		s.metrics.publicRequestErrorsTotal.Add(1)
 	}
