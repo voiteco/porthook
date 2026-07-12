@@ -4,6 +4,8 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-12
+
 ### Added
 - Added versioned `linux/amd64` and `linux/arm64` `porthook-gateway` and `porthook-control-plane` images published to GHCR, with `org.opencontainers.image.{title,description,version,revision,created,source,licenses}` labels and a multi-architecture manifest per release.
 - Added keyless-signed (Sigstore-backed) build provenance attestations and SPDX SBOMs for every published image and release binary, verifiable with `gh attestation verify` and no extra secrets.

@@ -4,7 +4,7 @@ Porthook is an open-source reverse tunnel service for exposing local development
 
 This repository is the public self-hosted product. Private commercial, hosted-cloud, pricing, and operating plans should live in separate private repositories.
 
-Project status: `v0.16.0` pre-production. The local HTTP and WebSocket tunnel paths, self-hosted control-plane token management, scoped admin tokens, gateway token validation, reserved subdomains, access policies, custom domain mappings, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs, operational defaults, and deployment boundaries can still change before 1.0.
+Project status: `v0.17.0` pre-production. The local HTTP and WebSocket tunnel paths, self-hosted control-plane token management, scoped admin tokens, gateway token validation, reserved subdomains, access policies, custom domain mappings, operational endpoints, and Docker Compose smoke paths are implemented. Public APIs, operational defaults, and deployment boundaries can still change before 1.0.
 
 ## What It Does
 
