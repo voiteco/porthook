@@ -6,7 +6,7 @@ The objective of this roadmap is to take the public self-hosted Porthook product
 
 This document is the execution source of truth for that work. Tasks are ordered by dependency and risk. A task is complete only after its implementation, tests, documentation, commit, push, and required CI checks are complete.
 
-Current phase: Blocks 1 through 6 are complete. Block 7 is ready to start.
+Current phase: Blocks 1 through 7 are complete. Block 8 is ready to start.
 
 ## Supported v1 Scope
 
@@ -208,24 +208,24 @@ Target: `v0.17.0`
 
 Tasks:
 
-- [ ] Publish versioned Linux `amd64` and `arm64` gateway and control-plane images to GHCR.
+- [x] Publish versioned Linux `amd64` and `arm64` gateway and control-plane images to GHCR.
 - [x] Add immutable version, commit, architecture, license, and source OCI labels.
-- [ ] Publish architecture manifests and immutable digest references.
+- [x] Publish architecture manifests and immutable digest references.
 - [x] Provide a release Compose bundle that pulls published images and does not require a source checkout or local build.
 - [x] Keep source-build Compose files available for contributors without making them the production default.
-- [ ] Publish Linux, macOS, and Windows CLI agent artifacts for supported architectures.
+- [x] Publish Linux, macOS, and Windows CLI agent artifacts for supported architectures.
 - [x] Package binaries consistently, including license notices, version output, checksums, and installation metadata.
-- [ ] Generate SPDX or CycloneDX SBOMs for binaries and images.
-- [ ] Add keyless signing and build provenance/attestations for release artifacts and images.
+- [x] Generate SPDX or CycloneDX SBOMs for binaries and images.
+- [x] Add keyless signing and build provenance/attestations for release artifacts and images.
 - [x] Provide a checksum-verifying installer or maintained package-manager path without bypassing artifact verification.
 - [x] Test clean installation and startup from release artifacts on Linux `amd64`, Linux `arm64`, macOS, and Windows.
 - [x] Document upgrades by immutable image tag or digest and prevent accidental deployment of development tags.
 
 Exit gate:
 
-- [ ] A new operator can deploy the supported stack using only published release artifacts and public documentation.
-- [ ] Every artifact has a checksum, SBOM, provenance, and a verifiable signature or attestation.
-- [ ] `v0.17.0` is suitable for broad external beta use, but remains explicitly pre-1.0.
+- [x] A new operator can deploy the supported stack using only published release artifacts and public documentation.
+- [x] Every artifact has a checksum, SBOM, provenance, and a verifiable signature or attestation.
+- [x] `v0.17.0` is suitable for broad external beta use, but remains explicitly pre-1.0.
 
 ## Block 8: Establish Reliability and Capacity Limits
 
