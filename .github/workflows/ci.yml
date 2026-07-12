@@ -95,10 +95,24 @@ jobs:
           path: dist/
           retention-days: 1
 
-  # These two jobs prove the binaries this run just cross-compiled actually
-  # start on real Linux arm64 and Windows hosts, install.sh/install.ps1's
-  # checksum verification works on each, and their PowerShell/POSIX shell
-  # syntax is valid, none of which the amd64-only `go` job can check.
+  # These jobs prove the binaries this run just cross-compiled actually
+  # start on real macOS, Linux arm64, and Windows hosts, install.sh/
+  # install.ps1's checksum verification works on each, and their
+  # PowerShell/POSIX shell syntax is valid, none of which the Linux-amd64-
+  # only `go` job can check.
+  install-macos:
+    name: Install script (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Test the install script against a real published release
+        run: |
+          ./scripts/install.sh --version v0.16.0 --dir /tmp/porthook-install-test
+          test "$(/tmp/porthook-install-test/porthook version)" = "v0.16.0"
+
   install-linux-arm64:
     name: Install script (Linux arm64)
     needs: go
