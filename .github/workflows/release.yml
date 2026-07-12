@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
   security-events: write
+  packages: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -19,6 +22,13 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      - name: Compute image metadata
+        id: image_meta
+        run: |
+          echo "owner=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -99,8 +109,119 @@ jobs:
       - name: Check production hardening
         run: make production-hardening-check
 
-      - name: Build Docker images
-        run: make docker-build VERSION="$VERSION"
+      - name: Generate release binaries SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: porthook-release-sbom.spdx.json
+          upload-artifact: false
+
+      - name: Attest release binaries provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+
+      - name: Attest release binaries SBOM
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: "dist/*"
+          sbom-path: porthook-release-sbom.spdx.json
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push gateway image
+        id: build_gateway
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/gateway/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            REVISION=${{ steps.image_meta.outputs.revision }}
+            BUILD_DATE=${{ steps.image_meta.outputs.created }}
+          tags: |
+            ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-gateway:${{ env.VERSION }}
+            ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-gateway:latest
+          cache-from: type=gha,scope=porthook-gateway
+          cache-to: type=gha,mode=max,scope=porthook-gateway
+
+      - name: Build and push control-plane image
+        id: build_control_plane
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/control-plane/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            REVISION=${{ steps.image_meta.outputs.revision }}
+            BUILD_DATE=${{ steps.image_meta.outputs.created }}
+          tags: |
+            ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-control-plane:${{ env.VERSION }}
+            ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-control-plane:latest
+          cache-from: type=gha,scope=porthook-control-plane
+          cache-to: type=gha,mode=max,scope=porthook-control-plane
+
+      - name: Attest gateway image provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-gateway
+          subject-digest: ${{ steps.build_gateway.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest control-plane image provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-control-plane
+          subject-digest: ${{ steps.build_control_plane.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate gateway image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-gateway@${{ steps.build_gateway.outputs.digest }}
+          format: spdx-json
+          output-file: porthook-gateway-sbom.spdx.json
+          upload-artifact: false
+
+      - name: Attest gateway image SBOM
+        uses: actions/attest-sbom@v2
+        with:
+          subject-name: ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-gateway
+          subject-digest: ${{ steps.build_gateway.outputs.digest }}
+          sbom-path: porthook-gateway-sbom.spdx.json
+          push-to-registry: true
+
+      - name: Generate control-plane image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-control-plane@${{ steps.build_control_plane.outputs.digest }}
+          format: spdx-json
+          output-file: porthook-control-plane-sbom.spdx.json
+          upload-artifact: false
+
+      - name: Attest control-plane image SBOM
+        uses: actions/attest-sbom@v2
+        with:
+          subject-name: ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-control-plane
+          subject-digest: ${{ steps.build_control_plane.outputs.digest }}
+          sbom-path: porthook-control-plane-sbom.spdx.json
+          push-to-registry: true
 
       - name: Extract release notes
         run: |
@@ -128,8 +249,25 @@ jobs:
             }
           ' CHANGELOG.md > release-notes.md
           test -s release-notes.md
+          {
+            echo ""
+            echo "## Container Images"
+            echo ""
+            echo "Pin by digest for stronger immutability than a version tag; see [Upgrading](https://github.com/${{ github.repository }}/blob/main/docs/UPGRADING.md)."
+            echo ""
+            echo "- \`ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-gateway@${{ steps.build_gateway.outputs.digest }}\`"
+            echo "- \`ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-control-plane@${{ steps.build_control_plane.outputs.digest }}\`"
+            echo ""
+            echo "Every binary and image in this release has a keyless-signed build provenance and SBOM attestation, verifiable with \`gh attestation verify\`; see [Upgrading](https://github.com/${{ github.repository }}/blob/main/docs/UPGRADING.md)."
+          } >> release-notes.md
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$VERSION" dist/* --title "$VERSION" --notes-file release-notes.md
+        run: |
+          gh release create "$VERSION" \
+            dist/* \
+            porthook-release-sbom.spdx.json \
+            porthook-gateway-sbom.spdx.json \
+            porthook-control-plane-sbom.spdx.json \
+            --title "$VERSION" --notes-file release-notes.md
