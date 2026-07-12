@@ -2,6 +2,65 @@
 
 Porthook is pre-1.0. Review the release notes before upgrading between minor versions.
 
+## Verifying and Pinning Releases
+
+Every release binary (`porthook`, `porthook-gateway`, `porthook-control-plane` for every published OS/architecture) and every published container image has a SHA256 checksum, an SPDX SBOM, and a keyless-signed (Sigstore-backed) build provenance attestation. No secrets beyond the repository's own `GITHUB_TOKEN` are involved in producing them, and none are needed to verify them.
+
+### Verify a downloaded binary
+
+```sh
+curl -LO "https://github.com/voiteco/porthook/releases/download/${VERSION}/porthook_${OS}_${ARCH}"
+curl -LO "https://github.com/voiteco/porthook/releases/download/${VERSION}/SHA256SUMS"
+grep " porthook_${OS}_${ARCH}\$" SHA256SUMS | sha256sum -c -
+```
+
+`scripts/install.sh` (Linux/macOS) and `scripts/install.ps1` (Windows) do this automatically and refuse to install on a checksum mismatch; see [Install From Releases](./INSTALL.md).
+
+With the [GitHub CLI](https://cli.github.com/) installed and authenticated, verify the build provenance attestation too:
+
+```sh
+gh attestation verify porthook_${OS}_${ARCH} --repo voiteco/porthook
+```
+
+Both install scripts run this check automatically when `gh` is available, and only warn (never block) if it's missing.
+
+### Verify a container image
+
+```sh
+gh attestation verify "oci://ghcr.io/voiteco/porthook-gateway:${VERSION}" --repo voiteco/porthook
+```
+
+The SBOM for each image is also attached as an attestation and downloadable from the release page as a standalone SPDX JSON file.
+
+### Pin by digest
+
+A version tag such as `v0.17.0` always resolves to whatever it currently points at; a digest is immutable. Every release's notes list the exact digest published for that release:
+
+```text
+ghcr.io/voiteco/porthook-gateway@sha256:...
+ghcr.io/voiteco/porthook-control-plane@sha256:...
+```
+
+Copy those digests into `PORTHOOK_GATEWAY_IMAGE`/`PORTHOOK_CONTROL_PLANE_IMAGE` for the strongest immutability guarantee, or resolve them yourself:
+
+```sh
+docker buildx imagetools inspect "ghcr.io/voiteco/porthook-gateway:${VERSION}"
+```
+
+`:latest` always points at the newest published image and exists only as a convenience pointer; do not deploy it to production. Pin production deployments to a specific version tag, or a digest for stronger immutability.
+
+## Upgrade from 0.16.0 to 0.17.0
+
+Version 0.17.0 publishes production-shaped distribution artifacts: versioned `linux/amd64` and `linux/arm64` `porthook-gateway` and `porthook-control-plane` images on GHCR (with OCI labels, SBOMs, and build provenance attestations), a Windows CLI agent build, bundled license notices, and checksum-verifying install scripts. There is no database migration and no required code change.
+
+Before upgrading:
+
+1. If deploying via Compose, switch to the new release bundle: set `PORTHOOK_GATEWAY_IMAGE` and `PORTHOOK_CONTROL_PLANE_IMAGE` in `.env.production` (see [Verifying and Pinning Releases](#verifying-and-pinning-releases) above), then `docker compose ... pull` and `up -d` instead of `up --build -d`. `docker-compose.production.yml` no longer builds from source; contributors building locally should use the new `docker-compose.source-build.yml` instead. See [Docker Compose Deployment](../deploy/compose/README.md).
+2. If installing the CLI agent manually, consider `scripts/install.sh` or `scripts/install.ps1` instead of the manual curl/checksum steps; see [Install From Releases](./INSTALL.md).
+3. Windows users can now install the CLI agent directly; earlier versions required building from source on Windows.
+
+Rollback to 0.16.0 is code-only: point `PORTHOOK_GATEWAY_IMAGE`/`PORTHOOK_CONTROL_PLANE_IMAGE` at the previous version's tag or digest, or rebuild from the 0.16.0 source tag with `docker-compose.source-build.yml`.
+
 ## Upgrade from 0.15.1 to 0.16.0
 
 Version 0.16.0 adds public WebSocket tunneling under protocol revision 0.3 (additive capability negotiation, so `v0.2` agents keep working for HTTP), a configurable request/idle/max-lifetime stream deadline policy, and verifies the real TLS and custom-domain edge end-to-end. There is no database migration and no required configuration change.

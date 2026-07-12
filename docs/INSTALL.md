@@ -1,13 +1,27 @@
 # Install From Releases
 
-Use release binaries for self-hosted deployments and local agents when you do not want to build from source.
+Use release binaries for self-hosted deployments and local agents when you do not want to build from source. The gateway and control plane are also published as container images; see [Docker Compose Deployment](../deploy/compose/README.md).
+
+## Quick Install (CLI Agent)
+
+`scripts/install.sh` (Linux/macOS) and `scripts/install.ps1` (Windows) download the CLI agent, verify it against the release's `SHA256SUMS` manifest, and refuse to install anything that fails verification:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/voiteco/porthook/main/scripts/install.sh | bash
+```
+
+```powershell
+irm https://raw.githubusercontent.com/voiteco/porthook/main/scripts/install.ps1 | iex
+```
+
+Both accept a specific version (`install.sh --version v0.17.0`, or `PORTHOOK_INSTALL_VERSION`) and install directory (`--dir`, or `PORTHOOK_INSTALL_DIR`); run with `--help` for the full list. When the [GitHub CLI](https://cli.github.com/) is installed and authenticated, they also verify the release's build provenance attestation and warn (without blocking) if that check fails. The rest of this document explains the manual download/verify/install steps the scripts automate, and how to install the gateway and control-plane binaries the same way.
 
 ## Download
 
 Pick the release version and the target operating system/architecture:
 
 ```sh
-VERSION=v0.15.0
+VERSION=v0.17.0
 OS=linux
 ARCH=amd64
 ```
@@ -23,10 +37,13 @@ curl -LO "https://github.com/voiteco/porthook/releases/download/${VERSION}/SHA25
 
 Supported release targets are:
 
-| OS | Architecture |
-| --- | --- |
-| `linux` | `amd64`, `arm64` |
-| `darwin` | `amd64`, `arm64` |
+| OS | Architecture | Binaries |
+| --- | --- | --- |
+| `linux` | `amd64`, `arm64` | `porthook`, `porthook-gateway`, `porthook-control-plane` |
+| `darwin` | `amd64`, `arm64` | `porthook`, `porthook-gateway`, `porthook-control-plane` |
+| `windows` | `amd64`, `arm64` | `porthook` only (`.exe`); the gateway and control plane are Linux-container-first, see [Docker Compose Deployment](../deploy/compose/README.md) |
+
+Every release also includes `LICENSE-agent-Apache-2.0.txt` (covers `porthook`) and `LICENSE-server-AGPL-3.0.txt` (covers `porthook-gateway` and `porthook-control-plane`).
 
 ## Verify Checksums
 
@@ -42,7 +59,7 @@ else
 fi
 ```
 
-The verification should print `OK` for each downloaded binary.
+The verification should print `OK` for each downloaded binary. See [Verifying and Pinning Releases](./UPGRADING.md#verifying-and-pinning-releases) to also verify each binary's build provenance attestation and SBOM.
 
 ## Install Binaries
 
@@ -96,7 +113,7 @@ From a source checkout:
 
 ```sh
 make build VERSION=dev
-make release-build VERSION=v0.15.0
+make release-build VERSION=v0.17.0
 make release-checksums
-make release-verify VERSION=v0.15.0
+make release-verify VERSION=v0.17.0
 ```

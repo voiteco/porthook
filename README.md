@@ -167,16 +167,17 @@ Completed foundations:
 24. Trusted-proxy client identity resolution, Argon2id access-policy password hashing, and bounded authentication-attempt protection, verified end-to-end against a real Caddy deployment.
 25. Public WebSocket tunneling under an additively-negotiated protocol revision, plus a configurable request/idle/max-lifetime stream deadline policy for long-lived SSE and long-polling responses, verified against real gateway and agent binaries.
 26. Real TLS and custom-domain edge verified end-to-end: certificate coverage and routing for the wildcard tunnel, agent, control-plane, and custom-domain hostnames, secure WebSocket round trips, and the complete custom-domain create/DNS-verify/activate/route/access-policy/delete lifecycle, all against a real Caddy deployment with ephemeral test-time certificates.
+27. Production-shaped distribution: versioned, multi-architecture gateway and control-plane images published to GHCR with OCI labels, a release Compose bundle that pulls them without a source checkout, Windows CLI builds, bundled license notices, checksum-verifying install scripts, and keyless-signed build provenance attestations and SBOMs for every release binary and image.
 
 The detailed production-stability plan, ordered implementation blocks, and `v1.0.0` release gates live in [docs/PRODUCTION_ROADMAP.md](./docs/PRODUCTION_ROADMAP.md).
 
 ## Known Limitations
 
-The current pre-production `main` line isolates gateway management on a private listener, mediates operator access through scoped control-plane APIs, resolves client identity through an explicit trusted-proxy configuration, tunnels public HTTP and WebSocket traffic, and verifies the real TLS and custom-domain edge end-to-end against a real Caddy deployment. Raw TCP/UDP tunnels remain out of scope for `v1.0.0`. The reference topology is a single gateway and control-plane node with Postgres. Release images are built locally from source, and release binaries are published for Linux and macOS only. TLS certificate issuance and DNS remain operator responsibilities; certificate lifecycle guidance lives in [docs/DOMAINS_TLS.md](./docs/DOMAINS_TLS.md).
+The current pre-production `main` line isolates gateway management on a private listener, mediates operator access through scoped control-plane APIs, resolves client identity through an explicit trusted-proxy configuration, tunnels public HTTP and WebSocket traffic, verifies the real TLS and custom-domain edge end-to-end against a real Caddy deployment, and publishes signed, attested, multi-architecture release artifacts. Raw TCP/UDP tunnels remain out of scope for `v1.0.0`. The reference topology is a single gateway and control-plane node with Postgres. TLS certificate issuance and DNS remain operator responsibilities; certificate lifecycle guidance lives in [docs/DOMAINS_TLS.md](./docs/DOMAINS_TLS.md).
 
 ## Installation
 
-Release binaries for `v0.16.0` are available for Linux and macOS on `amd64` and `arm64`. Windows users can build the CLI agent from source until Windows release packaging is added. See [docs/INSTALL.md](./docs/INSTALL.md) for download, checksum verification, installation, version checks, and `configcheck` usage.
+Release binaries are available for Linux and macOS on `amd64`/`arm64`, and for Windows on `amd64`/`arm64` (CLI agent only). The gateway and control plane are also published as multi-architecture container images on GHCR. See [docs/INSTALL.md](./docs/INSTALL.md) for the checksum-verifying install scripts, manual download/verify/install steps, version checks, and `configcheck` usage, and [docs/UPGRADING.md](./docs/UPGRADING.md) for verifying attestations and pinning by digest.
 
 ## Self-Hosted Quick Start
 

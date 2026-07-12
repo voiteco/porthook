@@ -4,6 +4,15 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+### Added
+- Added versioned `linux/amd64` and `linux/arm64` `porthook-gateway` and `porthook-control-plane` images published to GHCR, with `org.opencontainers.image.{title,description,version,revision,created,source,licenses}` labels and a multi-architecture manifest per release.
+- Added keyless-signed (Sigstore-backed) build provenance attestations and SPDX SBOMs for every published image and release binary, verifiable with `gh attestation verify` and no extra secrets.
+- Added `deploy/compose/docker-compose.production.yml` support for pulling published images by tag or digest (`PORTHOOK_GATEWAY_IMAGE`/`PORTHOOK_CONTROL_PLANE_IMAGE`, both required) instead of building from source; the prior build-from-source behavior moved to a new `deploy/compose/docker-compose.source-build.yml` for contributors.
+- Added Windows `amd64`/`arm64` release builds of the `porthook` CLI agent.
+- Added `LICENSE-agent-Apache-2.0.txt` and `LICENSE-server-AGPL-3.0.txt` to every release, and embedded the matching license text at `/LICENSE` in both container images.
+- Added `scripts/install.sh` (Linux/macOS) and `scripts/install.ps1` (Windows), checksum-verifying installers that refuse to install anything that fails verification and opportunistically verify build provenance attestations when the GitHub CLI is available.
+- Documented pinning releases by immutable image digest and verifying attestations in `docs/UPGRADING.md`.
+
 ## [0.16.0] - 2026-07-12
 
 ### Added
