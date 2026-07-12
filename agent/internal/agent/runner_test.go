@@ -821,6 +821,122 @@ func TestRunnerDoesNotReconnectAfterAuthError(t *testing.T) {
 	}
 }
 
+func TestRunnerReconnectsAfterAuthUnavailable(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/after-reconnect" {
+			t.Errorf("path = %s, want /after-reconnect", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("restored-ok"))
+	}))
+	defer local.Close()
+
+	var connections atomic.Int32
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != agentWebSocketPath {
+			http.NotFound(w, r)
+			return
+		}
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Errorf("Accept returned error: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		ctx := r.Context()
+
+		if connections.Add(1) == 1 {
+			var auth messages.Envelope
+			if err := wsjson.Read(ctx, conn, &auth); err != nil {
+				t.Errorf("read auth returned error: %v", err)
+				return
+			}
+			authErr, _ := messages.New(messages.TypeAuthError, messages.ErrorPayload{
+				Code:    "auth_unavailable",
+				Message: "token validation failed",
+			})
+			if err := wsjson.Write(ctx, conn, authErr); err != nil {
+				t.Errorf("write auth error returned error: %v", err)
+			}
+			return
+		}
+
+		readAuthAndRegistration(t, ctx, conn)
+
+		tunnelReq, err := messages.NewStream(messages.TypeHTTPRequest, "str_reconnect", "tun_test", httpwire.Request{
+			Method: http.MethodGet,
+			Path:   "/after-reconnect",
+		})
+		if err != nil {
+			t.Errorf("NewStream returned error: %v", err)
+			return
+		}
+		if err := wsjson.Write(ctx, conn, tunnelReq); err != nil {
+			t.Errorf("write tunnel request returned error: %v", err)
+			return
+		}
+
+		var response messages.Envelope
+		if err := wsjson.Read(ctx, conn, &response); err != nil {
+			t.Errorf("read tunnel response returned error: %v", err)
+			return
+		}
+		if response.Type != messages.TypeHTTPResponse {
+			t.Errorf("response type = %s, want %s", response.Type, messages.TypeHTTPResponse)
+			return
+		}
+		payload, err := messages.DecodePayload[httpwire.Response](response)
+		if err != nil {
+			t.Errorf("DecodePayload returned error: %v", err)
+			return
+		}
+		if payload.Status != http.StatusOK {
+			t.Errorf("status = %d, want 200", payload.Status)
+		}
+		if string(payload.Body) != "restored-ok" {
+			t.Errorf("body = %q, want restored-ok", string(payload.Body))
+		}
+	}))
+	defer gateway.Close()
+
+	var output bytes.Buffer
+	runner := NewRunner(Config{
+		ServerURL:             gateway.URL,
+		Token:                 "dev-token",
+		RequestedSubdomain:    "demo",
+		LocalTarget:           local.URL,
+		AgentVersion:          "test",
+		RequestTimeout:        5 * time.Second,
+		WebSocketPingInterval: time.Hour,
+		ReconnectInitialDelay: time.Millisecond,
+		ReconnectMaxDelay:     5 * time.Millisecond,
+		ReconnectJitter:       0,
+	}, nil, &output)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := runner.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if got := connections.Load(); got != 2 {
+		t.Fatalf("connections = %d, want 2", got)
+	}
+
+	got := output.String()
+	for _, want := range []string{
+		"Connection failed, retrying",
+		"Tunnel established",
+		"GET /after-reconnect -> 200",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestRunnerDoesNotReconnectAfterUnsupportedProtocolAuthOK(t *testing.T) {
 	var connections atomic.Int32
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
