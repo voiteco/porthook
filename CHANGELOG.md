@@ -10,6 +10,13 @@ All notable changes to Porthook are documented here.
 - Added a configurable request/idle/max-lifetime stream deadline policy (`PORTHOOK_STREAM_REQUEST_TIMEOUT`, `PORTHOOK_STREAM_IDLE_TIMEOUT`, `PORTHOOK_STREAM_MAX_LIFETIME`), replacing the previous fixed 30-second stream deadline that killed long-lived SSE and long-polling responses regardless of activity.
 - Added `PORTHOOK_WS_MESSAGE_MAX_BYTES` to bound a single tunneled WebSocket message on the gateway and agent.
 - Added `make smoke-websocket`, a real binary-level smoke test that tunnels to a local WebSocket echo service through the actual gateway and agent binaries.
+- Added `PORTHOOK_CA_FILE` so the agent can trust a gateway certificate issued by a private or internal CA.
+- Added `PORTHOOK_CONNECT_ADDR`, mirroring curl's `--resolve`, so a new edge deployment can be tested against its real hostname and certificate before DNS points at it.
+- Added `PORTHOOK_DNS_RESOLVER_ADDR` so the control plane can verify custom-domain TXT records against a specific DNS server instead of the system resolver, for split-horizon DNS, a private authoritative zone, or local testing.
+- Added `deploy/reverse-proxy/caddy/Caddyfile.custom-domain-example`, the supported pattern for routing an explicitly configured custom domain to the gateway, since the wildcard site block only matches subdomains of `PORTHOOK_ROOT_DOMAIN`.
+- Added `make smoke-tls-edge`, an end-to-end smoke test proving the checked-in Caddy deployment completes real HTTPS and secure WebSocket round trips, with certificate coverage and routing verified separately for the wildcard tunnel, agent, control-plane, and a custom-domain hostname, and the complete custom-domain create/DNS-verify/activate/route/access-policy/delete lifecycle exercised through that real edge.
+- Added a `configcheck` warning when the gateway's `PORTHOOK_PUBLIC_URL` host doesn't match `PORTHOOK_ROOT_DOMAIN`, and validation for a malformed `PORTHOOK_DNS_RESOLVER_ADDR`.
+- Documented certificate issuance, renewal, reload, expiry monitoring, and rollback for the checked-in Caddy deployment.
 
 ### Changed
 - The public listener's HTTP write timeout is disabled in favor of the new stream-level deadline policy, so response duration for SSE, long polling, and WebSocket tunnels is bounded by activity and an absolute cap rather than a fixed schedule.

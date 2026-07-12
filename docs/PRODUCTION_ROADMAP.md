@@ -192,8 +192,8 @@ Tasks:
 - [x] Add a supported Caddy configuration path for routing explicitly configured custom domains to the gateway.
 - [x] Run the complete custom-domain create, DNS verification, activation, TLS, routing, access-policy, and deletion lifecycle.
 - [x] Verify `X-Forwarded-*`, original host, request ID, and client-address behavior across the edge.
-- [ ] Add configuration checks for inconsistent public URL, root domain, proxy, and certificate settings where they can be validated safely.
-- [ ] Document certificate issuance, renewal, reload, expiry monitoring, and rollback without committing certificate material.
+- [x] Add configuration checks for inconsistent public URL, root domain, proxy, and certificate settings where they can be validated safely.
+- [x] Document certificate issuance, renewal, reload, expiry monitoring, and rollback without committing certificate material.
 - [ ] Run the TLS edge smoke in CI and the release workflow.
 
 Exit gate:

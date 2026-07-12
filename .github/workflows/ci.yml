@@ -62,6 +62,9 @@ jobs:
       - name: Run WebSocket smoke test
         run: make smoke-websocket VERSION=ci-smoke
 
+      - name: Run TLS edge smoke test
+        run: make smoke-tls-edge VERSION=ci-smoke
+
       - name: Build release binaries
         run: make release-build VERSION=ci
 
