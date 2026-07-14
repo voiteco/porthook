@@ -26,9 +26,38 @@ jobs:
       - name: Compute image metadata
         id: image_meta
         run: |
-          echo "owner=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+          # A hyphen in the tag (e.g. v1.0.0-rc.1) marks a pre-release per semver:
+          # publish it under its own version tag only, never move "latest" onto it,
+          # and mark the GitHub release itself as a pre-release.
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease=true
+          else
+            prerelease=false
+          fi
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "gateway_tags<<TAGS_EOF"
+            echo "ghcr.io/$owner/porthook-gateway:$VERSION"
+            if [ "$prerelease" = "false" ]; then
+              echo "ghcr.io/$owner/porthook-gateway:latest"
+            fi
+            echo "TAGS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "control_plane_tags<<TAGS_EOF"
+            echo "ghcr.io/$owner/porthook-control-plane:$VERSION"
+            if [ "$prerelease" = "false" ]; then
+              echo "ghcr.io/$owner/porthook-control-plane:latest"
+            fi
+            echo "TAGS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -153,9 +182,7 @@ jobs:
             VERSION=${{ env.VERSION }}
             REVISION=${{ steps.image_meta.outputs.revision }}
             BUILD_DATE=${{ steps.image_meta.outputs.created }}
-          tags: |
-            ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-gateway:${{ env.VERSION }}
-            ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-gateway:latest
+          tags: ${{ steps.image_meta.outputs.gateway_tags }}
           cache-from: type=gha,scope=porthook-gateway
           cache-to: type=gha,mode=max,scope=porthook-gateway
 
@@ -171,9 +198,7 @@ jobs:
             VERSION=${{ env.VERSION }}
             REVISION=${{ steps.image_meta.outputs.revision }}
             BUILD_DATE=${{ steps.image_meta.outputs.created }}
-          tags: |
-            ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-control-plane:${{ env.VERSION }}
-            ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-control-plane:latest
+          tags: ${{ steps.image_meta.outputs.control_plane_tags }}
           cache-from: type=gha,scope=porthook-control-plane
           cache-to: type=gha,mode=max,scope=porthook-control-plane
 
@@ -265,9 +290,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          prerelease_flag=""
+          if [ "${{ steps.image_meta.outputs.prerelease }}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
           gh release create "$VERSION" \
             dist/* \
             porthook-release-sbom.spdx.json \
             porthook-gateway-sbom.spdx.json \
             porthook-control-plane-sbom.spdx.json \
-            --title "$VERSION" --notes-file release-notes.md
+            --title "$VERSION" --notes-file release-notes.md $prerelease_flag

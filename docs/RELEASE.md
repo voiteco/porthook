@@ -75,6 +75,18 @@ GitHub Actions will create a release and upload:
 - `porthook-control-plane_darwin_arm64`
 - `SHA256SUMS`
 
+## Release Candidates
+
+Tags containing a hyphen (`v1.0.0-rc.1`, `v1.0.0-rc.2`, ...) are release candidates. The workflow detects the hyphen and treats the build differently from a stable release:
+
+- The GitHub Release is created with `--prerelease`, so it never appears as "Latest" and is clearly marked as a pre-release.
+- The container images are tagged only with the exact RC version (`ghcr.io/voiteco/porthook-gateway:v1.0.0-rc.1`); the `:latest` image tag is left pointing at the last stable release, not moved onto the RC.
+- Everything else — checksums, SBOMs, provenance attestations, binaries for every supported OS/architecture — is produced identically to a stable release, since an RC exists to be a byte-for-byte candidate for promotion to the next stable tag.
+
+Before tagging an RC, add a `## [1.0.0-rc.1]` (or matching) section to `CHANGELOG.md`; the release-notes extraction step requires an exact match on the tag's version (with the leading `v` stripped) and fails the workflow if it can't find one.
+
+Per [docs/PRODUCTION_ROADMAP.md](./PRODUCTION_ROADMAP.md) Block 9, only release blockers, compatibility fixes, tests, and documentation are accepted between RCs during the qualification window; a fixed RC gets a new candidate tag (`v1.0.0-rc.2`, ...), not a mutated existing one.
+
 ## Install a Binary
 
 See [INSTALL.md](./INSTALL.md) for release downloads, checksum verification, install paths, version checks, and `configcheck` commands.

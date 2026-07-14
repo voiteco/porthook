@@ -4,6 +4,13 @@ All notable changes to Porthook are documented here.
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-07-14
+
+First release candidate for `v1.0.0`, cut from the feature-frozen `v0.19.0` line per [docs/PRODUCTION_ROADMAP.md](./docs/PRODUCTION_ROADMAP.md) Block 9. Starts the 14-day qualification window; only release blockers, compatibility fixes, tests, and documentation are accepted before `v1.0.0` ships.
+
+### Added
+- Added release-candidate support to the release pipeline (`.github/workflows/release.yml`): a hyphen in the tag (e.g. `-rc.1`) is detected as a pre-release, publishes the GitHub Release with `--prerelease`, and publishes container images under their exact version tag only, leaving `:latest` pointing at the last stable release. Documented in [docs/RELEASE.md](./docs/RELEASE.md)'s new Release Candidates section.
+
 ## [0.19.0] - 2026-07-12
 
 Feature freeze for the `1.0.0` line: from this release onward, only release blockers, compatibility fixes, tests, and documentation are accepted until `v1.0.0` ships (see the roadmap's Block 9).

@@ -257,7 +257,7 @@ Targets: `v0.19.0`, `v1.0.0-rc.N`, and `v1.0.0`
 
 Tasks:
 
-- [ ] Freeze new features at `v0.19.0`; accept only release blockers, compatibility fixes, tests, and documentation afterward.
+- [x] Freeze new features at `v0.19.0`; accept only release blockers, compatibility fixes, tests, and documentation afterward.
 - [x] Publish the stable protocol/API/configuration/database compatibility matrix.
 - [x] Publish the `1.x` deprecation, migration, supported-version, and security-fix policies.
 - [x] Complete clean production-shaped installations on Linux `amd64` and `arm64` hosts.
