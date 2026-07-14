@@ -266,7 +266,7 @@ Tasks:
 - [x] Rehearse code rollback and database-compatible rollback for every migration introduced after `v0.14.0`.
 - [ ] Complete at least two independent self-hosted deployment evaluations using only public documentation. (Deferred: revisit before promoting the qualified RC to `v1.0.0`, not before `v1.0.0-rc.1`. Needs genuinely independent evaluators, not the assistant that built the codebase.)
 - [x] Perform a final security review against the threat model and resolve all release-blocking findings.
-- [ ] Publish `v1.0.0-rc.1` from the complete release pipeline.
+- [x] Publish `v1.0.0-rc.1` from the complete release pipeline. (Published 2026-07-14; GitHub Release correctly marked pre-release, container images published under the exact RC tag only, `:latest` left on `v0.19.0`. Starts the 14-day qualification window — see docs/RELEASE_REHEARSAL.md and the roadmap task below for tracking.)
 - [ ] Allow only blocker fixes in subsequent release candidates and repeat affected qualification suites.
 - [ ] Run the selected release candidate for at least 14 days without an unresolved P0 or P1 defect.
 - [ ] Prepare the final changelog, upgrade guide, release notes, checksums, image digests, SBOMs, attestations, and rollback references.
