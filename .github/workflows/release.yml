@@ -147,7 +147,7 @@ jobs:
           upload-artifact: false
 
       - name: Attest release binaries provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/*"
 
@@ -203,14 +203,14 @@ jobs:
           cache-to: type=gha,mode=max,scope=porthook-control-plane
 
       - name: Attest gateway image provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-gateway
           subject-digest: ${{ steps.build_gateway.outputs.digest }}
           push-to-registry: true
 
       - name: Attest control-plane image provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/${{ steps.image_meta.outputs.owner }}/porthook-control-plane
           subject-digest: ${{ steps.build_control_plane.outputs.digest }}
