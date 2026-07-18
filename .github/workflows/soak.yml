@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload soak output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: capacity-soak-output
           path: soak-output.log
@@ -99,7 +99,7 @@ jobs:
 
       - name: Upload backup/restore soak output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backup-restore-soak-output
           path: backup-restore-soak-output.log
